@@ -1,0 +1,215 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ============ 设计 token：流程蓝图 · 青蓝主线 / 琥珀会签 ============ */
+:root {
+  /* 自托管字体（fontsource 包）：中文回退系统字体栈 */
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system,
+    "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  --font-display: "Space Grotesk", "Inter", ui-sans-serif, system-ui,
+    "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo,
+    monospace;
+
+  --flow-bg: #06090f;        /* 深靛图纸底 */
+  --flow-panel: #0b1220;     /* 面板 */
+  --flow-line: #22d3ee;      /* 主线（青蓝，与 Aceternity 输入聚焦色同族） */
+  --flow-countersign: #fbbf24; /* 会签（琥珀） */
+  --flow-text: #e6edf7;
+  --flow-muted: #8b98ac;
+}
+
+::selection {
+  @apply bg-cyan-400/25 text-white;
+}
+
+/* 滚动条与整体底色保持暗色体系 */
+html {
+  color-scheme: dark;
+  /* 移动端触摸体验 */
+  -webkit-tap-highlight-color: transparent;
+  text-size-adjust: 100%;
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  background: var(--flow-bg);
+  @apply text-white antialiased;
+  /* 折叠屏展开/折叠切换时避免惯性滚动穿透 */
+  overscroll-behavior-y: none;
+}
+
+/* 环境光色场：为 LiquidGlass 折射提供可弯折的色彩背景 */
+.ambient-field {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(52rem 36rem at 12% -8%, rgba(34, 211, 238, 0.16), transparent 62%),
+    radial-gradient(44rem 30rem at 92% 12%, rgba(99, 102, 241, 0.14), transparent 64%),
+    radial-gradient(50rem 34rem at 78% 108%, rgba(251, 191, 36, 0.07), transparent 60%);
+}
+
+/* ============ 排印工具类 ============ */
+
+/* 眉题/工程标注：等宽小字 + 字距 */
+.eyebrow {
+  font-family: var(--font-mono), ui-monospace, monospace;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+}
+
+/* display 标题：几何 grotesk */
+.font-display {
+  font-family: var(--font-display), var(--font-sans), system-ui, sans-serif;
+}
+
+/* 数据标注（序号/统计/时间戳） */
+.font-data {
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ============ 流程轨道（签名元素） ============ */
+
+/* 轨道连线 */
+.rail-line {
+  width: 1px;
+  flex: 1 1 0%;
+  min-height: 0.75rem;
+  background: linear-gradient(
+    to bottom,
+    color-mix(in srgb, var(--flow-line) 45%, transparent),
+    color-mix(in srgb, var(--flow-line) 12%, transparent)
+  );
+}
+
+/* 轨道节点：普通步骤（青蓝圆点） */
+.rail-node {
+  width: 2rem;
+  height: 2rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9999px;
+  border: 1px solid color-mix(in srgb, var(--flow-line) 55%, transparent);
+  background: color-mix(in srgb, var(--flow-line) 10%, var(--flow-panel));
+  color: var(--flow-line);
+  box-shadow: 0 0 12px -4px color-mix(in srgb, var(--flow-line) 60%, transparent);
+}
+
+/* 轨道节点：会签（琥珀菱形，视觉分叉标记） */
+.rail-node--countersign {
+  border-radius: 4px;
+  transform: rotate(45deg);
+  border-color: color-mix(in srgb, var(--flow-countersign) 55%, transparent);
+  background: color-mix(in srgb, var(--flow-countersign) 10%, var(--flow-panel));
+  color: var(--flow-countersign);
+  box-shadow: 0 0 12px -4px color-mix(in srgb, var(--flow-countersign) 55%, transparent);
+}
+.rail-node--countersign > * {
+  transform: rotate(-45deg);
+}
+
+/* ============ 移动端 / 折叠屏适配（保持既有行为） ============ */
+
+/* 触屏设备：输入控件聚焦不缩放（≥16px） */
+@media (pointer: coarse) {
+  input,
+  textarea,
+  select {
+    font-size: 16px;
+  }
+}
+
+/* iOS 触控：消除 300ms 双击缩放延迟；按钮/链接不接受系统文本选择 */
+button,
+a,
+summary,
+[role="checkbox"],
+[role="button"] {
+  touch-action: manipulation;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* 安全区域避让：异形屏（刘海/曲面/折叠外屏）内容不被遮挡 */
+.safe-viewport {
+  padding-left: max(1rem, env(safe-area-inset-left));
+  padding-right: max(1rem, env(safe-area-inset-right));
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+/*
+ * 折叠屏竖向分屏姿态（上下双屏 / 铰链居中横跨）：
+ * 收窄内容宽度并避开中部铰链折痕区
+ */
+@media (vertical-viewport-segments: 2) {
+  .fold-aware {
+    max-width: min(40rem, calc(100% - 2rem));
+    margin-inline: auto;
+  }
+}
+
+/* 折叠屏横向分屏（左右双屏）：铰链竖向居中，同样收窄避开 */
+@media (horizontal-viewport-segments: 2) {
+  .fold-aware {
+    max-width: min(40rem, calc(100% - 2rem));
+    margin-inline: auto;
+  }
+}
+
+/* 动态视口：折叠展开/收起与移动端浏览器工具栏收展时高度自动跟随 */
+.dvh-fill {
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+
+/* LiquidGlass 轻量表面：与官方 liquid-glass 视觉同族的磨砂玻璃（性能友好，用于列表/步骤卡） */
+.glass-card {
+  position: relative;
+  border-radius: 24px;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.02) 42%),
+    rgba(11, 18, 32, 0.55);
+  backdrop-filter: blur(14px) saturate(140%);
+  -webkit-backdrop-filter: blur(14px) saturate(140%);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.12),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.04),
+    0 8px 32px -12px rgba(0, 0, 0, 0.6);
+}
+.glass-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: linear-gradient(160deg, rgba(255, 255, 255, 0.06), transparent 38%);
+}
+
+/* 动效克制：偏好减弱时关闭装饰动画 */
+@media (prefers-reduced-motion: reduce) {
+  .animate-meteor-effect,
+  .animate-shimmer {
+    animation: none !important;
+  }
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  @apply rounded-full bg-white/15;
+}
+::-webkit-scrollbar-thumb:hover {
+  @apply bg-white/25;
+}

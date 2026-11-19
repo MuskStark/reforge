@@ -1,0 +1,35 @@
+# 依赖
+node_modules/
+.pnpm-store/
+
+# 构建产物
+.next/
+out/
+dist/
+
+# 运行时数据与二进制
+backend/data/
+backend/flow-backend
+backend/__debug_bin*
+
+# 环境变量与密钥
+.env
+.env.*
+!.env.example
+
+# 日志与临时文件
+*.log
+*.tmp
+.aceternity/
+reg-input.json
+
+# 系统文件
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+
+# TypeScript 增量构建信息
+tsconfig.tsbuildinfo

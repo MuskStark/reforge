@@ -1,0 +1,59 @@
+# ReForge 生产部署编排：PostgreSQL + Go 后端 + Next.js 前端
+# 用法：bash deploy.sh（详见 deploy.sh / README）
+# 说明：与开发用 docker-compose.yml 相互独立（项目名 flow-prod），互不影响
+
+name: flow-prod
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: flow-prod-postgres
+    environment:
+      POSTGRES_USER: flow
+      POSTGRES_PASSWORD: flow
+      POSTGRES_DB: flow
+      TZ: Asia/Shanghai
+    volumes:
+      - flow-prod-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U flow -d flow"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  backend:
+    build:
+      context: ./backend
+      args:
+        GOPROXY: ${GOPROXY:-https://goproxy.cn,direct}
+        ALPINE_MIRROR: ${ALPINE_MIRROR:-mirrors.tuna.tsinghua.edu.cn}
+    container_name: flow-prod-backend
+    environment:
+      # 容器网络内指向 postgres 服务
+      DATABASE_URL: postgres://flow:flow@postgres:5432/flow?sslmode=disable
+      FLOW_ADDR: 0.0.0.0:8080
+      TZ: Asia/Shanghai
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # 如需宿主机直连后端 API，取消下行注释
+    # ports:
+    #   - "8080:8080"
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmmirror.com}
+    container_name: flow-prod-frontend
+    environment:
+      BACKEND_ORIGIN: http://backend:8080
+      TZ: Asia/Shanghai
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "3000:3000"
+
+volumes:
+  flow-prod-pgdata:
