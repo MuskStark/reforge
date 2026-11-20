@@ -35,6 +35,8 @@ func main() {
 	mux.HandleFunc("GET /api/auth/me", handleMe)
 	mux.HandleFunc("DELETE /api/auth/session", handleLogout)
 	mux.HandleFunc("GET /api/admin/users", handleListUsers(st))
+	mux.HandleFunc("POST /api/admin/users", handleAdminCreateUser(st))
+	mux.HandleFunc("DELETE /api/admin/users/{id}", handleAdminDeleteUser(st))
 	mux.HandleFunc("GET /api/processes", func(w http.ResponseWriter, r *http.Request) {
 		list, err := st.List()
 		if err != nil {

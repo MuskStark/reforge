@@ -25,10 +25,15 @@ type store interface {
 	CreateSystem(name string) (*SystemOption, error)
 	DeleteSystem(id string) (bool, error)
 	CountUsers() (int, error)
-	// CreateUser 原子创建用户：表为空时角色自动为 admin（首个注册用户即管理员）
+	// CreateUser 创建用户：u.Role 非空用显式角色（管理员创建），
+	// 否则原子判定——表为空时 admin（首个注册用户即管理员）
 	CreateUser(u *User) error
 	GetUserByUsername(username string) (*User, error)
+	GetUserByID(id string) (*User, error)
 	ListUsers() ([]*User, error)
+	DeleteUser(id string) (bool, error)
+	// CountAdmins 管理员数量（最后一个管理员删除保护）
+	CountAdmins() (int, error)
 	Close() error
 }
 
@@ -223,12 +228,21 @@ func (s *postgresStore) CountUsers() (int, error) {
 	return n, nil
 }
 
-// CreateUser 单条 INSERT 原子判定角色：表为空 → admin，否则 member（规避并发竞态）
+// CreateUser 创建用户：
+//   - u.Role 非空（管理员在后台创建）：使用显式角色
+//   - u.Role 为空（公开注册引导）：单条 INSERT 原子判定——表为空 → admin，否则 member
 func (s *postgresStore) CreateUser(u *User) error {
 	if u.ID == "" {
 		u.ID = newID()
 	}
 	u.CreatedAt = time.Now()
+	if u.Role == "admin" || u.Role == "member" {
+		_, err := s.db.Exec(
+			`INSERT INTO users (id, username, password_hash, role, created_at)
+			 VALUES ($1, $2, $3, $4, $5)`,
+			u.ID, u.Username, u.PasswordHash, u.Role, u.CreatedAt)
+		return err
+	}
 	return s.db.QueryRow(`
 		INSERT INTO users (id, username, password_hash, role, created_at)
 		VALUES ($1, $2, $3,
@@ -236,6 +250,37 @@ func (s *postgresStore) CreateUser(u *User) error {
 		        $4)
 		RETURNING role`, u.ID, u.Username, u.PasswordHash, u.CreatedAt,
 	).Scan(&u.Role)
+}
+
+func (s *postgresStore) GetUserByID(id string) (*User, error) {
+	var u User
+	err := s.db.QueryRow(
+		"SELECT id, username, password_hash, role, created_at FROM users WHERE id = $1", id,
+	).Scan(&u.ID, &u.Username, &u.PasswordHash, &u.Role, &u.CreatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &u, nil
+}
+
+func (s *postgresStore) DeleteUser(id string) (bool, error) {
+	res, err := s.db.Exec("DELETE FROM users WHERE id = $1", id)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	return n > 0, err
+}
+
+func (s *postgresStore) CountAdmins() (int, error) {
+	var n int
+	if err := s.db.QueryRow("SELECT count(*) FROM users WHERE role = 'admin'").Scan(&n); err != nil {
+		return 0, err
+	}
+	return n, nil
 }
 
 func (s *postgresStore) GetUserByUsername(username string) (*User, error) {

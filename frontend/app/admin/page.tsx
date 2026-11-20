@@ -70,6 +70,10 @@ export default function AdminPage() {
       toast.error("请填写账号和密码");
       return;
     }
+    if (mode === "register" && hasUsers) {
+      toast.error("公开注册已关闭", { description: "账号由管理员在后台创建，请联系管理员" });
+      return;
+    }
     if (mode === "register") {
       if (password !== confirm) {
         toast.error("两次输入的密码不一致");
@@ -224,13 +228,19 @@ export default function AdminPage() {
             </form>
 
             <div className="mt-5 flex items-center justify-between border-t border-white/5 pt-4">
-              <button
-                type="button"
-                onClick={() => setMode(mode === "login" ? "register" : "login")}
-                className="text-xs text-cyan-300 transition hover:text-cyan-200"
-              >
-                {mode === "login" ? "没有账号？注册 →" : "已有账号？登录 →"}
-              </button>
+              {!hasUsers ? (
+                <button
+                  type="button"
+                  onClick={() => setMode(mode === "login" ? "register" : "login")}
+                  className="text-xs text-cyan-300 transition hover:text-cyan-200"
+                >
+                  {mode === "login" ? "没有账号？注册 →" : "已有账号？登录 →"}
+                </button>
+              ) : (
+                <span className="text-xs text-[color:var(--flow-muted)]">
+                  公开注册已关闭，账号由管理员创建
+                </span>
+              )}
               <Link href="/" className="inline-flex items-center gap-1 text-xs text-neutral-400 transition hover:text-white">
                 <ArrowLeft className="h-3.5 w-3.5" /> 返回收集表
               </Link>
@@ -317,7 +327,7 @@ export default function AdminPage() {
               </div>
             </header>
 
-            <UsersManager onLogout={logout} />
+            <UsersManager onLogout={logout} me={me} />
             <SystemsManager onLogout={logout} />
             <ProcessManager onLogout={logout} onPreviewChart={(p) => setChart({ name: p.name, steps: p.steps })} />
           </>

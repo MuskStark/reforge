@@ -96,7 +96,8 @@ func validateCredential(username, password string) string {
 	return ""
 }
 
-// handleRegister POST /api/auth/register —— 首个注册用户自动成为管理员
+// handleRegister POST /api/auth/register —— 仅用于引导首个管理员：
+// 系统已有注册用户后公开注册关闭（403），账号由管理员在后台创建
 func handleRegister(st store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
@@ -110,6 +111,13 @@ func handleRegister(st store) http.HandlerFunc {
 		body.Username = strings.TrimSpace(body.Username)
 		if msg := validateCredential(body.Username, body.Password); msg != "" {
 			writeError(w, http.StatusBadRequest, msg)
+			return
+		}
+		if n, err := st.CountUsers(); err != nil {
+			writeError(w, http.StatusInternalServerError, "注册失败: "+err.Error())
+			return
+		} else if n > 0 {
+			writeError(w, http.StatusForbidden, "公开注册已关闭，请联系管理员创建账号")
 			return
 		}
 		if existing, err := st.GetUserByUsername(body.Username); err != nil {
@@ -238,4 +246,101 @@ func subtleEqual(a, b string) bool {
 		v |= a[i] ^ b[i]
 	}
 	return v == 0
+}
+
+
+// handleAdminCreateUser POST /api/admin/users —— 管理员创建用户（显式角色）
+func handleAdminCreateUser(st store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !requireAdmin(w, r) {
+			return
+		}
+		var body struct {
+			Username string `json:"username"`
+			Password string `json:"password"`
+			Role     string `json:"role"`
+		}
+		if err := decodeJSON(r, &body); err != nil {
+			writeError(w, http.StatusBadRequest, "请求数据格式不正确")
+			return
+		}
+		body.Username = strings.TrimSpace(body.Username)
+		body.Role = strings.TrimSpace(body.Role)
+		if body.Role == "" {
+			body.Role = "member"
+		}
+		if body.Role != "admin" && body.Role != "member" {
+			writeError(w, http.StatusBadRequest, "角色无效（应为 admin 或 member）")
+			return
+		}
+		if msg := validateCredential(body.Username, body.Password); msg != "" {
+			writeError(w, http.StatusBadRequest, msg)
+			return
+		}
+		if existing, err := st.GetUserByUsername(body.Username); err != nil {
+			writeError(w, http.StatusInternalServerError, "创建失败: "+err.Error())
+			return
+		} else if existing != nil {
+			writeError(w, http.StatusConflict, "用户名已被占用")
+			return
+		}
+		hash, err := bcrypt.GenerateFromPassword([]byte(body.Password), bcrypt.DefaultCost)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "密码加密失败")
+			return
+		}
+		u := &User{Username: body.Username, PasswordHash: string(hash), Role: body.Role}
+		if err := st.CreateUser(u); err != nil {
+			if strings.Contains(err.Error(), "duplicate key") {
+				writeError(w, http.StatusConflict, "用户名已被占用")
+				return
+			}
+			writeError(w, http.StatusInternalServerError, "创建失败: "+err.Error())
+			return
+		}
+		writeJSON(w, http.StatusCreated, u)
+	}
+}
+
+// handleAdminDeleteUser DELETE /api/admin/users/{id} —— 管理员删除用户；
+// 防呆：不能删除当前登录账号、不能删除最后一名管理员
+func handleAdminDeleteUser(st store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !requireAdmin(w, r) {
+			return
+		}
+		id := r.PathValue("id")
+		target, err := st.GetUserByID(id)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "删除失败: "+err.Error())
+			return
+		}
+		if target == nil {
+			writeError(w, http.StatusNotFound, "用户不存在或已删除")
+			return
+		}
+		if sd := sessions.get(bearerToken(r)); sd != nil && sd.Username == target.Username {
+			writeError(w, http.StatusForbidden, "不能删除当前登录账号")
+			return
+		}
+		if target.Role == "admin" {
+			if n, err := st.CountAdmins(); err != nil {
+				writeError(w, http.StatusInternalServerError, "删除失败: "+err.Error())
+				return
+			} else if n <= 1 {
+				writeError(w, http.StatusForbidden, "系统至少需要保留一名管理员")
+				return
+			}
+		}
+		ok, err := st.DeleteUser(id)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "删除失败: "+err.Error())
+			return
+		}
+		if !ok {
+			writeError(w, http.StatusNotFound, "用户不存在或已删除")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]bool{"deleted": true})
+	}
 }
