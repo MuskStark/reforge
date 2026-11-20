@@ -1,13 +1,25 @@
 #!/usr/bin/env bash
 # =============================================================
-# ReForge — 流程再造工程收集表 · Docker 一键部署脚本
-# 中国环境友好：Go / npm / Alpine 依赖默认走国内镜像
-#   覆盖方式：环境变量 GOPROXY / NPM_REGISTRY / ALPINE_MIRROR
+# ReForge — 流程再造工程收集表 · Ubuntu Docker 一键部署脚本
+# =============================================================
+# 功能：
+#   1. 环境自检与自动安装（curl/git、Docker CE、Compose 插件，
+#      自动配置国内 apt 源与 Docker Hub 镜像加速）
+#   2. 中国地区深度优化：apt 清华源、Docker Hub 镜像加速、
+#      Go/npm/Alpine 依赖国内镜像、基础镜像预拉取、ufw 防火墙放行
+#   3. 构建镜像 → 启动 PostgreSQL + 后端 + 前端 → 健康等待 → 输出地址
+#
 # 用法：
-#   bash deploy.sh            # 构建镜像并启动（首次/更新）
-#   bash deploy.sh --no-cache # 忽略缓存重新构建
-#   bash deploy.sh --down     # 停止并移除容器（数据卷保留）
-#   bash deploy.sh --logs     # 跟踪日志
+#   bash deploy.sh              # 完整部署（默认，中国镜像加速）
+#   bash deploy.sh --check      # 仅环境检测/安装，不部署
+#   bash deploy.sh --global     # 海外环境：全部使用官方源
+#   bash deploy.sh --skip-install # 只检测不自动安装缺失组件
+#   bash deploy.sh --no-cache   # 忽略构建缓存
+#   bash deploy.sh --down       # 停止并移除容器（数据卷保留）
+#   bash deploy.sh --logs       # 跟踪日志
+#
+# 镜像源可用环境变量覆盖：GOPROXY / NPM_REGISTRY / ALPINE_MIRROR /
+# APT_MIRROR / DOCKER_MIRROR
 # =============================================================
 set -euo pipefail
 
@@ -15,55 +27,233 @@ ROOT="$(cd "$(dirname "$0")" && pwd)"
 COMPOSE_FILE="$ROOT/docker-compose.prod.yml"
 PROJECT="flow-prod"
 
-# —— 中国镜像（可用环境变量覆盖为官方源）——
-GOPROXY_MIRROR="${GOPROXY:-https://goproxy.cn,direct}"
-NPM_MIRROR="${NPM_REGISTRY:-https://registry.npmmirror.com}"
-ALPINE_MIRROR="${ALPINE_MIRROR:-mirrors.tuna.tsinghua.edu.cn}"
-
-COMPOSE=(docker compose -p "$PROJECT" -f "$COMPOSE_FILE")
-NO_CACHE=""
+# ---------- 参数解析 ----------
 MODE="deploy"
-
+CHINA=1
+NO_CACHE=""
+SKIP_INSTALL=0
 for arg in "$@"; do
   case "$arg" in
+    --global) CHINA=0 ;;
+    --skip-install) SKIP_INSTALL=1 ;;
+    --no-cache) NO_CACHE="--no-cache" ;;
     --down) MODE="down" ;;
     --logs) MODE="logs" ;;
-    --no-cache) NO_CACHE="--no-cache" ;;
+    --check) MODE="check" ;;
     -h|--help) MODE="help" ;;
     *) echo "未知参数: $arg"; exit 1 ;;
   esac
 done
 
+# ---------- 镜像源（默认中国，--global 切官方） ----------
+if [ "$CHINA" = 1 ]; then
+  GOPROXY_MIRROR="${GOPROXY:-https://goproxy.cn,direct}"
+  NPM_MIRROR="${NPM_REGISTRY:-https://registry.npmmirror.com}"
+  ALPINE_MIRROR="${ALPINE_MIRROR:-mirrors.tuna.tsinghua.edu.cn}"
+  APT_MIRROR="${APT_MIRROR:-mirrors.tuna.tsinghua.edu.cn}"
+  DOCKER_MIRROR="${DOCKER_MIRROR:-docker.m.daocloud.io}"
+else
+  GOPROXY_MIRROR="${GOPROXY:-https://proxy.golang.org,direct}"
+  NPM_MIRROR="${NPM_REGISTRY:-https://registry.npmjs.org}"
+  ALPINE_MIRROR="${ALPINE_MIRROR:-dl-cdn.alpinelinux.org}"
+  APT_MIRROR=""
+  DOCKER_MIRROR=""
+fi
+
+# ---------- 基础工具 ----------
+SUDO=""
+[ "$(id -u)" -ne 0 ] && command -v sudo >/dev/null 2>&1 && SUDO="sudo"
+run_root() {
+  if [ "$(id -u)" = 0 ]; then "$@"; else $SUDO "$@"; fi
+}
+has_cmd() { command -v "$1" >/dev/null 2>&1; }
+
 banner() { printf "\n\033[1;36m== %s ==\033[0m\n" "$1"; }
 
+IS_UBUNTU=0
+grep -qi ubuntu /etc/os-release 2>/dev/null && IS_UBUNTU=1
+
+MODE_HELP_TEXT="$(sed -n '5,20p' "$0")"
+
+# =============================================================
 case "$MODE" in
-  help)
-    sed -n '2,14p' "$0"
-    exit 0
-    ;;
+  help) printf "%s\n" "$MODE_HELP_TEXT"; exit 0 ;;
   down)
     banner "停止并移除容器（数据卷保留）"
-    "${COMPOSE[@]}" down
+    docker compose -p "$PROJECT" -f "$COMPOSE_FILE" down
     exit 0
     ;;
   logs)
-    "${COMPOSE[@]}" logs -f --tail=100
+    docker compose -p "$PROJECT" -f "$COMPOSE_FILE" logs -f --tail=100
     exit 0
     ;;
 esac
 
-# ---- 前置检查 ----
-command -v docker >/dev/null 2>&1 || { echo "未检测到 docker，请先安装并启动 Docker"; exit 1; }
-docker info >/dev/null 2>&1 || { echo "Docker 未运行，请启动 Docker Desktop / 守护进程"; exit 1; }
+# =============================================================
+# 环境检测与安装
+# =============================================================
+banner "环境检测"
 
-banner "环境信息（中国镜像加速）"
-echo "GOPROXY      : $GOPROXY_MIRROR"
-echo "NPM registry : $NPM_MIRROR"
-echo "Alpine mirror: $ALPINE_MIRROR"
-echo "提示：若拉取 golang/node/postgres 基础镜像缓慢，请在 Docker 守护进程"
-echo "      配置 registry-mirrors（如 https://docker.m.daocloud.io）后重试。"
+# 1) 系统信息
+if [ -f /etc/os-release ]; then . /etc/os-release; fi
+echo "系统      : ${PRETTY_NAME:-未知} $(uname -m)"
+echo "中国优化   : $([ "$CHINA" = 1 ] && echo 开启 || echo 关闭)"
+echo "当前用户   : $(id -un) $([ "$(id -u)" = 0 ] && echo '(root)' || echo "(sudo: $(has_cmd sudo && echo 可用 || echo 不可用))")"
 
-# ---- 构建并启动 ----
+# 2) apt 清华源优化（仅 Ubuntu + 中国模式；原配置自动备份 .bak）
+if [ "$CHINA" = 1 ] && has_cmd apt-get && [ "$IS_UBUNTU" = 1 ]; then
+  if grep -rqs -e "archive.ubuntu.com" -e "security.ubuntu.com" \
+      /etc/apt/sources.list /etc/apt/sources.list.d 2>/dev/null; then
+    banner "apt 源切换到清华 TUNA 镜像（原配置备份为 .bak）"
+    for f in /etc/apt/sources.list /etc/apt/sources.list.d/*; do
+      [ -f "$f" ] || continue
+      if grep -qs -e "archive.ubuntu.com" -e "security.ubuntu.com" "$f"; then
+        $SUDO cp -n "$f" "$f.bak" 2>/dev/null || true
+        $SUDO sed -i \
+          -e "s|http://archive.ubuntu.com|https://${APT_MIRROR}|g" \
+          -e "s|http://security.ubuntu.com|https://${APT_MIRROR}|g" \
+          -e "s|https://archive.ubuntu.com|https://${APT_MIRROR}|g" \
+          -e "s|https://security.ubuntu.com|https://${APT_MIRROR}|g" "$f"
+      fi
+    done
+    $SUDO apt-get update -qq && echo "apt 源已更新 ✓"
+  fi
+fi
+
+# 3) 基础工具（curl/git）
+if ! has_cmd curl || ! has_cmd git; then
+  banner "安装基础工具（curl / git / ca-certificates）"
+  if has_cmd apt-get; then
+    $SUDO apt-get install -y curl git ca-certificates
+  else
+    echo "缺少 curl/git 且系统无 apt-get，请手动安装"; exit 1
+  fi
+fi
+
+# 4) Docker CE + Compose 插件
+install_docker() {
+  banner "安装 Docker CE（阿里云镜像源）"
+  if ! has_cmd apt-get || [ "$IS_UBUNTU" = 0 ]; then
+    echo "非 Ubuntu 系统请参考官方文档安装 Docker: https://docs.docker.com/engine/install/"; exit 1
+  fi
+  $SUDO install -m 0755 -d /etc/apt/keyrings
+  curl -fsSL "https://mirrors.aliyun.com/docker-ce/linux/ubuntu/gpg" \
+    | $SUDO tee /etc/apt/keyrings/docker.asc >/dev/null
+  $SUDO chmod a+r /etc/apt/keyrings/docker.asc
+  echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] \
+https://mirrors.aliyun.com/docker-ce/linux/ubuntu ${VERSION_CODENAME:-$(grep VERSION_CODENAME= /etc/os-release | cut -d= -f2 | tr -d '"')} stable" \
+    | $SUDO tee /etc/apt/sources.list.d/docker.list > /dev/null
+  $SUDO apt-get update -qq
+  $SUDO apt-get install -y docker-ce docker-ce-cli containerd.io \
+    docker-buildx-plugin docker-compose-plugin
+  $SUDO systemctl enable --now docker
+  $SUDO usermod -aG docker "$(id -un)" 2>/dev/null || true
+  echo "已将 $(id -un) 加入 docker 组；如仍提示无权限，请重新登录后重试"
+}
+
+if has_cmd docker; then
+  echo "Docker    : $(docker --version)"
+else
+  if [ "$SKIP_INSTALL" = 1 ]; then
+    echo "未安装 Docker（--skip-install 已跳过自动安装），请先安装后重试"; exit 1
+  fi
+  install_docker
+fi
+
+# Docker 守护进程运行中？
+if ! docker info >/dev/null 2>&1; then
+  banner "启动 Docker 守护进程"
+  if has_cmd systemctl; then
+    $SUDO systemctl start docker 2>/dev/null || true
+    sleep 2
+  fi
+  docker info >/dev/null 2>&1 || { echo "Docker 仍不可用，请手动启动 Docker 后重试"; exit 1; }
+fi
+echo "Compose   : $(docker compose version 2>/dev/null || echo '未安装')"
+
+# 5) Compose 插件缺失补装
+if ! docker compose version >/dev/null 2>&1; then
+  if [ "$SKIP_INSTALL" = 1 ]; then
+    echo "缺少 docker compose 插件（--skip-install 已跳过自动安装）"; exit 1
+  fi
+  banner "安装 docker-compose-plugin"
+  if has_cmd apt-get; then
+    $SUDO apt-get install -y docker-compose-plugin
+  else
+    echo "请手动安装 Docker Compose v2"; exit 1
+  fi
+fi
+
+# 6) 中国优化：Docker Hub 镜像加速写入 daemon.json（仅 Linux + 未配置时）
+if [ "$CHINA" = 1 ] && [ "$(uname -s)" = "Linux" ]; then
+  if ! docker info 2>/dev/null | grep -qi "docker.m.daocloud.io"; then
+    banner "配置 Docker Hub 镜像加速（daemon.json）"
+    $SUDO install -m 0755 -d /etc/docker
+    if [ -f /etc/docker/daemon.json ] && grep -qs "registry-mirrors" /etc/docker/daemon.json; then
+      echo "已存在 registry-mirrors 配置，跳过"
+    else
+      $SUDO cp -n /etc/docker/daemon.json /etc/docker/daemon.json.bak 2>/dev/null || true
+      printf '%s\n' \
+        '{' \
+        '  "registry-mirrors": [' \
+        '    "https://docker.m.daocloud.io",' \
+        '    "https://docker.1ms.run"' \
+        '  ]' \
+        '}' | $SUDO tee /etc/docker/daemon.json > /dev/null
+      $SUDO systemctl restart docker 2>/dev/null || true
+      sleep 2
+      echo "已配置镜像加速并重启 Docker（如有其它运行中容器会短暂重启）"
+    fi
+  fi
+fi
+
+# 7) 中国优化：基础镜像经镜像源预拉取（避免 Docker Hub 直连卡死）
+if [ "$CHINA" = 1 ] && [ -n "$DOCKER_MIRROR" ]; then
+  banner "基础镜像预拉取（经 ${DOCKER_MIRROR}）"
+  for img in golang:1.27-alpine node:22-alpine alpine:3.20 postgres:16-alpine; do
+    if docker image inspect "$img" >/dev/null 2>&1; then
+      echo "$img 已存在 ✓"
+    else
+      echo "拉取 $img ..."
+      docker pull "$DOCKER_MIRROR/library/$img" 2>/dev/null \
+        && docker tag "$DOCKER_MIRROR/library/$img" "$img" \
+        && echo "$img ✓" \
+        || echo "⚠ $img 预拉取失败，构建时将直连尝试"
+    fi
+  done
+fi
+
+# 8) ufw 防火墙放行前端端口
+if has_cmd ufw && ufw status 2>/dev/null | grep -q "Status: active"; then
+  $SUDO ufw allow 3000/tcp >/dev/null 2>&1 || true
+  echo "ufw 已放行 3000/tcp ✓"
+fi
+
+# 9) docker 权限包装（无 docker 组权限时走 sudo）
+DCMD=(docker)
+if ! docker info >/dev/null 2>&1 && [ -n "$SUDO" ]; then
+  DCMD=($SUDO docker)
+fi
+
+banner "环境就绪"
+echo "Go 模块源   : $GOPROXY_MIRROR"
+echo "npm 源      : $NPM_MIRROR"
+echo "Alpine 源   : $ALPINE_MIRROR"
+[ -n "$DOCKER_MIRROR" ] && echo "Docker Hub 加速: $DOCKER_MIRROR"
+
+case "$MODE" in
+  check)
+    banner "环境检测完成（--check 模式，未部署）"
+    echo "如需继续部署，请执行: bash deploy.sh"
+    exit 0
+    ;;
+esac
+
+# =============================================================
+# 构建与部署
+# =============================================================
+COMPOSE=("${DCMD[@]}" compose -p "$PROJECT" -f "$COMPOSE_FILE")
+
 banner "构建镜像（首次较慢，依赖走国内镜像）"
 # shellcheck disable=SC2086
 "${COMPOSE[@]}" build $NO_CACHE \
@@ -74,7 +264,7 @@ banner "构建镜像（首次较慢，依赖走国内镜像）"
 banner "启动服务"
 "${COMPOSE[@]}" up -d
 
-# ---- 健康等待 ----
+# ---------- 健康等待（端到端） ----------
 banner "等待服务就绪"
 wait_url() {
   local url="$1" name="$2" i=0 max=60
@@ -97,6 +287,6 @@ wait_url "http://127.0.0.1:3000/api/health" "后端连通（经前端代理，�
 banner "部署完成"
 echo "前台收集页   : http://localhost:3000"
 echo "管理后台     : http://localhost:3000/admin   （默认 admin / flow123）"
-echo "后端 API     : http://127.0.0.1:8080/api/health （容器网络内部互访）"
-echo "数据         : PostgreSQL（卷 flow-prod-pgdata 持久化）"
+echo "后端 API     : 经前端 /api 代理访问（容器网络内部互访）"
+echo "数据         : PostgreSQL（卷 ${PROJECT}_flow-prod-pgdata 持久化）"
 echo "常用命令     : bash deploy.sh --logs ｜ --down"
