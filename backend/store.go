@@ -24,6 +24,11 @@ type store interface {
 	ListSystems() ([]SystemOption, error)
 	CreateSystem(name string) (*SystemOption, error)
 	DeleteSystem(id string) (bool, error)
+	CountUsers() (int, error)
+	// CreateUser 原子创建用户：表为空时角色自动为 admin（首个注册用户即管理员）
+	CreateUser(u *User) error
+	GetUserByUsername(username string) (*User, error)
+	ListUsers() ([]*User, error)
 	Close() error
 }
 
@@ -44,7 +49,15 @@ CREATE TABLE IF NOT EXISTS systems (
 	name       TEXT NOT NULL,
 	created_at TIMESTAMPTZ NOT NULL
 );
-CREATE UNIQUE INDEX IF NOT EXISTS idx_systems_name ON systems (name);`
+CREATE UNIQUE INDEX IF NOT EXISTS idx_systems_name ON systems (name);
+
+CREATE TABLE IF NOT EXISTS users (
+	id            TEXT PRIMARY KEY,
+	username      TEXT NOT NULL UNIQUE,
+	password_hash TEXT NOT NULL,
+	role          TEXT NOT NULL DEFAULT 'member',
+	created_at    TIMESTAMPTZ NOT NULL
+);`
 
 // newStore 依据 DATABASE_URL（默认本机 Docker Postgres）建立存储；
 // 表为空且存在历史 JSON 文件时自动做一次数据迁移。
@@ -200,6 +213,60 @@ func (s *postgresStore) DeleteSystem(id string) (bool, error) {
 	}
 	n, err := res.RowsAffected()
 	return n > 0, err
+}
+
+func (s *postgresStore) CountUsers() (int, error) {
+	var n int
+	if err := s.db.QueryRow("SELECT count(*) FROM users").Scan(&n); err != nil {
+		return 0, err
+	}
+	return n, nil
+}
+
+// CreateUser 单条 INSERT 原子判定角色：表为空 → admin，否则 member（规避并发竞态）
+func (s *postgresStore) CreateUser(u *User) error {
+	if u.ID == "" {
+		u.ID = newID()
+	}
+	u.CreatedAt = time.Now()
+	return s.db.QueryRow(`
+		INSERT INTO users (id, username, password_hash, role, created_at)
+		VALUES ($1, $2, $3,
+		        CASE WHEN (SELECT count(*) FROM users) = 0 THEN 'admin' ELSE 'member' END,
+		        $4)
+		RETURNING role`, u.ID, u.Username, u.PasswordHash, u.CreatedAt,
+	).Scan(&u.Role)
+}
+
+func (s *postgresStore) GetUserByUsername(username string) (*User, error) {
+	var u User
+	err := s.db.QueryRow(
+		"SELECT id, username, password_hash, role, created_at FROM users WHERE username = $1", username,
+	).Scan(&u.ID, &u.Username, &u.PasswordHash, &u.Role, &u.CreatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &u, nil
+}
+
+func (s *postgresStore) ListUsers() ([]*User, error) {
+	rows, err := s.db.Query("SELECT id, username, password_hash, role, created_at FROM users ORDER BY created_at ASC")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []*User{}
+	for rows.Next() {
+		var u User
+		if err := rows.Scan(&u.ID, &u.Username, &u.PasswordHash, &u.Role, &u.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, &u)
+	}
+	return out, rows.Err()
 }
 
 // SeedSystemsFromProcesses 首次启用系统库时，从既有流程的 systemName 归集去重播种

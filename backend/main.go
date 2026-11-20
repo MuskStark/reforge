@@ -27,6 +27,14 @@ func main() {
 	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
+
+	// 用户认证：注册（首个用户自动成为管理员）/ 登录 / 身份 / 注销 / 注册状态
+	mux.HandleFunc("POST /api/auth/register", handleRegister(st))
+	mux.HandleFunc("POST /api/auth/login", handleLogin(st))
+	mux.HandleFunc("GET /api/auth/status", handleAuthStatus(st))
+	mux.HandleFunc("GET /api/auth/me", handleMe)
+	mux.HandleFunc("DELETE /api/auth/session", handleLogout)
+	mux.HandleFunc("GET /api/admin/users", handleListUsers(st))
 	mux.HandleFunc("GET /api/processes", func(w http.ResponseWriter, r *http.Request) {
 		list, err := st.List()
 		if err != nil {

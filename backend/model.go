@@ -75,6 +75,15 @@ type SystemOption struct {
 	CreatedAt time.Time `json:"createdAt"`
 }
 
+// User 注册用户：首个注册用户自动成为管理员，其后为普通成员
+type User struct {
+	ID           string    `json:"id"`
+	Username     string    `json:"username"`
+	PasswordHash string    `json:"-"`
+	Role         string    `json:"role"` // admin | member
+	CreatedAt    time.Time `json:"createdAt"`
+}
+
 // validateProcess 校验流程数据，返回中文错误信息供前端展示
 func validateProcess(p *Process) string {
 	if p.Name == "" {
