@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # =============================================================
 # ReForge — 流程再造工程收集表 · Ubuntu Docker 一键部署脚本
+# 兼容 Ubuntu 22.04 / 24.04 / 26.04（apt 传统源与 deb822 格式均支持）
 # =============================================================
 # 功能：
 #   1. 环境自检与自动安装（curl/git、Docker CE、Compose 插件，
@@ -101,19 +102,20 @@ echo "中国优化   : $([ "$CHINA" = 1 ] && echo 开启 || echo 关闭)"
 echo "当前用户   : $(id -un) $([ "$(id -u)" = 0 ] && echo '(root)' || echo "(sudo: $(has_cmd sudo && echo 可用 || echo 不可用))")"
 
 # 2) apt 清华源优化（仅 Ubuntu + 中国模式；原配置自动备份 .bak）
+#    24.04+ 默认为 deb822 格式（/etc/apt/sources.list.d/ubuntu.sources），
+#    与传统 sources.list 同样处理；同时覆盖 cn./us. 等区域前缀主机
 if [ "$CHINA" = 1 ] && has_cmd apt-get && [ "$IS_UBUNTU" = 1 ]; then
   if grep -rqs -e "archive.ubuntu.com" -e "security.ubuntu.com" \
       /etc/apt/sources.list /etc/apt/sources.list.d 2>/dev/null; then
     banner "apt 源切换到清华 TUNA 镜像（原配置备份为 .bak）"
     for f in /etc/apt/sources.list /etc/apt/sources.list.d/*; do
       [ -f "$f" ] || continue
+      case "$f" in *.bak|*.save|*.distUpgrade) continue ;; esac
       if grep -qs -e "archive.ubuntu.com" -e "security.ubuntu.com" "$f"; then
         $SUDO cp -n "$f" "$f.bak" 2>/dev/null || true
-        $SUDO sed -i \
-          -e "s|http://archive.ubuntu.com|https://${APT_MIRROR}|g" \
-          -e "s|http://security.ubuntu.com|https://${APT_MIRROR}|g" \
-          -e "s|https://archive.ubuntu.com|https://${APT_MIRROR}|g" \
-          -e "s|https://security.ubuntu.com|https://${APT_MIRROR}|g" "$f"
+        $SUDO sed -i -E \
+          -e "s|https?://([a-z]+\.)*archive\.ubuntu\.com|https://${APT_MIRROR}|g" \
+          -e "s|https?://([a-z]+\.)*security\.ubuntu\.com|https://${APT_MIRROR}|g" "$f"
       fi
     done
     $SUDO apt-get update -qq && echo "apt 源已更新 ✓"
@@ -132,16 +134,25 @@ fi
 
 # 4) Docker CE + Compose 插件
 install_docker() {
-  banner "安装 Docker CE（阿里云镜像源）"
+  banner "安装 Docker CE（$([ "$CHINA" = 1 ] && echo '阿里云镜像源' || echo '官方源')）"
   if ! has_cmd apt-get || [ "$IS_UBUNTU" = 0 ]; then
     echo "非 Ubuntu 系统请参考官方文档安装 Docker: https://docs.docker.com/engine/install/"; exit 1
   fi
+  # --global 用官方源，默认（中国模式）走阿里云镜像
+  local repo="https://download.docker.com/linux/ubuntu"
+  [ "$CHINA" = 1 ] && repo="https://mirrors.aliyun.com/docker-ce/linux/ubuntu"
+  local codename="${VERSION_CODENAME:-$(grep VERSION_CODENAME= /etc/os-release | cut -d= -f2 | tr -d '"')}"
+  # 26.04(resolute) 起主流镜像站已提供对应发行版；
+  # 若所选源暂缺当前代号的 Release，回退到上一个 LTS（noble）保证可安装
+  if ! curl -fsSI --max-time 10 "$repo/dists/$codename/Release" >/dev/null 2>&1; then
+    echo "⚠ Docker 源暂无 $codename 发行版，回退到 noble（上一个 LTS）"
+    codename="noble"
+  fi
   $SUDO install -m 0755 -d /etc/apt/keyrings
-  curl -fsSL "https://mirrors.aliyun.com/docker-ce/linux/ubuntu/gpg" \
-    | $SUDO tee /etc/apt/keyrings/docker.asc >/dev/null
+  curl -fsSL "$repo/gpg" | $SUDO tee /etc/apt/keyrings/docker.asc >/dev/null
   $SUDO chmod a+r /etc/apt/keyrings/docker.asc
   echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] \
-https://mirrors.aliyun.com/docker-ce/linux/ubuntu ${VERSION_CODENAME:-$(grep VERSION_CODENAME= /etc/os-release | cut -d= -f2 | tr -d '"')} stable" \
+$repo $codename stable" \
     | $SUDO tee /etc/apt/sources.list.d/docker.list > /dev/null
   $SUDO apt-get update -qq
   $SUDO apt-get install -y docker-ce docker-ce-cli containerd.io \
