@@ -8,7 +8,6 @@ import { LiquidGlass } from "@/components/ui/liquid-glass";
 import { Meteors } from "@/components/ui/meteors";
 import { ShootingStars } from "@/components/ui/shooting-stars";
 import { StarsBackground } from "@/components/ui/stars-background";
-import { TextGenerateEffect } from "@/components/ui/text-generate-effect";
 import { FlowBuilder } from "@/components/flow-builder";
 import { FlowChartModal, type ChartSource } from "@/components/flow-chart";
 import { emptyProcess } from "@/lib/types";
@@ -42,23 +41,17 @@ export default function Home() {
               <p className="eyebrow text-[11px] text-cyan-300/80">
                 ReForge / 流程再造工程收集表
               </p>
-              <h1 className="font-display mt-3 text-3xl font-bold leading-tight text-white sm:text-4xl">
-                <TextGenerateEffect
-                  words="再造一条流程，从第一步画到最后一步"
-                  duration={0.6}
-                />
-              </h1>
-              <p className="mt-3 max-w-xl text-sm leading-relaxed text-[color:var(--flow-muted)]">
-                自定义步骤与会签（内部可含多步）；每步标注线上 / 线下办理，
-                记录系统、移动端支持、线下文件与经办人员；一键生成流程图。
-                提交后由管理员在
+              <p className="mt-2 max-w-xl text-sm leading-relaxed text-[color:var(--flow-muted)]">
+                ① 填写流程名称与申报人；② 依次添加步骤，选「线上系统」或「线下办理」并补全信息，
+                需多方并行签署时打开会签开关；③ 点「一键生成流程图」预览；
+                ④ 点「提交流程」，由管理员在
                 <Link
                   href="/admin"
                   className="mx-0.5 inline-flex items-center gap-0.5 text-cyan-300 transition hover:text-cyan-200"
                 >
                   <ShieldCheck className="h-3.5 w-3.5" /> 管理后台
                 </Link>
-                统一查看与管理。
+                统一查看。
               </p>
             </div>
             <div className="flex shrink-0 flex-col items-end gap-3">
