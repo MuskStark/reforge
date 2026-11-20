@@ -22,6 +22,7 @@ import { TagInput } from "@/components/tag-input";
 import { HandlerList } from "@/components/handler-list";
 import { PartyEditor } from "@/components/party-editor";
 import { Hourglass } from "lucide-react";
+import { stepIssues } from "@/lib/step-checks";
 import type { FlowStep, StepMode, WaitFor } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -87,6 +88,24 @@ export function StepCard({
             会签节点
           </span>
         )}
+        {/* 完整度徽章：实时提示必填缺失项 */}
+        {(() => {
+          const issues = stepIssues(step);
+          const ready = issues.length === 0;
+          return (
+            <span
+              title={ready ? "本步骤必填信息已齐全" : issues.join("；")}
+              className={cn(
+                "hidden shrink-0 items-center gap-1 rounded-full px-2 py-1 text-[10px] sm:inline-flex",
+                ready
+                  ? "bg-emerald-400/15 text-emerald-300"
+                  : "bg-red-400/15 text-red-300",
+              )}
+            >
+              {ready ? "✓ 就绪" : `待完善 ${issues.length}`}
+            </span>
+          );
+        })()}
         <div className="flex shrink-0 items-center gap-1">
           <Tooltip content="上移一步" containerClassName="hidden sm:block">
             <button

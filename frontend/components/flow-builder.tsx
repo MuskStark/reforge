@@ -10,6 +10,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { LiquidGlass } from "@/components/ui/liquid-glass";
 import { MultiStepLoader } from "@/components/ui/multi-step-loader";
 import { GLASS_SHADOW, useGlassInteraction } from "@/lib/glass";
+import { cn } from "@/lib/utils";
+import { stepIssues } from "@/lib/step-checks";
 import { StepCard } from "@/components/step-card";
 import type { FlowProcess, FlowStep } from "@/lib/types";
 import { emptyProcess, emptyStep, normalizeParty } from "@/lib/types";
@@ -214,10 +216,47 @@ export function FlowBuilder({
           </span>
         </div>
 
+        {/* 步骤锚点导航条：复杂流程（多方会签）快速定位 */}
+        {steps.length > 1 && (
+          <nav
+            aria-label="步骤导航"
+            className="sticky top-2 z-30 -mx-1 flex items-center gap-1.5 overflow-x-auto rounded-xl border border-white/10 bg-[color:var(--flow-panel)]/90 px-2 py-1.5 backdrop-blur"
+          >
+            {steps.map((s, i) => {
+              const issues = stepIssues(s);
+              const ready = issues.length === 0;
+              return (
+                <button
+                  key={s.id}
+                  type="button"
+                  title={`${i + 1}. ${s.name || "未命名"}${ready ? "（就绪）" : "（待完善：" + issues[0] + "）"}`}
+                  onClick={() =>
+                    document
+                      .getElementById(`step-${s.id}`)
+                      ?.scrollIntoView({ behavior: "smooth", block: "start" })
+                  }
+                  className={cn(
+                    "font-data flex h-7 min-w-7 shrink-0 items-center justify-center rounded-full border px-1.5 text-xs transition",
+                    ready
+                      ? "border-emerald-400/40 bg-emerald-400/10 text-emerald-300 hover:border-emerald-300"
+                      : "border-red-400/50 bg-red-400/10 text-red-300 hover:border-red-300",
+                  )}
+                >
+                  {i + 1}
+                </button>
+              );
+            })}
+            <span className="mx-1 h-4 w-px shrink-0 bg-white/15" aria-hidden="true" />
+            <span className="font-data shrink-0 text-[10px] text-neutral-500">
+              {steps.filter((s) => stepIssues(s).length === 0).length}/{steps.length} 就绪
+            </span>
+          </nav>
+        )}
+
         <ol className="space-y-0">
           <AnimatePresence initial={false}>
             {steps.map((step, i) => (
-              <li key={step.id} className="flex gap-3 pb-5 sm:gap-4">
+              <li key={step.id} id={`step-${step.id}`} className="flex scroll-mt-24 gap-3 pb-5 sm:gap-4">
                 {/* 轨道节点列（pt 对准卡片首行垂直中线） */}
                 <div className="flex w-8 shrink-0 flex-col items-center pt-5 sm:pt-6" aria-hidden="true">
                   <span
