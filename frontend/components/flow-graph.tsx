@@ -54,7 +54,7 @@ function ModeBadges({
         </span>
       )}
       {mode === "online" && mobile && (
-        <span className="rounded-full bg-teal-400/20 px-1.5 py-0.5 text-[10px] font-medium text-teal-300">
+        <span className="rounded-full bg-sky-400/20 px-1.5 py-0.5 text-[10px] font-medium text-sky-300">
           支持移动端
         </span>
       )}
@@ -83,9 +83,7 @@ function SubStepRow({
   const tone =
     mode === "offline"
       ? { bar: "bg-emerald-400", ring: "border-l-4 border-l-emerald-400/70 bg-emerald-500/10" }
-      : mobile
-        ? { bar: "bg-teal-300", ring: "border-l-4 border-l-teal-300/70 bg-teal-500/10" }
-        : { bar: "bg-sky-400", ring: "border-l-4 border-l-sky-400/70 bg-sky-500/10" };
+      : { bar: "bg-sky-400", ring: "border-l-4 border-l-sky-400/70 bg-sky-500/10" };
   return (
     <div className={cn("rounded-lg border border-white/10 px-2 py-1.5", tone.ring)}>
       <div className="flex items-center gap-1.5 text-xs text-white">
@@ -150,9 +148,7 @@ function StepNode({ data }: NodeProps) {
     ? { border: "border-2 border-amber-400/90", bg: "bg-amber-500/25", accent: "bg-amber-400" }
     : d.mode === "offline"
       ? { border: "border-2 border-emerald-400/90", bg: "bg-emerald-500/30", accent: "bg-emerald-400" }
-      : d.mobile
-        ? { border: "border-2 border-teal-300/90", bg: "bg-teal-500/30", accent: "bg-teal-300" }
-        : { border: "border-2 border-sky-400/90", bg: "bg-sky-500/30", accent: "bg-sky-400" };
+      : { border: "border-2 border-sky-400/90", bg: "bg-sky-500/30", accent: "bg-sky-400" };
 
   return (
     <div

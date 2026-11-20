@@ -48,9 +48,6 @@ export function FlowChartModal({
                 <span className="inline-flex items-center gap-1 rounded-full bg-sky-400/15 px-2 py-0.5 text-sky-300">
                   蓝 · 线上
                 </span>
-                <span className="inline-flex items-center gap-1 rounded-full bg-teal-400/15 px-2 py-0.5 text-teal-300">
-                  青亮 · 支持移动端
-                </span>
                 <span className="inline-flex items-center gap-1 rounded-full bg-emerald-400/15 px-2 py-0.5 text-emerald-300">
                   绿 · 线下
                 </span>
