@@ -26,10 +26,13 @@ type Party struct {
 	SubSteps []SubStep `json:"subSteps"`
 }
 
-// OnlineInfo 线上处理属性：系统名称、是否支持移动端
+// OnlineInfo 线上处理属性：系统名称、是否支持移动端（必选，nil=未选择）；
+// DataInteroperable 与前一线上节点的系统是否数据互通——
+// 仅当相邻两线上节点系统名称不同时必填（nil=未填写）
 type OnlineInfo struct {
-	SystemName      string `json:"systemName"`
-	MobileSupported bool   `json:"mobileSupported"`
+	SystemName        string `json:"systemName"`
+	MobileSupported   *bool  `json:"mobileSupported"`
+	DataInteroperable *bool  `json:"dataInteroperable"`
 }
 
 // OfflineInfo 线下处理属性：涉及文件名称、经办部门及人员
@@ -111,6 +114,15 @@ func validateProcess(p *Process) string {
 				if s.Online.SystemName == "" {
 					return "第 " + itoa(n) + " 步为线上处理，请填写承载该步骤的系统名称"
 				}
+				if s.Online.MobileSupported == nil {
+					return "第 " + itoa(n) + " 步为线上处理，请选择是否支持移动端"
+				}
+				if i > 0 {
+					prev := p.Steps[i-1]
+					if !prev.Countersign && prev.Mode == "online" && prev.Online.SystemName != s.Online.SystemName && s.Online.DataInteroperable == nil {
+						return "第 " + itoa(n) + " 步与上一步均为线上且系统不同（" + prev.Online.SystemName + " → " + s.Online.SystemName + "），请选择两系统是否数据互通"
+					}
+				}
 			case "offline":
 				if !hasHandler(s.Offline.Handlers) {
 					return "第 " + itoa(n) + " 步为线下处理，请至少填写一个经办部门及人员"
@@ -157,7 +169,7 @@ func validateSubSteps(n int, parties []Party) string {
 		if who == "" {
 			who = "会签方" + itoa(j+1)
 		}
-		for _, sub := range party.SubSteps {
+		for k, sub := range party.SubSteps {
 			if sub.Name == "" {
 				continue
 			}
@@ -165,6 +177,15 @@ func validateSubSteps(n int, parties []Party) string {
 			case "online":
 				if sub.Online.SystemName == "" {
 					return "第 " + itoa(n) + " 步「" + who + "」的子步骤「" + sub.Name + "」为线上处理，请填写系统名称"
+				}
+				if sub.Online.MobileSupported == nil {
+					return "第 " + itoa(n) + " 步「" + who + "」的子步骤「" + sub.Name + "」为线上处理，请选择是否支持移动端"
+				}
+				if k > 0 {
+					prev := party.SubSteps[k-1]
+					if prev.Mode == "online" && prev.Online.SystemName != sub.Online.SystemName && sub.Online.DataInteroperable == nil {
+						return "第 " + itoa(n) + " 步「" + who + "」的子步骤「" + prev.Name + " → " + sub.Name + "」系统不同，请选择两系统是否数据互通"
+					}
 				}
 			case "offline":
 				if !hasHandler(sub.Offline.Handlers) {

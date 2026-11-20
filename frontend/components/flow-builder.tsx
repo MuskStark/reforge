@@ -74,6 +74,11 @@ export function FlowBuilder({
       const s = steps[i];
       const n = i + 1;
       if (!s.name.trim()) return `第 ${n} 步的步骤名称不能为空`;
+      const prev = i > 0 ? steps[i - 1] : undefined;
+      const prevOnlineSys =
+        prev && !prev.countersign && prev.mode === "online"
+          ? prev.online.systemName.trim()
+          : "";
       if (s.countersign) {
         // 会签步骤：属性下沉到子步骤，主级不再校验系统/经办
         if (!s.parties.some(validHandler))
@@ -81,17 +86,43 @@ export function FlowBuilder({
         for (let j = 0; j < s.parties.length; j++) {
           const party = s.parties[j];
           const who = party.department.trim() || `会签方${j + 1}`;
-          for (const sub of party.subSteps ?? []) {
+          const subs = (party.subSteps ?? []).map((x) => ({ ...x }));
+          for (let k = 0; k < subs.length; k++) {
+            const sub = subs[k];
             if (!sub.name.trim()) continue;
-            if (sub.mode === "online" && !sub.online.systemName.trim())
-              return `第 ${n} 步「${who}」的子步骤「${sub.name}」为线上处理，请填写系统名称`;
-            if (sub.mode === "offline" && !sub.offline.handlers.some(validHandler))
+            if (sub.mode === "online") {
+              if (!sub.online.systemName.trim())
+                return `第 ${n} 步「${who}」的子步骤「${sub.name}」为线上处理，请填写系统名称`;
+              if (sub.online.mobileSupported == null)
+                return `第 ${n} 步「${who}」的子步骤「${sub.name}」为线上处理，请选择是否支持移动端`;
+              if (k > 0) {
+                const p = subs[k - 1];
+                const pSys = p.mode === "online" ? p.online.systemName.trim() : "";
+                if (
+                  pSys &&
+                  pSys !== sub.online.systemName.trim() &&
+                  sub.online.dataInteroperable == null
+                )
+                  return `第 ${n} 步「${who}」的子步骤「${p.name} → ${sub.name}」系统不同，请选择两系统是否数据互通`;
+              }
+            } else if (!sub.offline.handlers.some(validHandler)) {
               return `第 ${n} 步「${who}」的子步骤「${sub.name}」为线下处理，请至少填写一个经办部门及人员`;
+            }
           }
         }
       } else {
-        if (s.mode === "online" && !s.online.systemName.trim())
-          return `第 ${n} 步为线上处理，请填写系统名称`;
+        if (s.mode === "online") {
+          if (!s.online.systemName.trim())
+            return `第 ${n} 步为线上处理，请填写系统名称`;
+          if (s.online.mobileSupported == null)
+            return `第 ${n} 步为线上处理，请选择是否支持移动端`;
+          if (
+            prevOnlineSys &&
+            prevOnlineSys !== s.online.systemName.trim() &&
+            s.online.dataInteroperable == null
+          )
+            return `第 ${n} 步与上一步均为线上且系统不同（${prevOnlineSys} → ${s.online.systemName.trim()}），请选择两系统是否数据互通`;
+        }
         if (s.mode === "offline" && !s.offline.handlers.some(validHandler))
           return `第 ${n} 步为线下处理，请至少填写一个经办部门及人员`;
       }

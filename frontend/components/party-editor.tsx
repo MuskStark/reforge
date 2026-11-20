@@ -18,6 +18,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { TagInput } from "@/components/tag-input";
 import { HandlerList } from "@/components/handler-list";
 import { SystemSelect } from "@/components/system-select";
+import { YesNoSelect } from "@/components/yes-no-select";
 import {
   emptyParty,
   emptySubStep,
@@ -291,17 +292,41 @@ export function PartyEditor({
                                   }
                                 />
                               </div>
-                              <div className="rounded-lg border border-white/10 px-2 py-0.5">
-                                <Checkbox
-                                  checked={sub.online.mobileSupported}
-                                  onCheckedChange={(v) =>
+                              <div className="flex flex-col gap-1.5">
+                                <YesNoSelect
+                                  compact
+                                  label="支持移动端"
+                                  value={sub.online.mobileSupported}
+                                  onChange={(v) =>
                                     updateSub(i, sub.id, {
                                       online: { ...sub.online, mobileSupported: v },
                                     })
                                   }
-                                >
-                                  <span className="text-xs">支持移动端</span>
-                                </Checkbox>
+                                />
+                                {(() => {
+                                  // 分支内相邻线上-线上且系统不同：需填写数据互通
+                                  const subs = (parties[i].subSteps ?? []).map(normalizeSubStep);
+                                  const idx = subs.findIndex((x) => x.id === sub.id);
+                                  if (idx <= 0) return null;
+                                  const prev = subs[idx - 1];
+                                  if (prev.mode !== "online") return null;
+                                  const pSys = prev.online.systemName.trim();
+                                  const cSys = sub.online.systemName.trim();
+                                  if (!pSys || pSys === cSys) return null;
+                                  return (
+                                    <YesNoSelect
+                                      compact
+                                      label={`「${pSys} → ${cSys}」数据互通`}
+                                      value={sub.online.dataInteroperable ?? null}
+                                      onChange={(v) =>
+                                        updateSub(i, sub.id, {
+                                          online: { ...sub.online, dataInteroperable: v },
+                                        })
+                                      }
+                                      hint="两系统是否自动共享数据"
+                                    />
+                                  );
+                                })()}
                               </div>
                             </div>
                           ) : (

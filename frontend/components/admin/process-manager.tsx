@@ -224,15 +224,36 @@ export function ProcessManager({
                               "ml-1 rounded px-1.5 py-0.5",
                               s.online.mobileSupported
                                 ? "bg-emerald-500/15 text-emerald-300"
-                                : "bg-white/5 text-neutral-500",
+                                : s.online.mobileSupported === false
+                                  ? "bg-white/5 text-neutral-500"
+                                  : "bg-amber-500/15 text-amber-300",
                             )}
                           >
-                            {s.online.mobileSupported ? "支持" : "不支持"}
+                            {s.online.mobileSupported
+                              ? "支持"
+                              : s.online.mobileSupported === false
+                                ? "不支持"
+                                : "未选择"}
                           </span>
                           {s.online.mobileSupported && (
                             <Smartphone className="h-3.5 w-3.5 text-emerald-300" />
                           )}
                         </p>
+                        {s.online.dataInteroperable != null && (
+                          <p>
+                            与上步系统数据互通：
+                            <span
+                              className={cn(
+                                "ml-1 rounded px-1.5 py-0.5",
+                                s.online.dataInteroperable
+                                  ? "bg-emerald-500/15 text-emerald-300"
+                                  : "bg-red-500/15 text-red-300",
+                              )}
+                            >
+                              {s.online.dataInteroperable ? "互通" : "不互通"}
+                            </span>
+                          </p>
+                        )}
                       </>
                     ) : (
                       <>

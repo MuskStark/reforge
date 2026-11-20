@@ -58,6 +58,11 @@ function ModeBadges({
           支持移动端
         </span>
       )}
+      {mode === "online" && mobile === false && (
+        <span className="rounded-full bg-white/10 px-1.5 py-0.5 text-[10px] font-medium text-neutral-400">
+          不支持移动端
+        </span>
+      )}
     </div>
   );
 }
@@ -344,7 +349,16 @@ function buildGraph(p: ChartSource): Built {
             name: s.name ?? "",
             mode: (s.mode ?? "online") as "online" | "offline",
             mobile: s.online?.mobileSupported ?? false,
-            system: s.online?.systemName ?? "",
+            system: [
+              s.online?.systemName ?? "",
+              s.online?.dataInteroperable == null
+                ? ""
+                : s.online.dataInteroperable
+                  ? "与上步互通"
+                  : "与上步不互通",
+            ]
+              .filter(Boolean)
+              .join(" · "),
             docs: s.mode === "offline" ? (s.offline?.documents ?? []) : [],
             handlerDepts:
               s.mode === "offline"
@@ -386,6 +400,11 @@ function buildGraph(p: ChartSource): Built {
           mobile: step.online?.mobileSupported ?? false,
           tail: [
             step.mode === "online" && step.online?.systemName ? step.online.systemName : "",
+            step.mode === "online" && step.online?.dataInteroperable != null
+              ? step.online.dataInteroperable
+                ? "与上步系统数据互通"
+                : "与上步系统数据不互通"
+              : "",
             step.mode === "offline" && step.offline?.documents?.length
               ? `文件：${step.offline.documents.join("、")}`
               : "",

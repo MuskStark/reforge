@@ -18,6 +18,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Tooltip } from "@/components/ui/tooltip-card";
 import { Spotlight } from "@/components/ui/spotlight";
 import { SystemSelect } from "@/components/system-select";
+import { YesNoSelect } from "@/components/yes-no-select";
 import { TagInput } from "@/components/tag-input";
 import { HandlerList } from "@/components/handler-list";
 import { PartyEditor } from "@/components/party-editor";
@@ -54,6 +55,18 @@ export function StepCard({
   const waitFor: WaitFor | null = step.waitFor ?? null;
   const depStep = waitFor ? waitCandidates.find((s) => s.id === waitFor.stepId) : undefined;
   const depParties = depStep?.parties ?? [];
+
+  // 相邻线上-线上且系统不同：需填写数据互通（前序为会签时暂不要求，多系统语义待协作期扩展）
+  const prevStep = index > 0 ? steps[index - 1] : undefined;
+  const prevSys =
+    prevStep && !prevStep.countersign && prevStep.mode === "online"
+      ? prevStep.online.systemName.trim()
+      : "";
+  const needsInterop =
+    !step.countersign &&
+    step.mode === "online" &&
+    !!prevSys &&
+    prevSys !== step.online.systemName.trim();
 
   return (
     <motion.div
@@ -225,17 +238,26 @@ export function StepCard({
                     }
                   />
                 </div>
-                <div className="rounded-lg border border-white/10 px-3 py-1">
-                  <Checkbox
-                    checked={step.online.mobileSupported}
-                    onCheckedChange={(v) =>
+                <div className="flex flex-col gap-2 sm:items-end">
+                  <YesNoSelect
+                    compact
+                    label="是否支持移动端"
+                    value={step.online.mobileSupported}
+                    onChange={(v) =>
                       onChange({ online: { ...step.online, mobileSupported: v } })
                     }
-                  >
-                    <span className="inline-flex items-center gap-1.5">
-                      <Smartphone className="h-4 w-4 text-neutral-500" /> 支持移动端
-                    </span>
-                  </Checkbox>
+                  />
+                  {needsInterop && (
+                    <YesNoSelect
+                      compact
+                      label={`「${prevSys} → ${step.online.systemName.trim()}」数据互通`}
+                      value={step.online.dataInteroperable ?? null}
+                      onChange={(v) =>
+                        onChange({ online: { ...step.online, dataInteroperable: v } })
+                      }
+                      hint="两系统是否自动共享数据"
+                    />
+                  )}
                 </div>
               </div>
             ) : (

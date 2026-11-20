@@ -27,7 +27,10 @@ export interface CountersignParty {
 
 export interface OnlineInfo {
   systemName: string;
-  mobileSupported: boolean;
+  /** 是否支持移动端：必选（null=未选择） */
+  mobileSupported: boolean | null;
+  /** 与前一线上节点的系统是否数据互通：相邻系统不同时必填（null=未填写） */
+  dataInteroperable?: boolean | null;
 }
 
 export interface OfflineInfo {
@@ -78,7 +81,7 @@ export function emptySubStep(): SubStep {
     id: genId(),
     name: "",
     mode: "online",
-    online: { systemName: "", mobileSupported: false },
+    online: { systemName: "", mobileSupported: null },
     offline: { documents: [], handlers: [] },
   };
 }
@@ -89,7 +92,7 @@ export function normalizeSubStep(s: Partial<SubStep>): SubStep {
     id: s.id ?? genId(),
     name: s.name ?? "",
     mode: s.mode ?? "online",
-    online: s.online ?? { systemName: "", mobileSupported: false },
+    online: s.online ?? { systemName: "", mobileSupported: null },
     offline: s.offline ?? { documents: [], handlers: [] },
   };
 }
@@ -116,7 +119,7 @@ export function emptyStep(name = "", id = genId()): FlowStep {
     name,
     mode: "online",
     countersign: false,
-    online: { systemName: "", mobileSupported: false },
+    online: { systemName: "", mobileSupported: null },
     offline: { documents: [], handlers: [] },
     parties: [],
     waitFor: null,
