@@ -8,7 +8,7 @@ import "@fontsource/space-grotesk/500.css";
 import "@fontsource/space-grotesk/700.css";
 import "@fontsource/jetbrains-mono/400.css";
 import "@fontsource/jetbrains-mono/600.css";
-import { Toaster } from "@/components/ui/toast";
+import { AppToaster } from "@/components/app-toaster";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -41,8 +41,10 @@ export default function RootLayout({
 }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="zh-CN" className="dark">
-      <body className="font-sans">{children}</body>
-      <Toaster position="top-center" />
+      <body className="font-sans">
+        {children}
+        <AppToaster />
+      </body>
     </html>
   );
 }

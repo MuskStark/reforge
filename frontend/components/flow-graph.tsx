@@ -462,7 +462,6 @@ export function FlowGraph({ source }: { source: ChartSource }) {
         zoomOnScroll={false}
         panOnScroll={false}
         zoomOnPinch={false}
-        proOptions={{ hideAttribution: true }}
       >
         <Background color="rgba(255,255,255,0.04)" gap={18} size={1.4} />
       </ReactFlow>
