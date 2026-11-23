@@ -3,18 +3,26 @@
 import { Toaster as Sonner } from "sonner";
 import { cn } from "@/lib/utils";
 
-/** Aceternity UI — Toast（基于 sonner 封装） */
+/** Toast(sonner):亮色玻璃 —— 与液态玻璃主题一致 */
 export function Toaster(props: React.ComponentProps<typeof Sonner>) {
-  const { theme = "dark", className, ...rest } = props;
+  const { theme = "light", className, ...rest } = props;
   return (
     <Sonner
       theme={theme}
-      className={cn("toaster group", className)}
+      className={cn("toaster", className)}
       toastOptions={{
+        style: {
+          background: "rgba(255, 255, 255, 0.82)",
+          backdropFilter: "blur(24px) saturate(180%)",
+          WebkitBackdropFilter: "blur(24px) saturate(180%)",
+          border: "0.5px solid rgba(255, 255, 255, 0.7)",
+          boxShadow:
+            "inset 0 1px 0 rgba(255,255,255,0.95), 0 12px 32px -12px rgba(23,42,80,0.28)",
+          color: "#1d1d1f",
+          borderRadius: "18px",
+        },
         classNames: {
-          toast:
-            "group toast group-[.toaster]:bg-neutral-950 group-[.toaster]:text-white group-[.toaster]:border-white/10 group-[.toaster]:shadow-lg",
-          description: "group-[.toast]:text-neutral-400",
+          description: "text-[#6e6e73]",
         },
       }}
       {...rest}

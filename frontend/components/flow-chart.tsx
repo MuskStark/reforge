@@ -2,17 +2,17 @@
 
 /**
  * 流程图弹窗：React Flow 渲染（见 flow-graph.tsx）。
- * 在官方 AnimatedModal 之上做受控桥接：挂载即打开，用户关闭后回调卸载。
+ * 在 AnimatedModal 之上做受控桥接：挂载即打开，用户关闭后回调卸载。
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import { Modal, ModalBody, ModalContent, useModal } from "@/components/ui/animated-modal";
 import { FlowGraph } from "@/components/flow-graph";
 import { type ChartSource } from "@/components/flow-graph";
 
 export type { ChartSource };
 
-/** 在官方 Modal 之上做受控桥接：挂载即打开，用户关闭后回调卸载 */
+/** 在官方 Modal 之上做受控桥接：挂载即打开 */
 function AutoOpenController({ onClose }: { onClose: () => void }) {
   const { open, setOpen } = useModal();
   const openedOnce = useRef(false);
@@ -26,7 +26,7 @@ function AutoOpenController({ onClose }: { onClose: () => void }) {
   return null;
 }
 
-/** 流程图弹窗 */
+/** 流程图弹窗(玻璃 Sheet) */
 export function FlowChartModal({
   onClose,
   source,
@@ -37,30 +37,26 @@ export function FlowChartModal({
   return (
     <Modal>
       <AutoOpenController onClose={onClose} />
-      <ModalBody className="md:max-w-4xl rounded-[24px] bg-transparent dark:bg-zinc-950/60 backdrop-blur-2xl shadow-2xl">
+      <ModalBody className="md:max-w-4xl">
         <ModalContent className="p-4 md:p-6">
           <div className="space-y-4">
-            <div className="flex items-center gap-3 pr-8">
-              <h2 className="font-display text-lg font-semibold text-white">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-2 pr-8">
+              <h2 className="text-[17px] font-semibold tracking-[-0.02em] text-neutral-900">
                 流程图 — {source.name || "未命名流程"}
               </h2>
-              <div className="ml-auto flex flex-wrap gap-1.5 text-[10px] text-neutral-400">
-                <span className="inline-flex items-center gap-1 rounded-full bg-sky-400/15 px-2 py-0.5 text-sky-300">
-                  蓝 · 线上
-                </span>
-                <span className="inline-flex items-center gap-1 rounded-full bg-emerald-400/15 px-2 py-0.5 text-emerald-300">
-                  绿 · 线下
-                </span>
-                <span className="inline-flex items-center gap-1 rounded-full bg-amber-400/15 px-2 py-0.5 text-amber-300">
-                  琥珀 · 会签
-                </span>
-                <span className="inline-flex items-center gap-1 rounded-full bg-white/10 px-2 py-0.5 text-amber-300">
-                  - - ▶ 前置依赖
-                </span>
+              <div className="ml-auto flex flex-wrap gap-1.5">
+                <span className="badge badge-blue"><span className="dot" />线上</span>
+                <span className="badge badge-green"><span className="dot" style={{ background: "var(--green)" }} />线下</span>
+                <span className="badge badge-amber">▣ 会签 · 旁路并行 · 全部通过后汇回主干</span>
+                <span className="badge badge-plain" style={{ color: "#6e7a8c" }}>- -&nbsp;▶&nbsp;线上↔线下衔接 / 系统数据不互通</span>
+                <span className="badge badge-indigo">- -&nbsp;▶&nbsp;等待会签结果</span>
               </div>
             </div>
 
             <FlowGraph source={source} />
+            <p className="mt-2 text-center text-[11px] text-[color:var(--ink-3)] sm:hidden">
+              双指缩放 · 拖动查看完整图
+            </p>
           </div>
         </ModalContent>
       </ModalBody>

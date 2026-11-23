@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { ChevronDown } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import type { SystemOption } from "@/lib/types";
 
@@ -53,10 +54,6 @@ export function SystemSelect({
     };
   }, []);
 
-  const selectCls = compact
-    ? "h-8 w-full rounded-md border-none bg-black px-2 text-xs text-white shadow-[0_0_1px_1px_rgba(255,255,255,0.12)] outline-none focus:shadow-[0_0_1px_2px_#3EC1D3]"
-    : "h-10 w-full rounded-md border-none bg-black px-3 text-sm text-white shadow-[0_0_1px_1px_rgba(255,255,255,0.12)] outline-none focus:shadow-[0_0_1px_2px_#3EC1D3]";
-
   // 加载中或系统库为空 → 手动输入兜底
   if (!options || options.length === 0) {
     return (
@@ -65,24 +62,30 @@ export function SystemSelect({
         value={value}
         placeholder={options === null ? "加载系统列表中…" : compact ? "手动输入系统名称" : "如：OA 办公系统 / ERP / 财务共享平台"}
         onChange={(e) => onChange(e.target.value)}
-        className={compact ? "h-8 text-xs" : undefined}
+        className={compact ? "h-9 text-sm" : undefined}
       />
     );
   }
 
   return (
-    <select
-      id={id}
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      className={selectCls}
-    >
-      <option value="">{placeholder}</option>
-      {options.map((o) => (
-        <option key={o.id} value={o.name}>
-          {o.name}
-        </option>
-      ))}
-    </select>
+    <div className="relative">
+      <select
+        id={id}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className={`field pr-9 ${compact ? "h-9 text-sm" : ""}`}
+      >
+        <option value="">{placeholder}</option>
+        {options.map((o) => (
+          <option key={o.id} value={o.name}>
+            {o.name}
+          </option>
+        ))}
+      </select>
+      <ChevronDown
+        aria-hidden="true"
+        className={`pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[color:var(--ink-3)] ${compact ? "h-3.5 w-3.5" : ""}`}
+      />
+    </div>
   );
 }

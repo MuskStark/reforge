@@ -1,0 +1,269 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>ReForge · Liquid Glass — 04 移动端</title>
+<link rel="stylesheet" href="assets/tokens.css">
+<style>
+  body { background: var(--bg); }
+  .page { padding: 14px 16px 0; max-width: 480px; margin: 0 auto; }
+
+  .topbar { top: 10px; height: 50px; margin-bottom: 14px; }
+
+  .hero { margin: 14px 2px 18px; }
+  .hero h1 { font: 700 30px/1.18 var(--font); letter-spacing: -0.022em; }
+  .hero .lede { font: 400 14px/1.55 var(--font); color: var(--ink-2); margin-top: 8px; }
+  .stats { display: flex; gap: 8px; margin-top: 14px; }
+
+  .sec-title { font: var(--t-title3); letter-spacing: -0.02em; margin: 24px 2px 12px; display: flex; align-items: center; gap: 8px; }
+
+  .lg-card.pad { padding: 16px; border-radius: 22px; }
+
+  .stack { display: grid; gap: 13px; }
+
+  .stepnav { position: sticky; top: 70px; z-index: 40; display: flex; gap: 6px; padding: 6px 8px;
+    margin: 0 0 14px; width: max-content; max-width: 100%; overflow-x: auto; }
+  .stepnav .pill { width: 30px; height: 30px; display: grid; place-items: center; border-radius: 50%;
+    font: 600 13px/1 var(--font); font-variant-numeric: tabular-nums;
+    background: rgba(120,120,128,0.16); color: #48484d; flex-shrink: 0;
+    box-shadow: inset 0 0 0 0.5px rgba(0,0,0,0.06); }
+  .stepnav .pill.ok { background: var(--green-soft); color: var(--green-deep); box-shadow: inset 0 0 0 0.5px rgba(52,199,89,0.35); }
+  .stepnav .pill.warn { background: var(--red-soft); color: var(--red-deep); box-shadow: inset 0 0 0 0.5px rgba(255,59,48,0.3); }
+  .stepnav .ready { font: var(--t-caption); color: var(--ink-2); padding: 0 6px; display: flex; align-items: center; white-space: nowrap; font-variant-numeric: tabular-nums; }
+
+  .step { display: flex; gap: 8px; padding-bottom: 16px; }
+  .rail-col { width: 36px; }
+  .rail-bead { width: 32px; height: 32px; font-size: 13px; }
+  .step-body { flex: 1; min-width: 0; padding: 15px 16px; border-radius: 22px; }
+
+  .step-top { display: flex; align-items: center; gap: 8px; }
+  .step-actions { display: flex; gap: 0; flex-shrink: 0; }
+  .icon-btn { width: 36px; height: 40px; }
+  .step-top .name { flex: 1; min-width: 0; }
+
+  .attr { margin-top: 13px; display: grid; gap: 11px; }
+  .group-row { padding: 9px 13px; }
+  .seg { width: 100%; }
+  .attr .seg button { height: 36px; }
+
+  .mobile-col { display: grid; gap: 11px; }
+  .mob-yn { display: flex; align-items: center; justify-content: space-between; }
+  .mob-yn .field-label { margin: 0; }
+
+  .party-sum { padding: 11px 13px; }
+
+  /* 底部 Dock */
+  .dock-gap { height: 110px; }
+  .dock { left: 16px; right: 16px; transform: none; bottom: calc(16px + env(safe-area-inset-bottom)); justify-content: space-between; }
+  .dock .btn-primary { flex: 1; }
+  .dock .reset {
+    width: 50px; height: 50px; padding: 0; flex-shrink: 0;
+  }
+
+  .pagefoot { text-align: center; padding: 0 0 26px; }
+
+  /* 会签琥珀卡 */
+  .step.countersign .step-body {
+    background: linear-gradient(180deg, rgba(255,246,231,0.52), rgba(255,243,224,0.36));
+    box-shadow:
+      inset 0 1px 0 rgba(255,255,255,0.95),
+      inset 0 0 0 0.5px rgba(255,255,255,0.6),
+      inset 0 0 0 2px rgba(255,149,0,0.28),
+      0 2px 6px -2px rgba(23,42,80,0.08),
+      0 24px 56px -24px rgba(154,98,0,0.32);
+  }
+</style>
+</head>
+<body>
+<div class="wallpaper" aria-hidden="true">
+  <div class="orb orb-1"></div><div class="orb orb-2"></div>
+  <div class="orb orb-3"></div><div class="orb orb-4"></div>
+</div>
+
+<div class="stage">
+  <div class="page">
+
+    <header class="topbar lg-clear">
+      <div class="brand">
+        <span class="mark">
+          <svg class="ic" style="font-size:15px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="5" cy="6" r="2.4"/><circle cx="5" cy="18" r="2.4"/><circle cx="19" cy="12" r="2.4"/><path d="M7.3 6.9 16.7 11.1M7.3 17.1 16.7 12.9"/></svg>
+        </span>
+        ReForge
+      </div>
+      <div class="spacer"></div>
+      <button class="nav-action" style="padding:0 12px">
+        <svg class="ic" style="font-size:14px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v5c0 4.3-2.9 7.3-7 9-4.1-1.7-7-4.7-7-9V6z"/><path d="M9.2 12l2 2 3.6-3.8"/></svg>
+        后台
+      </button>
+    </header>
+
+    <section class="hero">
+      <div class="kicker" style="font:600 12px/1 var(--font);color:var(--tint-deep);letter-spacing:.13em;text-transform:uppercase;margin-bottom:7px">ReForge · Process Reengineering</div>
+      <h1>流程再造工程<br>收集表</h1>
+      <p class="lede">沿时间轨描述线上与线下环节,需要多方并行签署时打开会签。</p>
+      <div class="stats">
+        <span class="stat-chip lg-chip">步骤 <b>4</b></span>
+        <span class="stat-chip lg-chip amber">会签 <b>1</b></span>
+        <span class="stat-chip lg-chip blue">就绪 <b>3/4</b></span>
+      </div>
+    </section>
+
+    <section class="lg-card pad stack">
+      <div>
+        <div class="field-label">流程名称 <span class="req">*</span></div>
+        <input class="field" value="采购申请审批流程">
+      </div>
+      <div>
+        <div class="field-label">申报人 <span class="opt">选填</span></div>
+        <div class="field-wrap has-icon">
+          <svg class="lead-icon ic" style="font-size:16px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><circle cx="12" cy="8" r="3.6"/><path d="M5 20c1.2-3.4 3.8-5 7-5s5.8 1.6 7 5"/></svg>
+          <input class="field" value="周琳">
+        </div>
+      </div>
+      <div>
+        <div class="field-label">流程说明 <span class="opt">选填</span></div>
+        <textarea class="field" rows="2" style="min-height:60px">覆盖采购申请从提交、预算合规会签到纸质归档的完整链路。</textarea>
+      </div>
+    </section>
+
+    <nav class="stepnav lg-clear" aria-label="步骤导航">
+      <span class="pill ok">1</span>
+      <span class="pill warn">2</span>
+      <span class="pill ok">3</span>
+      <span class="pill ok">4</span>
+      <span class="ready">3/4 就绪</span>
+    </nav>
+
+    <!-- 步骤 1 -->
+    <div class="step">
+      <div class="rail-col">
+        <span class="rail-bead">1</span>
+        <span class="rail-line"></span>
+      </div>
+      <div class="step-body lg-card">
+        <div class="step-top">
+          <input class="field name" value="提交申请">
+          <span class="badge ok" style="height:22px"><span class="dot"></span>就绪</span>
+          <div class="step-actions">
+            <button class="icon-btn" disabled aria-label="上移"><svg class="ic" style="font-size:15px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M6 11l6-6 6 6"/></svg></button>
+            <button class="icon-btn danger" aria-label="删除"><svg class="ic" style="font-size:15px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V5a1.5 1.5 0 0 1 1.5-1.5h3A1.5 1.5 0 0 1 15 5v2M6.5 7l1 12a2 2 0 0 0 2 1.8h5a2 2 0 0 0 2-1.8l1-12"/></svg></button>
+          </div>
+        </div>
+
+        <div class="attr mobile-col">
+          <div class="group-row">
+            <svg class="ic" style="font-size:17px;color:var(--ink-2)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M5 8h9a3 3 0 1 0-3-3"/><path d="M4 12.5h13a3 3 0 1 1-3 3"/><path d="M4 17h6"/></svg>
+            <span class="grow" style="font-size:14px">本步骤为会签</span>
+            <span class="switch"></span>
+          </div>
+
+          <div class="seg">
+            <button class="on">
+              <svg class="ic" style="font-size:14px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.6 2.3 3.9 5.1 3.9 8.5s-1.3 6.2-3.9 8.5c-2.6-2.3-3.9-5.1-3.9-8.5S9.4 5.8 12 3.5z"/></svg>
+              线上系统
+            </button>
+            <button>
+              <svg class="ic" style="font-size:14px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s-6.5-5.3-6.5-10a6.5 6.5 0 0 1 13 0c0 4.7-6.5 10-6.5 10z"/><circle cx="12" cy="11" r="2.3"/></svg>
+              线下办理
+            </button>
+          </div>
+
+          <div class="subcard" style="padding:13px 14px;display:grid;gap:12px">
+            <div>
+              <div class="field-label">
+                <svg class="ic" style="font-size:14px;color:var(--ink-3)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><rect x="3.5" y="5" width="17" height="12" rx="2"/><path d="M9 21h6M12 17v4"/></svg>
+                线上处理系统 <span class="req">*</span>
+              </div>
+              <div class="field-wrap">
+                <input class="field" value="OA 协同办公平台">
+                <svg class="trail-chevron ic" style="font-size:13px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9.5l6 6 6-6"/></svg>
+              </div>
+            </div>
+            <div class="mob-yn">
+              <div class="field-label">是否支持移动端 <span class="req">*</span></div>
+              <div class="seg mini"><button class="on">是</button><button>否</button></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 步骤 2:会签(折叠摘要) -->
+    <div class="step countersign">
+      <div class="rail-col">
+        <span class="rail-bead diamond"><span>2</span></span>
+        <span class="rail-line"></span>
+      </div>
+      <div class="step-body lg-card">
+        <div class="step-top">
+          <input class="field name" value="预算与合规会签">
+          <span class="badge warn" style="height:22px"><span class="dot"></span>2</span>
+          <div class="step-actions">
+            <button class="icon-btn" aria-label="下移"><svg class="ic" style="font-size:15px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M6 13l6 6 6-6"/></svg></button>
+            <button class="icon-btn danger" aria-label="删除"><svg class="ic" style="font-size:15px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V5a1.5 1.5 0 0 1 1.5-1.5h3A1.5 1.5 0 0 1 15 5v2M6.5 7l1 12a2 2 0 0 0 2 1.8h5a2 2 0 0 0 2-1.8l1-12"/></svg></button>
+          </div>
+        </div>
+
+        <div class="attr mobile-col">
+          <div class="group-row" style="background:var(--amber-soft);box-shadow:inset 0 0 0 0.5px rgba(255,149,0,0.25);border-radius:14px">
+            <svg class="ic" style="font-size:17px;color:var(--amber-deep)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M5 8h9a3 3 0 1 0-3-3"/><path d="M4 12.5h13a3 3 0 1 1-3 3"/><path d="M4 17h6"/></svg>
+            <span class="grow" style="font-size:14px;font-weight:600;color:var(--amber-deep)">会签</span>
+            <span class="switch on"></span>
+          </div>
+
+          <div class="party-pane party-sum">
+            <div class="party-head" style="display:flex;align-items:center;gap:9px">
+              <span class="badge amber" style="flex:0 0 auto">财务部</span>
+              <span style="flex:1;font:400 13px/1.3 var(--font);color:var(--ink-2)">王芳、李强 · 2 个子步骤</span>
+              <svg class="ic" style="font-size:14px;color:var(--ink-3)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 6l6 6-6 6"/></svg>
+            </div>
+          </div>
+          <div class="party-pane party-sum">
+            <div class="party-head" style="display:flex;align-items:center;gap:9px">
+              <span class="badge amber" style="flex:0 0 auto">法务部</span>
+              <span style="flex:1;font:400 13px/1.3 var(--font);color:var(--ink-2)">赵敏 · 2 个子步骤</span>
+              <svg class="ic" style="font-size:14px;color:var(--ink-3)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 6l6 6-6 6"/></svg>
+            </div>
+          </div>
+
+          <button class="btn btn-glass" style="height:38px;font-size:14px;color:var(--amber-deep)">
+            <svg class="ic" style="font-size:14px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+            添加会签方
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 添加下一步 -->
+    <div class="step">
+      <div class="rail-col"><span class="rail-bead plus"><span class="plus-icon">+</span></span></div>
+      <div style="display:flex;align-items:center">
+        <button class="btn btn-glass" style="height:40px;font-size:14px">
+          <svg class="ic" style="font-size:14px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+          添加下一步
+        </button>
+      </div>
+    </div>
+
+    <div class="dock-gap"></div>
+    <p class="pagefoot caption" style="margin-top:-84px">概念稿 04 / 06 · 移动端 393pt — Liquid Glass</p>
+  </div>
+</div>
+
+<!-- 底部操作 Dock -->
+<div class="dock lg-clear">
+  <button class="btn btn-glass reset" aria-label="重置">
+    <svg class="ic" style="font-size:17px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 12a8.5 8.5 0 1 1 1.8 5.2M3.5 12V7.5M3.5 12H8"/></svg>
+  </button>
+  <button class="btn btn-glass" style="height:50px">
+    <svg class="ic" style="font-size:16px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="5.5" r="2"/><circle cx="6" cy="18.5" r="2"/><circle cx="18" cy="12" r="2"/><path d="M8 6.3 16 11M8 17.7 16 13"/></svg>
+    流程图
+  </button>
+  <button class="btn btn-primary">
+    <svg class="ic" style="font-size:16px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4h11l3 3v13a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1z"/><path d="M8 12h8M8 16h5M8 8h3"/></svg>
+    提交流程
+  </button>
+</div>
+</body>
+</html>

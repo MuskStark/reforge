@@ -50,7 +50,7 @@ export const ModalTrigger = ({
   return (
     <button
       className={cn(
-        "px-4 py-2 rounded-md text-black dark:text-white text-center relative overflow-hidden",
+        "rounded-full px-3 py-2 text-sm text-neutral-700 text-center relative overflow-hidden transition hover:bg-black/5 hover:text-neutral-900",
         className
       )}
       onClick={() => setOpen(true)}
@@ -103,7 +103,7 @@ export const ModalBody = ({
           <motion.div
             ref={modalRef}
             className={cn(
-              "min-h-[50%] max-h-[90%] md:max-w-[40%] bg-white dark:bg-neutral-950 border border-transparent dark:border-neutral-800 md:rounded-2xl relative z-50 flex flex-col flex-1 overflow-hidden",
+              "glass-card relative z-50 flex min-h-[40%] max-h-[90%] flex-col overflow-hidden !rounded-[28px] p-0",
               className
             )}
             initial={{
@@ -146,7 +146,7 @@ export const ModalContent = ({
   className?: string;
 }) => {
   return (
-    <div className={cn("flex flex-col flex-1 p-8 md:p-10", className)}>
+    <div className={cn("flex min-h-0 flex-1 flex-col overflow-y-auto p-8 md:p-10", className)}>
       {children}
     </div>
   );
@@ -185,7 +185,8 @@ const Overlay = ({ className }: { className?: string }) => {
         opacity: 0,
         backdropFilter: "blur(0px)",
       }}
-      className={`fixed inset-0 h-full w-full bg-black bg-opacity-50 z-50 ${className}`}
+      className={`fixed inset-0 h-full w-full z-50 ${className}`}
+      style={{ background: "rgba(18, 26, 48, 0.32)" }}
     ></motion.div>
   );
 };
@@ -207,7 +208,7 @@ const CloseIcon = () => {
         strokeWidth="2"
         strokeLinecap="round"
         strokeLinejoin="round"
-        className="text-black dark:text-white h-4 w-4 group-hover:scale-125 group-hover:rotate-3 transition duration-200"
+        className="text-neutral-500 h-4 w-4 group-hover:scale-125 group-hover:rotate-3 transition duration-200"
       >
         <path stroke="none" d="M0 0h24v24H0z" fill="none" />
         <path d="M18 6l-12 12" />

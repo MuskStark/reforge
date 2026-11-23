@@ -33,45 +33,43 @@ export function TagInput({
   };
 
   return (
-    <div className={cn("space-y-1.5", className)}>
-      {label && <Label className="text-neutral-300">{label}</Label>}
+    <div className={cn("space-y-2", className)}>
+      {label && <Label>{label}</Label>}
       <div className="flex gap-2">
-        <Input
-          value={draft}
-          placeholder={placeholder}
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" || e.key === ",") {
-              e.preventDefault();
-              commit();
-            }
-            if (e.key === "Backspace" && !draft && tags.length) {
-              onChange(tags.slice(0, -1));
-            }
-          }}
-        />
+        <div className="min-w-0 flex-1">
+          <Input
+            value={draft}
+            placeholder={placeholder}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === ",") {
+                e.preventDefault();
+                commit();
+              }
+              if (e.key === "Backspace" && !draft && tags.length) {
+                onChange(tags.slice(0, -1));
+              }
+            }}
+          />
+        </div>
         <button
           type="button"
           onClick={commit}
           aria-label="添加"
-          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md text-neutral-400 shadow-[0_0_1px_1px_rgba(255,255,255,0.12)] transition hover:text-white hover:shadow-[0_0_1px_2px_rgba(255,255,255,0.3)]"
+          className="icon-btn !h-11 !w-11 shrink-0 text-[color:var(--ink-2)] shadow-[inset_0_0_0_0.5px_rgba(0,0,0,0.08)] bg-white/60 hover:bg-white/85"
         >
-          <Plus className="h-4 w-4" />
+          <Plus className="h-4.5 w-4.5" />
         </button>
       </div>
       {tags.length > 0 && (
-        <div className="flex flex-wrap gap-1.5 pt-1">
+        <div className="flex flex-wrap gap-1.5 pt-0.5">
           {tags.map((tag) => (
-            <span
-              key={tag}
-              className="group inline-flex items-center gap-1 rounded-full border border-white/10 bg-white/5 py-0.5 pl-2.5 pr-1.5 text-xs text-neutral-200"
-            >
+            <span key={tag} className="tag-chip">
               {tag}
               <button
                 type="button"
                 onClick={() => onChange(tags.filter((t) => t !== tag))}
                 aria-label={`删除 ${tag}`}
-                className="rounded-full p-0.5 text-neutral-500 transition hover:bg-white/10 hover:text-white"
               >
                 <X className="h-3 w-3" />
               </button>

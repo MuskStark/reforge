@@ -1,40 +1,41 @@
 "use client";
 
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence } from "framer-motion";
 import { useState } from "react";
 import { Plus, RotateCcw, Save, User, Waypoints } from "lucide-react";
 import { toast } from "sonner";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { LiquidGlass } from "@/components/ui/liquid-glass";
 import { MultiStepLoader } from "@/components/ui/multi-step-loader";
-import { GLASS_SHADOW, useGlassInteraction } from "@/lib/glass";
 import { cn } from "@/lib/utils";
-import { stepIssues } from "@/lib/step-checks";
+import { stepIssues, interopSystems, subInteropPrev } from "@/lib/step-checks";
 import { StepCard } from "@/components/step-card";
 import type { FlowProcess, FlowStep } from "@/lib/types";
 import { emptyProcess, emptyStep, normalizeParty } from "@/lib/types";
+import { adminFetch } from "@/lib/auth";
 
 /**
- * 流程收集主表单：流程基本信息 + 自定义增删/排序步骤，
+ * 流程收集主表单（液态玻璃）：流程基本信息 + 自定义增删/排序步骤，
  * 每步可配置会签与线上/线下属性，提交到 Go 后端。
+ * 桌面端提交区为内联玻璃条；移动端为底部悬浮玻璃 Dock。
  */
 export function FlowBuilder({
   value,
   onChange,
   onSubmitted,
   onPreviewChart,
+  /** 编辑已有流程:提交走 PUT /api/admin/processes/{id}(需管理员或被指派跟进人) */
+  existingId,
 }: {
   value: ReturnType<typeof emptyProcess>;
   onChange: (v: ReturnType<typeof emptyProcess>) => void;
   onSubmitted: () => void;
   onPreviewChart: () => void;
+  existingId?: string;
 }) {
   const { name, description, applicant, steps } = value;
   const [submitting, setSubmitting] = useState(false);
-  const glassInteraction = useGlassInteraction();
-
   const patchStep = (id: string, patch: Partial<FlowStep>) =>
     onChange({ ...value, steps: steps.map((s) => (s.id === id ? { ...s, ...patch } : s)) });
 
@@ -75,10 +76,6 @@ export function FlowBuilder({
       const n = i + 1;
       if (!s.name.trim()) return `第 ${n} 步的步骤名称不能为空`;
       const prev = i > 0 ? steps[i - 1] : undefined;
-      const prevOnlineSys =
-        prev && !prev.countersign && prev.mode === "online"
-          ? prev.online.systemName.trim()
-          : "";
       if (s.countersign) {
         // 会签步骤：属性下沉到子步骤，主级不再校验系统/经办
         if (!s.parties.some(validHandler))
@@ -95,16 +92,10 @@ export function FlowBuilder({
                 return `第 ${n} 步「${who}」的子步骤「${sub.name}」为线上处理，请填写系统名称`;
               if (sub.online.mobileSupported == null)
                 return `第 ${n} 步「${who}」的子步骤「${sub.name}」为线上处理，请选择是否支持移动端`;
-              if (k > 0) {
-                const p = subs[k - 1];
-                const pSys = p.mode === "online" ? p.online.systemName.trim() : "";
-                if (
-                  pSys &&
-                  pSys !== sub.online.systemName.trim() &&
-                  sub.online.dataInteroperable == null
-                )
-                  return `第 ${n} 步「${who}」的子步骤「${p.name} → ${sub.name}」系统不同，请选择两系统是否数据互通`;
-              }
+              // 与上一个已命名子步骤均线上且系统不同：必须选择是否数据互通
+              const p = subInteropPrev(subs, k);
+              if (p && sub.online.dataInteroperable == null)
+                return `第 ${n} 步「${who}」的子步骤「${p.name} → ${sub.name}」系统不同，请选择两系统是否数据互通`;
             } else if (!sub.offline.handlers.some(validHandler)) {
               return `第 ${n} 步「${who}」的子步骤「${sub.name}」为线下处理，请至少填写一个经办部门及人员`;
             }
@@ -116,12 +107,10 @@ export function FlowBuilder({
             return `第 ${n} 步为线上处理，请填写系统名称`;
           if (s.online.mobileSupported == null)
             return `第 ${n} 步为线上处理，请选择是否支持移动端`;
-          if (
-            prevOnlineSys &&
-            prevOnlineSys !== s.online.systemName.trim() &&
-            s.online.dataInteroperable == null
-          )
-            return `第 ${n} 步与上一步均为线上且系统不同（${prevOnlineSys} → ${s.online.systemName.trim()}），请选择两系统是否数据互通`;
+          // 相邻线上且系统不同（上一步为会签时取各方末位子步骤的系统）：必须选择是否数据互通
+          const prevSystems = interopSystems(s, prev);
+          if (prevSystems.length && s.online.dataInteroperable == null)
+            return `第 ${n} 步与上一步${prev?.countersign ? "（会签）" : ""}均为线上且系统不同（${prevSystems.join("、")} → ${s.online.systemName.trim()}），请选择两系统是否数据互通`;
         }
         if (s.mode === "offline" && !s.offline.handlers.some(validHandler))
           return `第 ${n} 步为线下处理，请至少填写一个经办部门及人员`;
@@ -150,14 +139,12 @@ export function FlowBuilder({
     }
     try {
       setSubmitting(true);
-      const res = await fetch("/api/processes", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name,
-          description,
-          applicant,
-          steps: steps.map((s, i) => {
+      // 载荷构造(新建 POST / 编辑 PUT 共用)
+      const payload = {
+        name,
+        description,
+        applicant,
+        steps: steps.map((s, i) => {
             // 提交前规整：会签方兜底 + 悬空的前置依赖清理
             let waitFor = s.waitFor ?? null;
             if (waitFor?.stepId) {
@@ -168,18 +155,26 @@ export function FlowBuilder({
             }
             return { ...s, parties: s.parties.map(normalizeParty), waitFor };
           }),
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        toast.error("提交失败", { description: data?.error ?? "服务异常，请稍后重试" });
-        return;
-      }
-      toast.success("流程已提交", {
-        description: `「${data.name}」共 ${data.steps.length} 个步骤，已保存至后端`,
+      };
+      const data = existingId
+        ? await adminFetch<FlowProcess>(`/api/admin/processes/${existingId}?via=form`, {
+            method: "PUT",
+            body: JSON.stringify(payload),
+          })
+        : await fetch("/api/processes", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          }).then(async (res) => {
+            const d = await res.json();
+            if (!res.ok) throw new Error(d?.error ?? "服务异常，请稍后重试");
+            return d as FlowProcess;
+          });
+      toast.success(existingId ? "流程已更新" : "流程已提交", {
+        description: `「${data.name}」共 ${data.steps.length} 个步骤`,
       });
       onSubmitted();
-      onChange(emptyProcess());
+      if (!existingId) onChange(emptyProcess());
     } catch {
       toast.error("网络异常", { description: "无法连接后端服务，请确认 Go 服务已启动" });
     } finally {
@@ -187,15 +182,20 @@ export function FlowBuilder({
     }
   };
 
+  const readyCount = steps.filter((s, i) => stepIssues(s, steps[i - 1]).length === 0).length;
+
   return (
-    <div className="space-y-8">
+    <div className="space-y-7">
       {/* 流程基本信息 */}
-      <section className="glass-card p-5">
-        <h2 className="mb-4 text-base font-semibold text-white">流程基本信息</h2>
+      <section className="glass-card p-5 sm:p-6">
+        <h2 className="mb-4 flex items-center gap-2 text-[17px] font-semibold tracking-[-0.02em] text-neutral-900">
+          <svg className="h-[18px] w-[18px] text-[color:var(--tint)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round"><path d="M7 4h10a2 2 0 0 1 2 2v14l-4.5-2.5L10 20l-2.7-2L5 20V6a2 2 0 0 1 2-2z"/><path d="M9 9h6M9 12.5h4"/></svg>
+          流程基本信息
+        </h2>
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="space-y-1.5">
-            <Label className="text-neutral-300" htmlFor="flow-name">
-              流程名称 <span className="text-red-400">*</span>
+            <Label htmlFor="flow-name">
+              流程名称 <span className="text-[color:var(--red)]">*</span>
             </Label>
             <Input
               id="flow-name"
@@ -205,14 +205,14 @@ export function FlowBuilder({
             />
           </div>
           <div className="space-y-1.5">
-            <Label className="text-neutral-300" htmlFor="flow-applicant">
-              申报人（选填）
+            <Label htmlFor="flow-applicant">
+              申报人 <span className="font-normal text-[color:var(--ink-3)]">选填</span>
             </Label>
             <div className="relative">
-              <User className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-600" />
+              <User className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-[color:var(--ink-3)]" />
               <Input
                 id="flow-applicant"
-                className="pl-9"
+                className="pl-10"
                 value={applicant}
                 placeholder="填写申报人姓名"
                 onChange={(e) => onChange({ ...value, applicant: e.target.value })}
@@ -220,8 +220,8 @@ export function FlowBuilder({
             </div>
           </div>
           <div className="space-y-1.5 sm:col-span-2">
-            <Label className="text-neutral-300" htmlFor="flow-desc">
-              流程说明（选填）
+            <Label htmlFor="flow-desc">
+              流程说明 <span className="font-normal text-[color:var(--ink-3)]">选填</span>
             </Label>
             <Textarea
               id="flow-desc"
@@ -233,17 +233,18 @@ export function FlowBuilder({
         </div>
       </section>
 
-      {/* 步骤区：左侧流程轨道（青蓝节点 = 普通步骤，琥珀菱形 = 会签） */}
-      <section className="space-y-5">
-        <div className="flex items-baseline justify-between gap-4">
-          <h2 className="text-base font-semibold text-white">
+      {/* 步骤区：左侧流程轨道（玻璃圆珠 = 普通步骤，琥珀菱形 = 会签） */}
+      <section className="space-y-4">
+        <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+          <h2 className="flex items-center gap-2 text-[17px] font-semibold tracking-[-0.02em] text-neutral-900">
+            <svg className="h-[18px] w-[18px] text-[color:var(--tint)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round"><circle cx="5.5" cy="6" r="2.2"/><circle cx="5.5" cy="18" r="2.2"/><circle cx="18.5" cy="12" r="2.2"/><path d="M7.6 6.8 16.3 11.2M7.6 17.2 16.3 12.8"/></svg>
             流程步骤
-            <span className="ml-2 text-xs font-normal text-[color:var(--flow-muted)]">
-              沿轨道依次增加下一步 · 菱形节点为会签
+            <span className="text-xs font-normal text-[color:var(--ink-2)]">
+              沿时间轨依次添加 · 琥珀菱形为会签
             </span>
           </h2>
-          <span className="font-data shrink-0 text-xs text-cyan-300/70">
-            STEP {String(steps.length).padStart(2, "0")}
+          <span className="font-data text-xs text-[color:var(--ink-3)]">
+            {readyCount}/{steps.length} 就绪
           </span>
         </div>
 
@@ -251,35 +252,35 @@ export function FlowBuilder({
         {steps.length > 1 && (
           <nav
             aria-label="步骤导航"
-            className="sticky top-2 z-30 -mx-1 flex items-center gap-1.5 overflow-x-auto rounded-xl border border-white/10 bg-[color:var(--flow-panel)]/90 px-2 py-1.5 backdrop-blur"
+            className="lg-clear sticky top-[72px] z-30 -mx-1 flex w-max max-w-full items-center gap-1.5 overflow-x-auto px-2 py-1.5"
           >
             {steps.map((s, i) => {
-              const issues = stepIssues(s);
-              const ready = issues.length === 0;
+              const issues = stepIssues(s, steps[i - 1]);
+              const ok = issues.length === 0;
               return (
                 <button
                   key={s.id}
                   type="button"
-                  title={`${i + 1}. ${s.name || "未命名"}${ready ? "（就绪）" : "（待完善：" + issues[0] + "）"}`}
+                  title={`${i + 1}. ${s.name || "未命名"}${ok ? "（就绪）" : "（待完善：" + issues[0] + "）"}`}
                   onClick={() =>
                     document
                       .getElementById(`step-${s.id}`)
                       ?.scrollIntoView({ behavior: "smooth", block: "start" })
                   }
                   className={cn(
-                    "font-data flex h-7 min-w-7 shrink-0 items-center justify-center rounded-full border px-1.5 text-xs transition",
-                    ready
-                      ? "border-emerald-400/40 bg-emerald-400/10 text-emerald-300 hover:border-emerald-300"
-                      : "border-red-400/50 bg-red-400/10 text-red-300 hover:border-red-300",
+                    "font-data flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-full text-xs font-semibold transition",
+                    ok
+                      ? "bg-[color:var(--green-soft)] text-[color:var(--green-deep)] shadow-[inset_0_0_0_0.5px_rgba(52,199,89,0.35)] hover:brightness-105"
+                      : "bg-[color:var(--red-soft)] text-[color:var(--red-deep)] shadow-[inset_0_0_0_0.5px_rgba(255,59,48,0.3)] hover:brightness-105",
                   )}
                 >
                   {i + 1}
                 </button>
               );
             })}
-            <span className="mx-1 h-4 w-px shrink-0 bg-white/15" aria-hidden="true" />
-            <span className="font-data shrink-0 text-[10px] text-neutral-500">
-              {steps.filter((s) => stepIssues(s).length === 0).length}/{steps.length} 就绪
+            <span className="mx-1 h-4 w-px shrink-0 bg-[color:var(--sep)]" aria-hidden="true" />
+            <span className="font-data shrink-0 px-1.5 text-[11px] text-[color:var(--ink-2)]">
+              {readyCount}/{steps.length} 就绪
             </span>
           </nav>
         )}
@@ -287,13 +288,12 @@ export function FlowBuilder({
         <ol className="space-y-0">
           <AnimatePresence initial={false}>
             {steps.map((step, i) => (
-              <li key={step.id} id={`step-${step.id}`} className="flex scroll-mt-24 gap-3 pb-5 sm:gap-4">
-                {/* 轨道节点列（pt 对准卡片首行垂直中线） */}
-                <div className="flex w-8 shrink-0 flex-col items-center pt-5 sm:pt-6" aria-hidden="true">
+              <li key={step.id} id={`step-${step.id}`} className="flex scroll-mt-36 gap-2.5 pb-5 sm:gap-3">
+                {/* 轨道节点列(垂直中线对准卡片首行) */}
+                <div className="flex w-8 shrink-0 flex-col items-center pt-[13px] sm:w-9 sm:pt-4" aria-hidden="true">
                   <span
                     className={
-                      "rail-node font-data text-xs font-semibold" +
-                      (step.countersign ? " rail-node--countersign" : "")
+                      "rail-node" + (step.countersign ? " rail-node--countersign" : "")
                     }
                   >
                     <span>{i + 1}</span>
@@ -317,67 +317,64 @@ export function FlowBuilder({
           </AnimatePresence>
 
           {/* 轨道末端：添加下一步 */}
-          <li className="flex gap-3 sm:gap-4">
-            <div className="flex w-8 shrink-0 flex-col items-center" aria-hidden="true">
-              <span className="rail-node font-data border-dashed text-base text-cyan-300/80">+</span>
+          <li className="flex gap-2.5 sm:gap-3">
+            <div className="flex w-8 shrink-0 flex-col items-center sm:w-9" aria-hidden="true">
+              <span className="rail-node grid place-items-center border-0 text-base !shadow-none" style={{ background: "transparent", boxShadow: "inset 0 0 0 1.5px rgba(10,132,255,0.45)" }}>
+                <span className="font-normal text-[color:var(--tint)]" style={{ transform: "none" }}>+</span>
+              </span>
             </div>
             <div className="flex flex-1 items-center">
-              <motion.button {...glassInteraction} onClick={addStep} className="rounded-full">
-                <LiquidGlass
-                  tint={0.12}
-                  scale={24}
-                  bevelDepth={10}
-                  aberration={2}
-                  className={GLASS_SHADOW}
-                  contentClassName="flex items-center gap-1.5 px-5 py-2.5 text-sm font-medium"
-                >
-                  <Plus className="h-4 w-4" /> 添加下一步
-                </LiquidGlass>
-              </motion.button>
+              <button type="button" onClick={addStep} className="btn btn-glass">
+                <Plus className="h-4 w-4" /> 添加下一步
+              </button>
             </div>
           </li>
         </ol>
       </section>
 
-      {/* 提交区 */}
-      <section className="flex flex-wrap items-center justify-end gap-3">
-        {/* 重置：玻璃次级 */}
-        <motion.button {...glassInteraction} onClick={() => onChange(emptyProcess())} className="rounded-full">
-          <LiquidGlass
-            tint={0.12}
-            scale={24}
-            bevelDepth={10}
-            aberration={2}
-            className={GLASS_SHADOW}
-            contentClassName="flex items-center gap-1.5 px-5 py-2.5 text-sm"
-          >
-            <RotateCcw className="h-3.5 w-3.5" /> 重置
-          </LiquidGlass>
-        </motion.button>
-        {/* 一键生成流程图：玻璃强调（官方 Book a demo 款式） */}
-        <motion.button {...glassInteraction} onClick={onPreviewChart} className="rounded-full">
-          <LiquidGlass
-            tint={0.2}
-            scale={24}
-            bevelDepth={10}
-            aberration={2}
-            className={GLASS_SHADOW}
-            contentClassName="flex items-center gap-1.5 px-5 py-2.5 text-sm font-medium [text-shadow:0_1px_2px_rgb(0_0_0/0.25)]"
-          >
+      {/* 提交区(桌面:内联玻璃条;移动端隐藏,由底部 Dock 接管) */}
+      <section className="glass-card mb-2 hidden flex-wrap items-center justify-between gap-3 p-4 sm:flex sm:p-5">
+        <p className="flex items-center gap-2 px-1 text-[13px] text-[color:var(--ink-2)]">
+          <span className={cn("h-2 w-2 rounded-full", readyCount === steps.length ? "bg-[color:var(--green)]" : "bg-[color:var(--red)]")} />
+          <span className="font-data">{readyCount}/{steps.length}</span> 步骤就绪 · 提交前请完善标红的必填项
+        </p>
+        <div className="flex flex-wrap items-center gap-2.5">
+          <button type="button" onClick={() => onChange(emptyProcess())} className="btn btn-glass">
+            <RotateCcw className="h-4 w-4" /> 重置
+          </button>
+          <button type="button" onClick={onPreviewChart} className="btn btn-glass">
             <Waypoints className="h-4 w-4" /> 一键生成流程图
-          </LiquidGlass>
-        </motion.button>
-        {/* 提交流程：白色实底主按钮（官方 Start for free 款式） */}
-        <motion.button
-          {...glassInteraction}
-          onClick={() => void submit()}
-          className="flex items-center gap-2 rounded-full bg-white px-7 py-2.5 text-sm font-semibold text-neutral-900 shadow-lg"
-        >
-          <Save className="h-4 w-4" /> 提交流程
-        </motion.button>
+          </button>
+          <button type="button" onClick={() => void submit()} className="btn btn-primary text-[17px]">
+            <Save className="h-4 w-4" /> 提交流程
+          </button>
+        </div>
       </section>
 
-      {/* 提交过程 loading：官方 MultiStepLoader */}
+      {/* 移动端底部操作 Dock(Clear 玻璃,44pt+ 触摸目标) */}
+      <div
+        className="lg-clear fixed inset-x-4 bottom-[calc(1rem+env(safe-area-inset-bottom))] z-50 flex items-center gap-2.5 p-2.5 sm:hidden"
+        style={{ borderRadius: 26 }}
+      >
+        <button
+          type="button"
+          onClick={() => onChange(emptyProcess())}
+          aria-label="重置"
+          className="btn btn-glass !h-12 !w-12 shrink-0 !p-0"
+        >
+          <RotateCcw className="h-[18px] w-[18px]" />
+        </button>
+        <button type="button" onClick={onPreviewChart} className="btn btn-glass !h-12 shrink-0">
+          <Waypoints className="h-4 w-4" /> 流程图
+        </button>
+        <button type="button" onClick={() => void submit()} className="btn btn-primary !h-12 min-w-0 flex-1 text-[16px]">
+          <Save className="h-4 w-4" /> 提交流程
+        </button>
+      </div>
+      {/* Dock 遮挡避让:移动端内容底部留白 */}
+      <div className="h-20 sm:hidden" aria-hidden="true" />
+
+      {/* 提交过程 loading:MultiStepLoader(亮色) */}
       <MultiStepLoader
         loading={submitting}
         loop={false}

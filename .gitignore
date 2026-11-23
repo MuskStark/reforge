@@ -33,3 +33,17 @@ Thumbs.db
 
 # TypeScript 增量构建信息
 tsconfig.tsbuildinfo
+
+# 含真实业务数据的设计稿(员工姓名、部门、内部分析结论):仓库是公开的,暂不入库。
+# 文件仍在本地;脱敏或把仓库改为私有后,删掉下面几行即可入库。
+design/liquid-glass/shots/follow-board.png
+design/liquid-glass/shots/follow-board-assign.png
+design/liquid-glass/shots/follow-detail.png
+design/liquid-glass/shots/chart-editor.png
+design/liquid-glass/shots/05-admin.png
+design/liquid-glass/shots/monitor-full.png
+design/liquid-glass/follow-board.html
+design/liquid-glass/follow-detail.html
+design/liquid-glass/chart-editor.html
+design/liquid-glass/admin.html
+design/liquid-glass/monitor-full.html

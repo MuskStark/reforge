@@ -265,12 +265,47 @@ esac
 # =============================================================
 COMPOSE=("${DCMD[@]}" compose -p "$PROJECT" -f "$COMPOSE_FILE")
 
-banner "构建镜像（首次较慢，依赖走国内镜像）"
+# ---------- 安全秘密引导(F04/F08):生成/补齐 .env,弱默认不再随生产生效 ----------
+gen_secret() { openssl rand -hex 24 2>/dev/null || head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n'; }
+if [ ! -f .env ]; then
+  {
+    echo "POSTGRES_PASSWORD=$(gen_secret)"
+    echo "FLOW_ADMIN_USER=admin"
+    echo "FLOW_ADMIN_PASS=$(gen_secret)"
+  } > .env
+  chmod 600 .env
+  echo "已生成 .env(数据库与管理员强口令,请妥善保管,勿提交入库)"
+else
+  grep -q '^POSTGRES_PASSWORD=' .env || { echo "POSTGRES_PASSWORD=$(gen_secret)" >> .env; echo "已在 .env 补齐 POSTGRES_PASSWORD"; }
+  grep -q '^FLOW_ADMIN_PASS='   .env || { echo "FLOW_ADMIN_PASS=$(gen_secret)" >> .env; echo "已在 .env 补齐 FLOW_ADMIN_PASS"; }
+  grep -q '^FLOW_ADMIN_USER='   .env || echo "FLOW_ADMIN_USER=admin" >> .env
+  chmod 600 .env
+fi
+
+# ---------- F10:镜像摘要锚定(部署时解析,网络不可达则降级 tag 并告警) ----------
+pin_image() {
+  local img="$1" digest
+  digest=$(docker buildx imagetools inspect "$img" --format '{{.Manifest.Digest}}' 2>/dev/null | head -1)
+  if [ -n "$digest" ] && [[ "$digest" == sha256:* ]]; then
+    echo "${img}@${digest}"
+  else
+    echo "[warn] 未能解析 $img 的摘要(网络受限),降级为可变 tag —— 供应链完整性未锚定" >&2
+    echo "$img"
+  fi
+}
+GOLANG_PINNED=$(pin_image golang:1.27-alpine)
+ALPINE_PINNED=$(pin_image alpine:3.20)
+NODE_PINNED=$(pin_image node:22-alpine)
+
+banner "构建镜像（首次较慢，依赖走国内镜像；基础镜像已尝试摘要锚定）"
 # shellcheck disable=SC2086
 "${COMPOSE[@]}" build $NO_CACHE \
   --build-arg GOPROXY="$GOPROXY_MIRROR" \
   --build-arg NPM_REGISTRY="$NPM_MIRROR" \
-  --build-arg ALPINE_MIRROR="$ALPINE_MIRROR"
+  --build-arg ALPINE_MIRROR="$ALPINE_MIRROR" \
+  --build-arg GOLANG_IMAGE="$GOLANG_PINNED" \
+  --build-arg ALPINE_IMAGE="$ALPINE_PINNED" \
+  --build-arg NODE_IMAGE="$NODE_PINNED"
 
 banner "启动服务"
 "${COMPOSE[@]}" up -d
@@ -297,7 +332,7 @@ wait_url "http://127.0.0.1:3000/api/health" "后端连通（经前端代理，�
 
 banner "部署完成"
 echo "前台收集页   : http://localhost:3000"
-echo "管理后台     : http://localhost:3000/admin   （默认 admin / flow123）"
+echo "管理后台     : http://localhost:3000/admin   ——凭据见 .env(FLOW_ADMIN_USER / FLOW_ADMIN_PASS)"
 echo "后端 API     : 经前端 /api 代理访问（容器网络内部互访）"
 echo "数据         : PostgreSQL（卷 ${PROJECT}_flow-prod-pgdata 持久化）"
 echo "常用命令     : bash deploy.sh --logs ｜ --down"

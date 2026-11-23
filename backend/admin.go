@@ -23,7 +23,7 @@ func adminCredentials() (user, pass string) {
 // registerAdminRoutes 挂载管理端路由（全部要求管理员会话）
 func registerAdminRoutes(mux *http.ServeMux, st store) {
 	mux.HandleFunc("GET /api/admin/processes", func(w http.ResponseWriter, r *http.Request) {
-		if !requireAdmin(w, r) {
+		if currentUser(w, r) == nil { // 登录即可查看(数据查看权限)
 			return
 		}
 		list, err := st.List()
@@ -35,7 +35,7 @@ func registerAdminRoutes(mux *http.ServeMux, st store) {
 	})
 
 	mux.HandleFunc("GET /api/admin/processes/{id}", func(w http.ResponseWriter, r *http.Request) {
-		if !requireAdmin(w, r) {
+		if currentUser(w, r) == nil { // 登录即可查看
 			return
 		}
 		p, err := st.Get(r.PathValue("id"))
@@ -84,7 +84,7 @@ func registerAdminRoutes(mux *http.ServeMux, st store) {
 		var body struct {
 			Name string `json:"name"`
 		}
-		if err := decodeJSON(r, &body); err != nil {
+		if err := decodeJSON(w, r, &body); err != nil {
 			writeError(w, http.StatusBadRequest, "请求数据格式不正确")
 			return
 		}

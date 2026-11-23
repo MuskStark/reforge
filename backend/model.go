@@ -1,6 +1,11 @@
 package main
 
-import "time"
+import (
+	"fmt"
+	"slices"
+	"strings"
+	"time"
+)
 
 // Handler 表示线下经办方：部门 + 涉及人员
 type Handler struct {
@@ -20,15 +25,16 @@ type SubStep struct {
 
 // Party 会签方：部门 + 涉及人员 + 分支内部子步骤（各方并行、内部顺序执行）
 type Party struct {
-	ID       string    `json:"id"`
-	Department string  `json:"department"`
-	Staff    []string  `json:"staff"`
-	SubSteps []SubStep `json:"subSteps"`
+	ID         string    `json:"id"`
+	Department string    `json:"department"`
+	Staff      []string  `json:"staff"`
+	SubSteps   []SubStep `json:"subSteps"`
 }
 
 // OnlineInfo 线上处理属性：系统名称、是否支持移动端（必选，nil=未选择）；
 // DataInteroperable 与前一线上节点的系统是否数据互通——
-// 仅当相邻两线上节点系统名称不同时必填（nil=未填写）
+// 仅当相邻两线上节点系统名称不同时必填（nil=未填写）；
+// 上一步为会签时，比较对象是各方最后一个子步骤的系统（见 countersignExitSystems）
 type OnlineInfo struct {
 	SystemName        string `json:"systemName"`
 	MobileSupported   *bool  `json:"mobileSupported"`
@@ -69,6 +75,25 @@ type Process struct {
 	Steps       []Step    `json:"steps"`
 	CreatedAt   time.Time `json:"createdAt"`
 	UpdatedAt   time.Time `json:"updatedAt"`
+
+	// ---- 跟进体系(docs/followup-plan.md)----
+	FollowStatus string `json:"followStatus"`           // analyzing|unassigned|following|review|done|shelved
+	AssigneeID   string `json:"assigneeId,omitempty"`   // users.id
+	AssigneeName string `json:"assigneeName,omitempty"` // join users.username
+	DueDate      string `json:"dueDate,omitempty"`      // YYYY-MM-DD
+	Stage        int    `json:"stage"`                  // 0..5 改造阶段
+	Analysis     []byte `json:"analysis,omitempty"`     // 需求分析结论 JSON
+}
+
+// FollowEvent 跟进动态(不可变追加,驱动时间线)
+type FollowEvent struct {
+	ID        string    `json:"id"`
+	ProcessID string    `json:"processId"`
+	ActorID   string    `json:"actorId"` // 用户名(会话侧标识)
+	ActorName string    `json:"actorName"`
+	Kind      string    `json:"kind"` // analyzed|assigned|status|stage|edited_form|edited_chart
+	Detail    []byte    `json:"detail,omitempty"`
+	CreatedAt time.Time `json:"createdAt"`
 }
 
 // SystemOption 管理员维护的线上系统库条目（前台表单下拉选择）
@@ -78,12 +103,16 @@ type SystemOption struct {
 	CreatedAt time.Time `json:"createdAt"`
 }
 
-// User 注册用户：首个注册用户自动成为管理员，其后为普通成员
+// User 注册用户：首个注册用户自动成为管理员，其后为普通成员。
+// Role 是系统角色(只管系统管理);JobRole 是全局岗位(CTO / 项目经理 / 经办 / 开发实施 / 观察者)。
 type User struct {
 	ID           string    `json:"id"`
 	Username     string    `json:"username"`
 	PasswordHash string    `json:"-"`
 	Role         string    `json:"role"` // admin | member
+	DisplayName  string    `json:"displayName"`
+	Department   string    `json:"department"`
+	JobRole      string    `json:"jobRole"` // cto | pm | handler | dev | viewer
 	CreatedAt    time.Time `json:"createdAt"`
 }
 
@@ -95,8 +124,32 @@ func validateProcess(p *Process) string {
 	if len(p.Steps) == 0 {
 		return "请至少添加一个流程步骤"
 	}
+	// 数量上限(防 1MB 内的结构滥用)
+	if len(p.Steps) > 200 {
+		return "流程步骤过多(上限 200)"
+	}
+	if l := len([]rune(p.Name)); l > 200 {
+		return "流程名称过长"
+	}
+	if l := len([]rune(p.Description)); l > 2000 {
+		return "流程说明过长"
+	}
 	for i, s := range p.Steps {
 		n := i + 1
+		if l := len([]rune(s.Name)); l > 200 {
+			return fmt.Sprintf("第 %d 步名称过长", n)
+		}
+		if len(s.Offline.Documents) > 100 {
+			return fmt.Sprintf("第 %d 步涉及文件过多(上限 100)", n)
+		}
+		if len(s.Parties) > 50 {
+			return fmt.Sprintf("第 %d 步会签方过多(上限 50)", n)
+		}
+		for _, pt := range s.Parties {
+			if len(pt.SubSteps) > 100 {
+				return fmt.Sprintf("第 %d 步会签方「%s」子步骤过多", n, pt.Department)
+			}
+		}
 		if s.Name == "" {
 			return "第 " + itoa(n) + " 步的步骤名称不能为空"
 		}
@@ -119,8 +172,16 @@ func validateProcess(p *Process) string {
 				}
 				if i > 0 {
 					prev := p.Steps[i-1]
-					if !prev.Countersign && prev.Mode == "online" && prev.Online.SystemName != s.Online.SystemName && s.Online.DataInteroperable == nil {
-						return "第 " + itoa(n) + " 步与上一步均为线上且系统不同（" + prev.Online.SystemName + " → " + s.Online.SystemName + "），请选择两系统是否数据互通"
+					if s.Online.DataInteroperable == nil {
+						if !prev.Countersign && prev.Mode == "online" && prev.Online.SystemName != s.Online.SystemName {
+							return "第 " + itoa(n) + " 步与上一步均为线上且系统不同（" + prev.Online.SystemName + " → " + s.Online.SystemName + "），请选择两系统是否数据互通"
+						}
+						// 上一步为会签:各方交接出来的系统(见 countersignExitSystems)任一与本步骤不同,同样必填
+						if prev.Countersign {
+							if sys := countersignExitSystems(prev.Parties, s.Online.SystemName); len(sys) > 0 {
+								return "第 " + itoa(n) + " 步与上一步（会签）均为线上且系统不同（" + strings.Join(sys, "、") + " → " + s.Online.SystemName + "），请选择两系统是否数据互通"
+							}
+						}
 					}
 				}
 			case "offline":
@@ -162,7 +223,28 @@ func lookupStep(steps []Step, id string) (Step, bool) {
 	return Step{}, false
 }
 
-// validateSubSteps 校验会签方内部子步骤的线上/线下属性（与主步骤规则一致）
+// countersignExitSystems 会签交接给下一步的线上系统:每一方取其最后一个子步骤
+// (sanitize 已清理空名子步骤),为线上且系统与 next 不同才计入;按会签方顺序去重。
+// 返回非空 = 下一步(线上)须填写与这些系统的数据互通情况。
+func countersignExitSystems(parties []Party, next string) []string {
+	out := make([]string, 0, len(parties))
+	for _, pt := range parties {
+		if len(pt.SubSteps) == 0 {
+			continue
+		}
+		last := pt.SubSteps[len(pt.SubSteps)-1]
+		if last.Mode != "online" || last.Online.SystemName == "" || last.Online.SystemName == next {
+			continue
+		}
+		if !slices.Contains(out, last.Online.SystemName) {
+			out = append(out, last.Online.SystemName)
+		}
+	}
+	return out
+}
+
+// validateSubSteps 校验会签方内部子步骤的线上/线下属性（与主步骤规则一致）。
+// 系统互通以清理后的相邻子步骤为基准（即上一个已命名子步骤）
 func validateSubSteps(n int, parties []Party) string {
 	for j, party := range parties {
 		who := party.Department

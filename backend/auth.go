@@ -1,6 +1,9 @@
 package main
 
 import (
+	"encoding/json"
+	"io"
+	"log"
 	"net/http"
 	"strings"
 	"sync"
@@ -9,10 +12,11 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
-// sessionData 会话载荷：携带用户名与角色（admin 可访问管理端）
+// sessionData 会话载荷：携带用户名、系统角色与用户 ID（admin 可访问管理端）
 type sessionData struct {
 	Username  string
 	Role      string
+	UserID    string // users.id;环境变量引导的管理员没有用户行,为空
 	ExpiresAt time.Time
 }
 
@@ -27,10 +31,10 @@ func newSessionStore() *sessionStore {
 	return &sessionStore{tokens: make(map[string]sessionData), ttl: 24 * time.Hour}
 }
 
-func (s *sessionStore) create(username, role string) string {
+func (s *sessionStore) create(username, role, userID string) string {
 	token := newID()
 	s.mu.Lock()
-	s.tokens[token] = sessionData{Username: username, Role: role, ExpiresAt: time.Now().Add(s.ttl)}
+	s.tokens[token] = sessionData{Username: username, Role: role, UserID: userID, ExpiresAt: time.Now().Add(s.ttl)}
 	s.mu.Unlock()
 	return token
 }
@@ -54,6 +58,17 @@ func (s *sessionStore) get(token string) *sessionData {
 func (s *sessionStore) revoke(token string) {
 	s.mu.Lock()
 	delete(s.tokens, token)
+	s.mu.Unlock()
+}
+
+// revokeByUsername(F03):账号被删除时吊销其全部存量会话
+func (s *sessionStore) revokeByUsername(username string) {
+	s.mu.Lock()
+	for t, sd := range s.tokens {
+		if sd.Username == username {
+			delete(s.tokens, t)
+		}
+	}
 	s.mu.Unlock()
 }
 
@@ -104,7 +119,7 @@ func handleRegister(st store) http.HandlerFunc {
 			Username string `json:"username"`
 			Password string `json:"password"`
 		}
-		if err := decodeJSON(r, &body); err != nil {
+		if err := decodeJSON(w, r, &body); err != nil {
 			writeError(w, http.StatusBadRequest, "请求数据格式不正确")
 			return
 		}
@@ -141,10 +156,10 @@ func handleRegister(st store) http.HandlerFunc {
 			writeError(w, http.StatusInternalServerError, "注册失败: "+err.Error())
 			return
 		}
-		token := sessions.create(u.Username, u.Role)
+		token := sessions.create(u.Username, u.Role, u.ID)
 		writeJSON(w, http.StatusCreated, map[string]any{
 			"token": token,
-			"user":  map[string]any{"id": u.ID, "username": u.Username, "role": u.Role},
+			"user":  publicUser(u),
 		})
 	}
 }
@@ -153,37 +168,65 @@ func handleRegister(st store) http.HandlerFunc {
 // 未命中注册用户时回退校验环境变量引导管理员（FLOW_ADMIN_USER/PASS）
 func handleLogin(st store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		// S2 登录限流:按 IP+账号,15 分钟 5 次失败锁定
+		ip := clientIP(r)
+		r.Body = http.MaxBytesReader(w, r.Body, 4096) // 登录载荷极小,收紧到 4KB
+		raw, readErr := io.ReadAll(r.Body)
+		if readErr != nil {
+			writeError(w, http.StatusBadRequest, "请求数据过大")
+			return
+		}
 		var body struct {
 			Username string `json:"username"`
 			Password string `json:"password"`
 		}
-		if err := decodeJSON(r, &body); err != nil {
+		if err := json.Unmarshal(raw, &body); err != nil {
 			writeError(w, http.StatusBadRequest, "请求数据格式不正确")
 			return
 		}
 		username := strings.TrimSpace(body.Username)
+		rlKey := "login:" + ip + "|" + username
+		if !loginLimiter.allow(rlKey) {
+			writeError(w, http.StatusTooManyRequests, "尝试次数过多,请 15 分钟后再试")
+			return
+		}
+
+		fail := func(code int, msg string) {
+			loginLimiter.hit(rlKey)
+			loginAccountLimiter.hit("acct:" + username)
+			writeError(w, code, msg)
+		}
 
 		if u, err := st.GetUserByUsername(username); err != nil {
 			writeError(w, http.StatusInternalServerError, "登录失败: "+err.Error())
 			return
 		} else if u != nil {
 			if bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(body.Password)) != nil {
-				writeError(w, http.StatusUnauthorized, "账号或密码错误")
+				fail(http.StatusUnauthorized, "账号或密码错误")
 				return
 			}
 			writeJSON(w, http.StatusOK, map[string]any{
-				"token": sessions.create(u.Username, u.Role),
-				"user":  map[string]any{"id": u.ID, "username": u.Username, "role": u.Role},
+				"token": sessions.create(u.Username, u.Role, u.ID),
+				"user":  publicUser(u),
 			})
 			return
 		}
 
 		// 回退：环境变量引导管理员（系统级账号，非注册用户）
 		envUser, envPass := adminCredentials()
+		if username != envUser {
+			fail(http.StatusUnauthorized, "账号或密码错误")
+			return
+		}
+		if username == envUser && !subtleEqual(body.Password, envPass) {
+			fail(http.StatusUnauthorized, "账号或密码错误")
+			return
+		}
 		if username == envUser && subtleEqual(body.Password, envPass) {
 			writeJSON(w, http.StatusOK, map[string]any{
-				"token": sessions.create(envUser, "admin"),
-				"user":  map[string]any{"id": "", "username": envUser, "role": "admin"},
+				"token": sessions.create(envUser, "admin", ""),
+				"user": map[string]any{"id": "", "username": envUser, "role": "admin",
+					"displayName": envUser, "department": "", "jobRole": ""},
 			})
 			return
 		}
@@ -203,14 +246,30 @@ func handleAuthStatus(st store) http.HandlerFunc {
 	}
 }
 
-// handleMe GET /api/auth/me —— 当前会话身份
-func handleMe(w http.ResponseWriter, r *http.Request) {
-	sd := sessions.get(bearerToken(r))
-	if sd == nil {
-		writeError(w, http.StatusUnauthorized, "未登录或会话已过期")
-		return
+// handleMe GET /api/auth/me —— 当前会话身份(含显示名、部门、岗位)
+func handleMe(st *postgresStore) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		sd := sessions.get(bearerToken(r))
+		if sd == nil {
+			writeError(w, http.StatusUnauthorized, "未登录或会话已过期")
+			return
+		}
+		u := &User{ID: sd.UserID, Username: sd.Username, Role: sd.Role, DisplayName: sd.Username}
+		if sd.UserID != "" {
+			if row, err := st.GetUserByID(sd.UserID); err == nil && row != nil {
+				u = row
+			}
+		}
+		writeJSON(w, http.StatusOK, publicUser(u))
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"username": sd.Username, "role": sd.Role})
+}
+
+// publicUser 对外暴露的用户信息(不含口令散列)
+func publicUser(u *User) map[string]any {
+	return map[string]any{
+		"id": u.ID, "username": u.Username, "role": u.Role,
+		"displayName": displayName(u), "department": u.Department, "jobRole": u.JobRole,
+	}
 }
 
 // handleLogout DELETE /api/auth/session
@@ -248,7 +307,6 @@ func subtleEqual(a, b string) bool {
 	return v == 0
 }
 
-
 // handleAdminCreateUser POST /api/admin/users —— 管理员创建用户（显式角色）
 func handleAdminCreateUser(st store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -256,21 +314,33 @@ func handleAdminCreateUser(st store) http.HandlerFunc {
 			return
 		}
 		var body struct {
-			Username string `json:"username"`
-			Password string `json:"password"`
-			Role     string `json:"role"`
+			Username    string `json:"username"`
+			Password    string `json:"password"`
+			Role        string `json:"role"`
+			DisplayName string `json:"displayName"`
+			Department  string `json:"department"`
+			JobRole     string `json:"jobRole"`
 		}
-		if err := decodeJSON(r, &body); err != nil {
+		if err := decodeJSON(w, r, &body); err != nil {
 			writeError(w, http.StatusBadRequest, "请求数据格式不正确")
 			return
 		}
 		body.Username = strings.TrimSpace(body.Username)
 		body.Role = strings.TrimSpace(body.Role)
+		body.DisplayName, body.Department = trimRunes(body.DisplayName, 32), trimRunes(body.Department, 64)
+		body.JobRole = strings.TrimSpace(body.JobRole)
 		if body.Role == "" {
 			body.Role = "member"
 		}
 		if body.Role != "admin" && body.Role != "member" {
 			writeError(w, http.StatusBadRequest, "角色无效（应为 admin 或 member）")
+			return
+		}
+		if body.JobRole == "" {
+			body.JobRole = RoleHandler
+		}
+		if !validJobRoles[body.JobRole] {
+			writeError(w, http.StatusBadRequest, "岗位无效（应为 CTO、项目经理、经办、开发实施或观察者）")
 			return
 		}
 		if msg := validateCredential(body.Username, body.Password); msg != "" {
@@ -289,7 +359,8 @@ func handleAdminCreateUser(st store) http.HandlerFunc {
 			writeError(w, http.StatusInternalServerError, "密码加密失败")
 			return
 		}
-		u := &User{Username: body.Username, PasswordHash: string(hash), Role: body.Role}
+		u := &User{Username: body.Username, PasswordHash: string(hash), Role: body.Role,
+			DisplayName: body.DisplayName, Department: body.Department, JobRole: body.JobRole}
 		if err := st.CreateUser(u); err != nil {
 			if strings.Contains(err.Error(), "duplicate key") {
 				writeError(w, http.StatusConflict, "用户名已被占用")
@@ -334,12 +405,17 @@ func handleAdminDeleteUser(st store) http.HandlerFunc {
 		}
 		ok, err := st.DeleteUser(id)
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, "删除失败: "+err.Error())
+			log.Printf("[DELETE /api/admin/users] 删除失败: %v", err)
+			writeError(w, http.StatusInternalServerError, "删除失败,请稍后重试")
 			return
 		}
 		if !ok {
 			writeError(w, http.StatusNotFound, "用户不存在或已删除")
 			return
+		}
+		// F03:吊销被删用户全部存量会话(角色快照立即失效)
+		if target != nil {
+			sessions.revokeByUsername(target.Username)
 		}
 		writeJSON(w, http.StatusOK, map[string]bool{"deleted": true})
 	}

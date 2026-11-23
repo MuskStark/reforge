@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ReForge · Liquid Glass — 高保真概念稿总览</title>
+<link rel="stylesheet" href="assets/tokens.css">
+<style>
+  .page { max-width: 1080px; margin: 0 auto; padding: 26px 28px 60px; }
+  .hero { margin: 26px 4px 30px; }
+  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+  @media (max-width: 860px) { .grid { grid-template-columns: repeat(2, 1fr); } }
+  @media (max-width: 560px) { .grid { grid-template-columns: 1fr; } }
+  .shot { display: block; text-decoration: none; color: inherit; padding: 12px; transition: transform .18s ease, box-shadow .18s ease; }
+  .shot:hover { transform: translateY(-3px); }
+  .shot img { width: 100%; height: auto; display: block; border-radius: 14px; box-shadow: 0 8px 24px -12px rgba(23,42,80,.35); border: 0.5px solid rgba(255,255,255,.7); }
+  .shot .t { margin-top: 10px; display: flex; align-items: baseline; gap: 8px; }
+  .shot .t b { font: 600 15px/1.3 var(--font); }
+  .shot .t span { font: 400 12px/1.3 var(--font); color: var(--ink-3); }
+  .no { font: 700 11px/1 var(--font); color: var(--tint-deep); letter-spacing: .1em; }
+  .sys { padding: 20px 22px; margin-top: 34px; }
+  .sys h2 { font: var(--t-title3); margin-bottom: 12px; }
+  .sys dl { display: grid; grid-template-columns: 84px 1fr; gap: 8px 14px; font: var(--t-footnote); }
+  .sys dt { color: var(--ink-3); }
+  .sys dd { color: var(--ink-2); }
+  .sw { display: inline-block; width: 11px; height: 11px; border-radius: 4px; margin-right: 5px; vertical-align: -1px; box-shadow: inset 0 0 0 .5px rgba(0,0,0,.08); }
+</style>
+</head>
+<body>
+<div class="wallpaper" aria-hidden="true">
+  <div class="orb orb-1"></div><div class="orb orb-2"></div>
+  <div class="orb orb-3"></div><div class="orb orb-4"></div>
+  <div class="orb orb-5"></div><div class="orb orb-6"></div>
+</div>
+
+<div class="stage">
+  <div class="page">
+    <header class="topbar lg-clear">
+      <div class="brand">
+        <span class="mark">
+          <svg class="ic" style="font-size:16px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="5" cy="6" r="2.4"/><circle cx="5" cy="18" r="2.4"/><circle cx="19" cy="12" r="2.4"/><path d="M7.3 6.9 16.7 11.1M7.3 17.1 16.7 12.9"/></svg>
+        </span>
+        ReForge · Liquid Glass
+      </div>
+      <div class="spacer"></div>
+      <span class="footnote">高保真概念稿 · 6 屏 · Apple HIG</span>
+    </header>
+
+    <section class="hero large-title">
+      <div class="kicker">Concept · High-Fidelity Mockups</div>
+      <h1>液态玻璃重设计 · 效果图总览</h1>
+      <p class="lede">亮色极光壁纸上悬浮 Regular / Clear 两级玻璃材质;iOS 字阶与控件规格;签名元素「玻璃时间轨」——普通步骤为玻璃圆珠、会签为琥珀菱形。点击任一屏进入可交互预览。</p>
+    </section>
+
+    <div class="grid">
+      <a class="shot lg-card" href="follow-board.html">
+        <img src="shots/follow-board.png" alt="">
+        <div class="t"><span class="no">F1</span><b>跟进看板 + 指派</b><span>改造跟进</span></div>
+      </a>
+      <a class="shot lg-card" href="follow-detail.html">
+        <img src="shots/follow-detail.png" alt="">
+        <div class="t"><span class="no">F2</span><b>跟进详情</b><span>阶段 + 动态</span></div>
+      </a>
+      <a class="shot lg-card" href="chart-editor.html">
+        <img src="shots/chart-editor.png" alt="">
+        <div class="t"><span class="no">F3</span><b>流程图编辑器</b><span>画布 + 检查器</span></div>
+      </a>
+      <a class="shot lg-card" href="monitor-screen.html">
+        <img src="shots/monitor-screen.png?v=p1" alt="">
+        <div class="t"><span class="no">F4</span><b>监控大屏 · 一期</b><span>三个核心数</span></div>
+      </a>
+      <a class="shot lg-card" href="monitor-full.html">
+        <img src="shots/monitor-full.png?v=full" alt="">
+        <div class="t"><span class="no">F5</span><b>监控大屏 · 完整</b><span>P3 全维度</span></div>
+      </a>
+      <a class="shot lg-card" href="home.html">
+        <img src="shots/01-home-desktop.png" alt="">
+        <div class="t"><span class="no">01</span><b>首页 / 流程编辑器</b><span>桌面 1440</span></div>
+      </a>
+      <a class="shot lg-card" href="countersign.html">
+        <img src="shots/02-countersign-desktop.png" alt="">
+        <div class="t"><span class="no">02</span><b>会签编辑器</b><span>展开态</span></div>
+      </a>
+      <a class="shot lg-card" href="chart.html">
+        <img src="shots/03-chart-modal.png" alt="">
+        <div class="t"><span class="no">03</span><b>流程图弹窗</b><span>Sheet</span></div>
+      </a>
+      <a class="shot lg-card" href="mobile.html">
+        <img src="shots/04-mobile.png" alt="">
+        <div class="t"><span class="no">04</span><b>移动端</b><span>393 × 852</span></div>
+      </a>
+      <a class="shot lg-card" href="admin.html">
+        <img src="shots/05-admin.png" alt="">
+        <div class="t"><span class="no">05</span><b>管理后台</b><span>流程管理</span></div>
+      </a>
+      <a class="shot lg-card" href="login.html">
+        <img src="shots/06-login.png" alt="">
+        <div class="t"><span class="no">06</span><b>后台登录</b><span>玻璃卡片</span></div>
+      </a>
+    </div>
+
+    <section class="sys lg-card">
+      <h2>设计系统速览</h2>
+      <dl>
+        <dt>材质</dt><dd>Regular 玻璃(卡片):白 60%→38% + blur(28px) saturate(200%) + 镜面高光边 + 深柔影;Clear 玻璃(顶栏/Dock):白 50%→36% + blur(22px)</dd>
+        <dt>色彩</dt><dd>
+          <span class="sw" style="background:#0071e3"></span>操作蓝 #0071E3 ·
+          <span class="sw" style="background:#ff9500"></span>会签琥珀 #FF9500 ·
+          <span class="sw" style="background:#34c759"></span>就绪绿 #34C759 ·
+          <span class="sw" style="background:#5856d6"></span>依赖靛 #5856D6 ·
+          <span class="sw" style="background:#ff3b30"></span>缺失红 #FF3B30(Apple 系统色)</dd>
+        <dt>字体</dt><dd>SF Pro + PingFang SC(系统栈);iOS 字阶:大标题 34 / Title2 22 / 正文 17 / 脚注 13;表格数字</dd>
+        <dt>控件</dt><dd>iOS 分段控件(处理方式/是/否)、开关(会签)、44pt 输入、胶囊主按钮、分组列表行、44pt 触摸目标</dd>
+        <dt>签名元素</dt><dd>玻璃时间轨:步骤序号 = 轨道玻璃珠,会签 = 琥珀玻璃菱形;移动端底部悬浮玻璃操作 Dock</dd>
+        <dt>语义延续</dt><dd>沿用现行图例:蓝 = 线上、绿 = 线下、琥珀 = 会签、虚线箭头 = 前置依赖</dd>
+      </dl>
+    </section>
+  </div>
+</div>
+</body>
+</html>

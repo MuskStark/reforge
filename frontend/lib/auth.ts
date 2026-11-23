@@ -4,9 +4,18 @@
 const TOKEN_KEY = "flow.admin.token";
 const USER_KEY = "flow.admin.user";
 
+import type { JobRole } from "@/lib/types";
+
 export interface SessionUser {
+  /** users.id;环境变量引导的管理员为空字符串 */
+  id: string;
   username: string;
+  /** 系统角色:只决定能否进管理后台 */
   role: "admin" | "member";
+  displayName: string;
+  department: string;
+  /** 全局岗位;引导管理员为空字符串 */
+  jobRole: JobRole | "";
 }
 
 export function getToken(): string | null {
@@ -48,6 +57,8 @@ export async function authFetch<T>(path: string, init?: RequestInit): Promise<T>
   });
   if (res.status === 401) {
     clearSession();
+    // 通知应用外壳:会话已失效,回到登录页
+    if (typeof window !== "undefined") window.dispatchEvent(new Event("reforge:unauthorized"));
     throw new Error("UNAUTHORIZED");
   }
   const data = await res.json();
@@ -59,3 +70,56 @@ export async function authFetch<T>(path: string, init?: RequestInit): Promise<T>
 
 // 兼容既有引用（管理端数据请求）
 export const adminFetch = authFetch;
+
+/**
+ * 携带 Bearer 令牌下载文件（导出用；<a href> 带不了令牌）。
+ * 返回文件名（取自 Content-Disposition，没有就退回 fallback）。
+ */
+export async function authFetchBlob(path: string, init: RequestInit, fallbackName: string): Promise<{ blob: Blob; filename: string }> {
+  const token = getToken();
+  const res = await fetch(path, {
+    ...init,
+    headers: {
+      ...(init.body ? { "Content-Type": "application/json" } : {}),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...init?.headers,
+    },
+  });
+  if (res.status === 401) {
+    clearSession();
+    if (typeof window !== "undefined") window.dispatchEvent(new Event("reforge:unauthorized"));
+    throw new Error("UNAUTHORIZED");
+  }
+  if (!res.ok) {
+    let msg = "请求失败";
+    try {
+      msg = ((await res.json()) as { error?: string })?.error ?? msg;
+    } catch {
+      /* 非 JSON 错误体 */
+    }
+    throw new Error(msg);
+  }
+  const disposition = res.headers.get("Content-Disposition") ?? "";
+  const star = /filename\*=UTF-8''([^;]+)/i.exec(disposition);
+  const plain = /filename="([^"]+)"/i.exec(disposition);
+  let filename = fallbackName;
+  try {
+    if (star) filename = decodeURIComponent(star[1]);
+    else if (plain) filename = plain[1];
+  } catch {
+    /* 文件名解码失败就用兜底名 */
+  }
+  return { blob: await res.blob(), filename };
+}
+
+/** 把 Blob 存成本地文件 */
+export function saveBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}

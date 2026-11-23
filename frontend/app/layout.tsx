@@ -1,11 +1,10 @@
 import type { Metadata, Viewport } from "next";
-// 字体自托管（fontsource 包，构建/运行零外网请求，中国环境友好）
+// 字体自托管（fontsource，构建/运行零外网请求，中国环境友好）
+// Apple 设备上 --font-sans 优先命中 SF Pro + PingFang SC，Inter 作为非苹果平台回退
 import "@fontsource/inter/400.css";
 import "@fontsource/inter/500.css";
 import "@fontsource/inter/600.css";
 import "@fontsource/inter/700.css";
-import "@fontsource/space-grotesk/500.css";
-import "@fontsource/space-grotesk/700.css";
 import "@fontsource/jetbrains-mono/400.css";
 import "@fontsource/jetbrains-mono/600.css";
 import { AppToaster } from "@/components/app-toaster";
@@ -15,11 +14,11 @@ export const metadata: Metadata = {
   title: "流程再造工程收集表 — ReForge",
   description:
     "流程再造工程收集表：自定义流程步骤与会签（内部可含多步），标注线上/线下办理，多人协作推进流程再造。",
-  // iOS（含 iPhone Duo）：数字不被识别为电话号；添加到主屏幕时独立窗口 + 黑色状态栏融合暗色主题
+  // iOS（含 iPhone Duo）：数字不被识别为电话号；添加到主屏幕时独立窗口
   formatDetection: { telephone: false },
   appleWebApp: {
     capable: true,
-    statusBarStyle: "black-translucent",
+    statusBarStyle: "default",
     title: "流程再造工程收集表",
   },
 };
@@ -33,14 +32,14 @@ export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
   viewportFit: "cover",
-  themeColor: "#06090F",
+  themeColor: "#EEF0F4",
 };
 
 export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="zh-CN" className="dark">
+    <html lang="zh-CN">
       <body className="font-sans">
         {children}
         <AppToaster />

@@ -1,83 +1,99 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import Link from "next/link";
 import { ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
-import { LiquidGlass } from "@/components/ui/liquid-glass";
-import { Meteors } from "@/components/ui/meteors";
-import { ShootingStars } from "@/components/ui/shooting-stars";
-import { StarsBackground } from "@/components/ui/stars-background";
 import { FlowBuilder } from "@/components/flow-builder";
 import { FlowChartModal, type ChartSource } from "@/components/flow-chart";
+import { stepIssues } from "@/lib/step-checks";
 import { emptyProcess } from "@/lib/types";
+
+/** 品牌图形:分叉汇聚的流程节点(与 app icon 同构) */
+function BrandMark({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.2"
+      strokeLinecap="round"
+      aria-hidden="true"
+    >
+      <circle cx="5" cy="6" r="2.4" />
+      <circle cx="5" cy="18" r="2.4" />
+      <circle cx="19" cy="12" r="2.4" />
+      <path d="M7.3 6.9 16.7 11.1M7.3 17.1 16.7 12.9" />
+    </svg>
+  );
+}
 
 export default function Home() {
   const [draft, setDraft] = useState(emptyProcess);
   const [chart, setChart] = useState<ChartSource | null>(null);
-  // 官方 Meteors 内部使用 Math.random()，SSR/CSR 不一致；
-  // 挂载后再渲染以避免 hydration mismatch（不改动官方组件源码）
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
+
+  const countersignCount = draft.steps.filter((s) => s.countersign).length;
+  const readyCount = draft.steps.filter((s, i) => stepIssues(s, draft.steps[i - 1]).length === 0).length;
 
   return (
-    <main className="dvh-fill relative w-full overflow-x-clip bg-black">
+    <main className="dvh-fill relative w-full overflow-x-clip">
+      {/* 环境光场:亮色极光(fixed,为玻璃提供可折射的色彩) */}
       <div className="ambient-field" aria-hidden="true" />
-      {mounted && (
-        <>
-          <StarsBackground className="z-0" />
-          <ShootingStars className="z-0" />
-        </>
-      )}
 
-      <div className="fold-aware safe-viewport relative z-10 mx-auto w-full max-w-4xl py-10 sm:py-14">
-        {/* 标题区：工程标头 */}
-        <header className="relative mb-8 sm:mb-10">
-          <LiquidGlass radius={28} bevelDepth={12} scale={36} aberration={3} frost={0.5} tint={0.1}>
-          <div className="relative overflow-hidden rounded-[28px] p-6 sm:p-8">
-          {mounted && <Meteors number={5} />}
-          <div className="relative flex flex-wrap items-end justify-between gap-x-8 gap-y-4">
-            <div>
-              <p className="eyebrow text-[11px] text-cyan-300/80">
-                ReForge / 流程再造工程收集表
-              </p>
-              <p className="mt-2 max-w-xl text-sm leading-relaxed text-[color:var(--flow-muted)]">
-                ① 填写流程名称与申报人；② 依次添加步骤，选「线上系统」或「线下办理」并补全信息，
-                需多方并行签署时打开会签开关；③ 点「一键生成流程图」预览；
-                ④ 点「提交流程」，由管理员在
-                <Link
-                  href="/admin"
-                  className="mx-0.5 inline-flex items-center gap-0.5 text-cyan-300 transition hover:text-cyan-200"
-                >
-                  <ShieldCheck className="h-3.5 w-3.5" /> 管理后台
-                </Link>
-                统一查看。
-              </p>
-            </div>
-            <div className="flex shrink-0 flex-col items-end gap-3">
-              <dl className="font-data space-y-1.5 border-l border-white/10 pl-5 text-right text-xs text-[color:var(--flow-muted)] sm:pl-6">
-                <div className="flex items-center justify-end gap-2">
-                  <dt>步骤</dt>
-                  <dd className="text-base text-cyan-300">{draft.steps.length}</dd>
-                </div>
-                <div className="flex items-center justify-end gap-2">
-                  <dt>会签</dt>
-                  <dd className="text-base text-amber-300">
-                    {draft.steps.filter((s) => s.countersign).length}
-                  </dd>
-                </div>
-              </dl>
-              <Link
-                href="/admin"
-                className="inline-flex items-center gap-1.5 rounded-full border border-white/15 px-4 py-1.5 text-xs text-neutral-300 transition hover:border-cyan-400/40 hover:text-cyan-200"
-              >
-                <ShieldCheck className="h-3.5 w-3.5" /> 管理后台登录
-              </Link>
-            </div>
+      <div className="safe-viewport fold-aware relative z-10 mx-auto w-full max-w-4xl px-4 pb-2 pt-3 sm:px-6 sm:pt-5">
+        {/* 顶栏:悬浮 Clear 玻璃 */}
+        <header className="lg-clear sticky top-2.5 z-40 mb-2 flex h-[54px] items-center gap-3.5 px-2.5 pr-1.5">
+          <div className="flex items-center gap-2.5">
+            <span
+              className="grid h-7 w-7 place-items-center rounded-[8px] text-white"
+              style={{
+                background: "linear-gradient(180deg, #2b95ff, #0071e3)",
+                boxShadow:
+                  "inset 0 1px 0 rgba(255,255,255,0.35), 0 3px 8px -3px rgba(0,113,227,0.6)",
+              }}
+            >
+              <BrandMark className="h-4 w-4" />
+            </span>
+            <span className="text-[17px] font-semibold tracking-[-0.02em]">ReForge</span>
           </div>
-          </div>
-          </LiquidGlass>
+          <div className="flex-1" />
+          <Link
+            href="/admin"
+            className="inline-flex h-9 items-center gap-1.5 rounded-full px-3.5 text-sm font-semibold text-[color:var(--tint)] transition hover:bg-[color:var(--tint-soft)]"
+          >
+            <ShieldCheck className="h-4 w-4" />
+            管理后台
+          </Link>
         </header>
+
+        {/* 大标题区(iOS Large Title) */}
+        <section className="mb-6 mt-4 flex flex-wrap items-end justify-between gap-x-6 gap-y-4 sm:mt-6">
+          <div className="min-w-0">
+            <p className="eyebrow mb-1.5 text-[11px] text-[color:var(--tint-deep)]">
+              ReForge · Process Reengineering
+            </p>
+            <h1 className="text-[30px] font-bold leading-[1.15] tracking-[-0.022em] text-neutral-900 sm:text-[34px]">
+              流程再造工程收集表
+            </h1>
+            <p className="mt-2 max-w-xl text-sm leading-relaxed text-[color:var(--ink-2)]">
+              沿时间轨逐步描述线上与线下环节;需要多方并行签署时打开会签。
+              完成后一键生成流程图,提交至管理后台统一查看。
+            </p>
+          </div>
+          {/* 统计玻璃小牌 */}
+          <div className="flex shrink-0 gap-2">
+            <span className="lg-chip inline-flex items-baseline gap-1.5 px-3.5 py-1.5 text-[13px] text-[color:var(--ink-2)]">
+              步骤 <b className="font-data text-[17px] font-semibold leading-none text-neutral-900">{draft.steps.length}</b>
+            </span>
+            <span className="lg-chip inline-flex items-baseline gap-1.5 px-3.5 py-1.5 text-[13px] text-[color:var(--ink-2)]">
+              会签 <b className="font-data text-[17px] font-semibold leading-none text-[color:var(--amber-deep)]">{countersignCount}</b>
+            </span>
+            <span className="lg-chip hidden items-baseline gap-1.5 px-3.5 py-1.5 text-[13px] text-[color:var(--ink-2)] sm:inline-flex">
+              就绪 <b className="font-data text-[17px] font-semibold leading-none text-[color:var(--tint-deep)]">{readyCount}/{draft.steps.length}</b>
+            </span>
+          </div>
+        </section>
 
         <FlowBuilder
           value={draft}

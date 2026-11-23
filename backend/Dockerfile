@@ -1,7 +1,9 @@
 # syntax=docker/dockerfile:1
 # ReForge 后端：Go 多阶段构建（中国镜像加速，可用 --build-arg 覆盖）
 
-FROM golang:1.27-alpine AS builder
+ARG GOLANG_IMAGE=golang:1.27-alpine
+ARG ALPINE_IMAGE=alpine:3.20
+FROM ${GOLANG_IMAGE} AS builder
 ARG GOPROXY=https://goproxy.cn,direct
 # Alpine 镜像源（清华 TUNA，中国加速；海外可传入官方源覆盖）
 ARG ALPINE_MIRROR=mirrors.tuna.tsinghua.edu.cn
@@ -16,7 +18,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     go build -ldflags="-s -w" -o /out/flow-backend .
 
-FROM alpine:3.20
+FROM ${ALPINE_IMAGE}
 ARG ALPINE_MIRROR=mirrors.tuna.tsinghua.edu.cn
 RUN sed -i "s/dl-cdn.alpinelinux.org/${ALPINE_MIRROR}/g" /etc/apk/repositories \
   && apk add --no-cache ca-certificates tzdata wget \

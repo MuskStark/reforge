@@ -2,14 +2,12 @@
 
 import { useCallback, useEffect, useState } from "react";
 import {
-  ArrowDownWideNarrow,
-  ChevronRight,
   Eye,
   FileSignature,
   Globe,
   Hourglass,
-  Inbox,
   MapPin,
+  Search,
   Smartphone,
   Trash2,
   User,
@@ -17,13 +15,17 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { Modal, ModalBody, ModalContent, ModalTrigger } from "@/components/ui/animated-modal";
-import { HoverBorderGradient } from "@/components/ui/hover-border-gradient";
-import { PlaceholdersAndVanishInput } from "@/components/ui/placeholders-and-vanish-input";
+import { Dialog, DialogActions, DialogHeader } from "@/components/ui/dialog";
+import { CountersignModeBadge } from "@/components/countersign-mode-badge";
+import { countersignMode } from "@/lib/step-checks";
 import type { FlowProcess } from "@/lib/types";
 import { adminFetch } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 
-/** 后台管理：已收集流程的查看 / 流程图 / 删除（全部走受保护的管理端 API） */
+/**
+ * 后台管理(液态玻璃):已收集流程的查看 / 流程图 / 删除(全部走受保护的管理端 API)。
+ * 删除会连同流程项目及其全部记录一起删(见后端 postgresStore.Delete),所以必须先确认。
+ */
 export function ProcessManager({
   onLogout,
   onPreviewChart,
@@ -34,6 +36,8 @@ export function ProcessManager({
   const [processes, setProcesses] = useState<FlowProcess[]>([]);
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(true);
+  const [askRemove, setAskRemove] = useState<FlowProcess | null>(null);
+  const [removing, setRemoving] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -54,9 +58,11 @@ export function ProcessManager({
   }, [load]);
 
   const remove = async (p: FlowProcess) => {
+    setRemoving(true);
     try {
       await adminFetch(`/api/admin/processes/${p.id}`, { method: "DELETE" });
-      toast.success("已删除", { description: `「${p.name}」已删除` });
+      toast.success("已删除", { description: `「${p.name}」及其流程项目已删除` });
+      setAskRemove(null);
       void load();
     } catch (e) {
       if (e instanceof Error && e.message === "UNAUTHORIZED") {
@@ -64,138 +70,148 @@ export function ProcessManager({
         return;
       }
       toast.error("删除失败", { description: "请稍后重试" });
+    } finally {
+      setRemoving(false);
     }
   };
 
+  const filtered = processes.filter(
+    (p) =>
+      !query.trim() ||
+      p.name.includes(query.trim()) ||
+      (p.applicant ?? "").includes(query.trim()),
+  );
+
   return (
-    <section className="mt-10">
-      <h2 className="mb-4 flex items-center gap-2 text-base font-semibold text-white">
-        <Inbox className="h-4 w-4 text-neutral-400" />
-        流程管理
-        <span className="rounded-full bg-white/10 px-2 py-0.5 text-xs font-normal text-neutral-300">
-          {loading ? "…" : processes.length}
+    <section>
+      <div className="mb-3.5 flex flex-wrap items-center gap-3">
+        <h2 className="text-[22px] font-bold tracking-[-0.02em]">流程管理</h2>
+        <span className="badge badge-plain">
+          {loading ? "…" : `${processes.length} 条`}
         </span>
-      </h2>
+        <div className="relative ml-auto w-full sm:w-72">
+          <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-[color:var(--ink-3)]" />
+          <input
+            className="field pl-10"
+            placeholder="搜索流程名称、申报人"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            aria-label="搜索流程"
+          />
+        </div>
+      </div>
 
       {!loading && processes.length === 0 && (
-        <p className="rounded-2xl border border-dashed border-white/10 px-4 py-8 text-center text-sm text-neutral-500">
+        <p className="glass-card px-5 py-10 text-center text-sm text-[color:var(--ink-3)]">
           暂无数据，提交第一个流程后在此展示
         </p>
       )}
 
-      {/* 官方 PlaceholdersAndVanishInput：占位轮播搜索框 */}
-      <div className="mb-4 flex justify-center">
-        <PlaceholdersAndVanishInput
-          placeholders={["搜索流程名称…", "按申报人筛选…", "查看已收集的流程"]}
-          onChange={(e) => setQuery(e.target.value)}
-          onSubmit={(e) => e.preventDefault()}
-        />
-      </div>
-
-      <div className="grid gap-3 sm:grid-cols-2">
-        {processes
-          .filter((p) =>
-            !query.trim() ||
-            p.name.includes(query.trim()) ||
-            (p.applicant ?? "").includes(query.trim()),
-          )
-          .map((p) => (
+      <div className="glass-card space-y-0.5 p-1.5">
+        {filtered.map((p) => {
+          const countersignN = p.steps.filter((s) => s.countersign).length;
+          const waitForN = p.steps.filter((s) => s.waitFor?.stepId).length;
+          return (
           <Modal key={p.id}>
-          <div className="glass-card flex flex-col justify-between gap-3 p-4 transition-colors hover:border-cyan-400/40 hover:shadow-[0_0_24px_-10px_rgba(34,211,238,0.35)]">
-            <div>
-              <div className="flex items-center gap-2">
-                <ArrowDownWideNarrow className="h-4 w-4 shrink-0 text-cyan-300" />
-                <p className="truncate text-sm font-medium text-white">{p.name}</p>
+          <div className="group flex items-center gap-3.5 rounded-[18px] px-3.5 py-3.5 transition-colors hover:bg-white/45 sm:px-4">
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <p className="truncate text-[16px] font-semibold text-neutral-900">{p.name}</p>
+                {countersignN > 0 && (
+                  <span className="badge badge-amber !h-[20px]"><span className="dot" />会签 {countersignN}</span>
+                )}
               </div>
-              {p.description && (
-                <p className="mt-1 line-clamp-1 text-xs text-neutral-500">{p.description}</p>
-              )}
-              <div className="mt-2 flex flex-wrap gap-1.5 text-[11px] text-neutral-400">
-                <span className="rounded-full bg-white/5 px-2 py-0.5">
-                  {p.steps.length} 个步骤
-                </span>
-                <span className="rounded-full bg-white/5 px-2 py-0.5">
-                  {p.steps.filter((s) => s.countersign).length} 处会签
-                </span>
-                <span className="rounded-full bg-white/5 px-2 py-0.5">
-                  {p.steps.filter((s) => s.mode === "online").length} 线上 ·{" "}
-                  {p.steps.filter((s) => s.mode === "offline").length} 线下
-                </span>
+              <div className="font-data mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-[color:var(--ink-2)]">
+                <span>{p.steps.length} 个步骤</span>
+                {waitForN > 0 && <span>前置依赖 {waitForN} 项</span>}
+                <span>{new Date(p.updatedAt ?? p.createdAt).toLocaleString("zh-CN")}</span>
               </div>
             </div>
-            <div className="flex items-center justify-between">
-              <span className="font-data text-[11px] text-[color:var(--flow-muted)]">
-                {new Date(p.createdAt).toLocaleString("zh-CN")}
-              </span>
-              <div className="flex gap-1 sm:gap-1">
-                <ModalTrigger className="inline-flex items-center gap-1 whitespace-nowrap rounded-md px-3 py-2.5 text-xs text-neutral-300 transition hover:bg-white/10 hover:text-white sm:px-2 sm:py-1">
-                  <Eye className="h-3.5 w-3.5" /> 详情
-                </ModalTrigger>
-                <button
-                  type="button"
-                  onClick={() => onPreviewChart(p)}
-                  className="inline-flex items-center gap-1 whitespace-nowrap rounded-md px-3 py-2.5 text-xs text-cyan-300 transition hover:bg-cyan-500/10 hover:text-cyan-200 sm:px-2 sm:py-1"
-                >
-                  <Waypoints className="h-3.5 w-3.5" /> 流程图
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void remove(p)}
-                  className="inline-flex items-center gap-1 whitespace-nowrap rounded-md px-3 py-2.5 text-xs text-neutral-500 transition hover:bg-red-500/10 hover:text-red-400 sm:px-2 sm:py-1"
-                >
-                  <Trash2 className="h-3.5 w-3.5" /> 删除
-                </button>
-              </div>
+            {/* 申报人头像 */}
+            <span
+              aria-hidden="true"
+              className="hidden h-[38px] w-[38px] shrink-0 place-items-center rounded-full text-[13px] font-semibold sm:grid"
+              style={{ background: "linear-gradient(180deg,#b8ccff,#9db4ff)", color: "#21407a" }}
+              title={p.applicant ? `申报人:${p.applicant}` : undefined}
+            >
+              {(p.applicant || p.name || "?").slice(0, 1)}
+            </span>
+            <div className="flex shrink-0 items-center gap-0.5">
+              <ModalTrigger
+                className="!h-11 !w-11 !p-0 sm:!h-9 sm:!w-9"
+                aria-label={`查看 ${p.name} 详情`}
+              >
+                <Eye className="mx-auto h-4 w-4 text-[color:var(--ink-2)] group-hover:text-neutral-900" />
+              </ModalTrigger>
+              <button
+                type="button"
+                onClick={() => onPreviewChart(p)}
+                className="icon-btn !h-11 !w-11 sm:!h-9 sm:!w-9"
+                aria-label={`查看 ${p.name} 流程图`}
+                title="流程图"
+              >
+                <Waypoints className="h-4 w-4" />
+              </button>
+              <button
+                type="button"
+                onClick={() => setAskRemove(p)}
+                className="icon-btn icon-danger !h-11 !w-11 sm:!h-9 sm:!w-9"
+                aria-label={`删除 ${p.name}`}
+                title="删除"
+              >
+                <Trash2 className="h-4 w-4" />
+              </button>
             </div>
           </div>
-          <ModalBody className="md:max-w-2xl rounded-[24px] bg-transparent dark:bg-zinc-950/60 backdrop-blur-2xl shadow-2xl">
+          <ModalBody className="md:max-w-2xl">
           <ModalContent className="p-4 md:p-6">
           <div className="space-y-5">
             <div>
-              <h3 className="font-display text-lg font-semibold text-white pr-8">{p.name}</h3>
+              <h3 className="pr-8 text-[19px] font-bold tracking-[-0.02em]">{p.name}</h3>
               {p.description && (
-                <p className="mt-1 text-sm text-neutral-400">{p.description}</p>
+                <p className="mt-1 text-sm text-[color:var(--ink-2)]">{p.description}</p>
               )}
               {p.applicant && (
-                <p className="mt-2 inline-flex items-center gap-1 text-xs text-neutral-500">
+                <p className="mt-2 inline-flex items-center gap-1 text-xs text-[color:var(--ink-2)]">
                   <User className="h-3 w-3" /> 申报人：{p.applicant}
                 </p>
               )}
             </div>
 
-            <ol className="space-y-4">
+            <ol className="space-y-3">
               {p.steps.map((s, i) => (
-                <li key={s.id} className="relative rounded-xl border border-white/10 bg-black/40 p-4">
+                <li key={s.id} className="rounded-2xl bg-white/55 p-4 shadow-[inset_0_0_0_0.5px_rgba(255,255,255,0.65),inset_0_0_0_0.5px_rgba(0,0,0,0.04)]">
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="font-data flex h-6 w-6 items-center justify-center rounded-full border border-cyan-400/40 bg-cyan-500/10 text-xs font-semibold text-cyan-300">
-                      {i + 1}
-                    </span>
-                    <span className="text-sm font-medium text-white">{s.name}</span>
                     <span
                       className={cn(
-                        "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px]",
-                        s.mode === "online"
-                          ? "bg-sky-500/15 text-sky-300"
-                          : "bg-emerald-500/15 text-emerald-300",
+                        "font-data flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold",
+                        s.countersign
+                          ? "rotate-45 bg-[color:var(--amber-soft)] text-[color:var(--amber-deep)]"
+                          : "bg-[color:var(--tint-soft)] text-[color:var(--tint-deep)]",
                       )}
                     >
-                      {s.mode === "online" ? (
-                        <Globe className="h-3 w-3" />
-                      ) : (
-                        <MapPin className="h-3 w-3" />
-                      )}
-                      {s.mode === "online" ? "线上处理" : "线下处理"}
+                      <span className={s.countersign ? "-rotate-45" : undefined}>{i + 1}</span>
                     </span>
+                    <span className="text-sm font-semibold text-neutral-900">{s.name}</span>
+                    {/* 办理方式:普通步骤读自身 mode;会签读由各方内部子步骤汇总的整体办理方式 */}
+                    {s.countersign ? (
+                      <CountersignModeBadge mode={countersignMode(s)} className="!h-[20px]" />
+                    ) : (
+                      <span className={cn("badge !h-[20px]", s.mode === "online" ? "badge-blue" : "badge-green")}>
+                        {s.mode === "online" ? <Globe className="h-3 w-3" /> : <MapPin className="h-3 w-3" />}
+                        {s.mode === "online" ? "线上处理" : "线下处理"}
+                      </span>
+                    )}
                     {s.countersign && (
-                      <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-[11px] text-amber-300">
+                      <span className="badge badge-amber !h-[20px]">
                         <FileSignature className="h-3 w-3" /> 会签
                       </span>
                     )}
                   </div>
 
-                  <div className="mt-3 space-y-2 text-xs text-neutral-300">
+                  <div className="mt-3 space-y-2 text-xs text-neutral-700">
                     {s.waitFor?.stepId && (
-                      <p className="inline-flex items-center gap-1 text-sky-300">
+                      <p className="inline-flex items-center gap-1 text-[color:var(--indigo-deep)]">
                         <Hourglass className="h-3 w-3" />
                         前置条件：等待「
                         {p.steps.find((x) => x.id === s.waitFor!.stepId)?.name ?? "?"}」
@@ -213,7 +229,7 @@ export function ProcessManager({
                       <>
                         <p>
                           处理系统：
-                          <span className="ml-1 rounded bg-white/5 px-1.5 py-0.5 text-neutral-100">
+                          <span className="ml-1 rounded-lg bg-white/80 px-1.5 py-0.5 shadow-[inset_0_0_0_0.5px_rgba(0,0,0,0.06)]">
                             {s.online.systemName}
                           </span>
                         </p>
@@ -221,12 +237,12 @@ export function ProcessManager({
                           移动端：
                           <span
                             className={cn(
-                              "ml-1 rounded px-1.5 py-0.5",
+                              "ml-1 rounded-lg px-1.5 py-0.5 font-medium",
                               s.online.mobileSupported
-                                ? "bg-emerald-500/15 text-emerald-300"
+                                ? "bg-[color:var(--green-soft)] text-[color:var(--green-deep)]"
                                 : s.online.mobileSupported === false
-                                  ? "bg-white/5 text-neutral-500"
-                                  : "bg-amber-500/15 text-amber-300",
+                                  ? "bg-[rgba(120,120,128,0.12)] text-[color:var(--ink-2)]"
+                                  : "bg-[color:var(--amber-soft)] text-[color:var(--amber-deep)]",
                             )}
                           >
                             {s.online.mobileSupported
@@ -236,7 +252,7 @@ export function ProcessManager({
                                 : "未选择"}
                           </span>
                           {s.online.mobileSupported && (
-                            <Smartphone className="h-3.5 w-3.5 text-emerald-300" />
+                            <Smartphone className="h-3.5 w-3.5 text-[color:var(--green)]" />
                           )}
                         </p>
                         {s.online.dataInteroperable != null && (
@@ -244,10 +260,10 @@ export function ProcessManager({
                             与上步系统数据互通：
                             <span
                               className={cn(
-                                "ml-1 rounded px-1.5 py-0.5",
+                                "ml-1 rounded-lg px-1.5 py-0.5 font-medium",
                                 s.online.dataInteroperable
-                                  ? "bg-emerald-500/15 text-emerald-300"
-                                  : "bg-red-500/15 text-red-300",
+                                  ? "bg-[color:var(--green-soft)] text-[color:var(--green-deep)]"
+                                  : "bg-[color:var(--red-soft)] text-[color:var(--red-deep)]",
                               )}
                             >
                               {s.online.dataInteroperable ? "互通" : "不互通"}
@@ -263,24 +279,24 @@ export function ProcessManager({
                             s.offline.documents.map((d) => (
                               <span
                                 key={d}
-                                className="ml-1 inline-block rounded bg-white/5 px-1.5 py-0.5 text-neutral-100"
+                                className="ml-1 inline-block rounded-lg bg-white/80 px-1.5 py-0.5 shadow-[inset_0_0_0_0.5px_rgba(0,0,0,0.06)]"
                               >
                                 {d}
                               </span>
                             ))
                           ) : (
-                            <span className="ml-1 text-neutral-500">无</span>
+                            <span className="ml-1 text-[color:var(--ink-3)]">无</span>
                           )}
                         </p>
                         <div>
-                          <p className="text-neutral-500">经办部门及人员：</p>
+                          <p className="text-[color:var(--ink-3)]">经办部门及人员：</p>
                           <ul className="mt-1 space-y-1">
                             {s.offline.handlers.map((h, j) => (
                               <li key={j}>
-                                <span className="rounded bg-white/5 px-1.5 py-0.5 text-neutral-100">
+                                <span className="rounded-lg bg-white/80 px-1.5 py-0.5 shadow-[inset_0_0_0_0.5px_rgba(0,0,0,0.06)]">
                                   {h.department || "未填写部门"}
                                 </span>
-                                <span className="ml-2 text-neutral-400">
+                                <span className="ml-2 text-[color:var(--ink-2)]">
                                   {h.staff.join("、") || "—"}
                                 </span>
                               </li>
@@ -291,14 +307,14 @@ export function ProcessManager({
                     ))}
                     {s.countersign && (
                       <div>
-                        <p className="text-amber-300/80">会签方（并行）：</p>
+                        <p className="font-medium text-[color:var(--amber-deep)]">会签方（并行）：</p>
                         <ul className="mt-1 space-y-1.5">
                           {(s.parties ?? []).map((h, j) => (
                             <li key={j}>
-                              <span className="rounded bg-amber-400/10 px-1.5 py-0.5 text-amber-100">
+                              <span className="rounded-lg bg-[color:var(--amber-soft)] px-1.5 py-0.5 font-medium text-[color:var(--amber-deep)]">
                                 {h.department || "未填写部门"}
                               </span>
-                              <span className="ml-2 text-neutral-400">
+                              <span className="ml-2 text-[color:var(--ink-2)]">
                                 {h.staff?.join("、") || "—"}
                               </span>
                               {(h.subSteps ?? []).filter((x) => x?.name).length > 0 && (
@@ -306,17 +322,15 @@ export function ProcessManager({
                                   {h.subSteps
                                     .filter((x) => x?.name)
                                     .map((x, k) => (
-                                      <div key={x.id ?? k} className="flex items-start gap-1">
-                                        <ChevronRight className="mt-1 h-3 w-3 shrink-0 text-neutral-600" />
-                                        <span className="text-neutral-200">
-                                          {k + 1}. {x.name}
-                                        </span>
+                                      <div key={x.id ?? k} className="flex flex-wrap items-start gap-1">
+                                        <span className="text-[color:var(--amber-deep)]">{k + 1}.</span>
+                                        <span className="text-neutral-800">{x.name}</span>
                                         <span
                                           className={cn(
-                                            "ml-1 rounded px-1.5 py-0.5 text-[10px]",
+                                            "badge !h-[18px] !px-1.5 text-[10px]",
                                             (x.mode ?? "online") === "online"
-                                              ? "bg-sky-500/15 text-sky-300"
-                                              : "bg-emerald-500/15 text-emerald-300",
+                                              ? "badge-blue"
+                                              : "badge-green",
                                           )}
                                         >
                                           {(x.mode ?? "online") === "online"
@@ -345,19 +359,36 @@ export function ProcessManager({
                         </ul>
                       </div>
                     )}
-                    {s.remark && <p className="text-neutral-500">备注：{s.remark}</p>}
+                    {s.remark && <p className="text-[color:var(--ink-3)]">备注：{s.remark}</p>}
                   </div>
                 </li>
               ))}
             </ol>
-
-
           </div>
           </ModalContent>
           </ModalBody>
           </Modal>
-        ))}
+          );
+        })}
       </div>
+
+      {askRemove && (
+        <Dialog onClose={() => setAskRemove(null)} labelledBy="process-remove-title">
+          <DialogHeader id="process-remove-title" title={`删除流程「${askRemove.name}」？`} subtitle="无法恢复。" onClose={() => setAskRemove(null)} />
+          <div className="mt-4 rounded-2xl bg-[color:var(--red-soft)] px-4 py-3 text-[13px] leading-relaxed text-[color:var(--red-deep)]">
+            流程提交后已自动立为流程项目。删除会一并删掉它的项目及全部记录：阶段进度、评审与表决、工作项、评论与简报、流程版本快照和动态时间线。
+            如果只是不想再推进，可以在项目页「取消」或「搁置」项目，记录会保留。
+          </div>
+          <DialogActions>
+            <button type="button" onClick={() => setAskRemove(null)} disabled={removing} className="btn btn-glass">
+              取消
+            </button>
+            <button type="button" onClick={() => void remove(askRemove)} disabled={removing} className="btn btn-glass text-[color:var(--red-deep)] disabled:opacity-50">
+              <Trash2 className="h-4 w-4" /> {removing ? "删除中…" : "确认删除"}
+            </button>
+          </DialogActions>
+        </Dialog>
+      )}
     </section>
   );
 }

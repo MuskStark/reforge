@@ -30,34 +30,35 @@ export function HandlerList({
   return (
     <div className="space-y-2.5">
       <div className="flex items-center justify-between">
-        <Label className="text-neutral-300">{title}</Label>
+        <Label>{title}</Label>
         <button
           type="button"
           aria-label="添加经办记录"
           onClick={() => onChange([...handlers, { department: "", staff: [] }])}
-          className="inline-flex items-center gap-1 text-xs text-neutral-400 transition hover:text-white"
+          className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium text-[color:var(--tint)] transition hover:bg-[color:var(--tint-soft)]"
         >
           <Plus className="h-3.5 w-3.5" /> 添加
         </button>
       </div>
 
       {handlers.length === 0 && (
-        <p className="rounded-md border border-dashed border-white/10 px-3 py-2.5 text-xs text-neutral-500">
+        <p className="rounded-xl border border-dashed border-black/10 bg-white/30 px-3 py-2.5 text-xs text-[color:var(--ink-3)]">
           暂未添加，点击右上角"添加"增加一条记录
         </p>
       )}
 
-      <div className="space-y-3">
+      <div className="space-y-2.5">
         {handlers.map((h, i) => (
           <div
             key={i}
-            className="space-y-2 rounded-lg border border-white/10 bg-black/40 p-3"
+            className="space-y-2 rounded-2xl bg-white/50 p-3 shadow-[inset_0_0_0_0.5px_rgba(255,255,255,0.65),inset_0_0_0_0.5px_rgba(0,0,0,0.04)]"
           >
             <div className="flex items-center gap-2">
-              <Building2 className="h-4 w-4 shrink-0 text-neutral-500" />
+              <Building2 className="h-4 w-4 shrink-0 text-[color:var(--ink-3)]" />
               <Input
                 value={h.department}
                 placeholder={departmentPlaceholder}
+                aria-label={departmentLabel}
                 onChange={(e) => update(i, { department: e.target.value })}
                 className="h-9"
               />
@@ -65,18 +66,18 @@ export function HandlerList({
                 type="button"
                 onClick={() => onChange(handlers.filter((_, idx) => idx !== i))}
                 aria-label="删除此条"
-                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md text-neutral-500 transition hover:bg-red-500/10 hover:text-red-400 sm:h-9 sm:w-9"
+                className="icon-btn icon-danger !h-11 !w-11 shrink-0 sm:!h-9 sm:!w-9"
               >
                 <Trash2 className="h-4 w-4" />
               </button>
             </div>
             <div className="flex items-start gap-2 sm:pl-6">
-              <User className="mt-2.5 h-4 w-4 shrink-0 text-neutral-500" />
+              <User className="mt-2.5 h-4 w-4 shrink-0 text-[color:var(--ink-3)]" />
               <TagInput
                 placeholder="输入人员姓名后回车，可添加多个"
                 tags={h.staff}
                 onChange={(staff) => update(i, { staff })}
-                className="flex-1"
+                className="min-w-0 flex-1"
               />
             </div>
           </div>

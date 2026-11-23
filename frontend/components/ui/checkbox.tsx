@@ -1,12 +1,11 @@
 "use client";
-
-import { motion } from "framer-motion";
 import React from "react";
 import { cn } from "@/lib/utils";
 
 /**
- * Aceternity UI — Checkbox
- * 点击整块区域可切换，选中时白底黑色对勾
+ * iOS 开关(UISwitch 规格 51×31,选中 systemGreen)。
+ * 保留旧 Checkbox API(checked / onCheckedChange / children),
+ * 点击整块区域可切换 —— 用于「本步骤为会签」等布尔开关。
  */
 export const Checkbox = React.forwardRef<
   HTMLButtonElement,
@@ -22,45 +21,38 @@ export const Checkbox = React.forwardRef<
     <button
       ref={ref}
       type="button"
-      role="checkbox"
+      role="switch"
       aria-checked={checked}
       onClick={() => onCheckedChange?.(!checked)}
-      className={cn(
-        "group flex w-full items-center gap-2 rounded-md p-1 text-left",
-        className,
-      )}
+      className={cn("group flex w-full items-center gap-2 rounded-xl p-1 text-left", className)}
       {...props}
     >
-      <motion.span
-        initial={false}
-        animate={{
-          backgroundColor: checked ? "rgba(255,255,255,1)" : "rgba(255,255,255,0)",
-        }}
+      <span
+        aria-hidden="true"
         className={cn(
-          "flex h-4 w-4 shrink-0 items-center justify-center rounded border transition-colors duration-200",
-          checked ? "border-transparent" : "border-white/30 group-hover:border-white/60",
+          "relative h-[31px] w-[51px] shrink-0 rounded-full transition-colors duration-200",
+          checked ? "bg-[#34c759]" : "bg-[rgba(120,120,128,0.16)]",
         )}
+        style={{
+          boxShadow: checked
+            ? "inset 0 0 0 0.5px rgba(0,0,0,0.04), inset 0 1px 2px rgba(0,66,24,0.18)"
+            : "inset 0 0 0 0.5px rgba(0,0,0,0.08), inset 0 1px 3px rgba(23,42,80,0.1)",
+        }}
       >
-        <svg
-          xmlns="http://www.w3.org/2000/svg"
-          fill="none"
-          viewBox="0 0 24 24"
-          strokeWidth={3.5}
-          stroke="currentColor"
+        <span
           className={cn(
-            "h-3 w-3 text-black transition-opacity duration-200",
-            checked ? "opacity-100" : "opacity-0",
+            "absolute top-[2px] h-[27px] w-[27px] rounded-full bg-white",
+            "transition-[left] duration-200 [transition-timing-function:cubic-bezier(0.33,1,0.68,1)]",
+            checked ? "left-[22px]" : "left-[2px]",
           )}
-        >
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            d="m4.5 12.75 6 6 9-13.5"
-          />
-        </svg>
-      </motion.span>
+          style={{
+            boxShadow:
+              "0 2px 5px -1px rgba(23,42,80,0.3), 0 1px 2px rgba(23,42,80,0.12)",
+          }}
+        />
+      </span>
       {children != null && (
-        <span className="text-sm text-neutral-300 transition-colors duration-200 group-hover:text-white">
+        <span className="min-w-0 flex-1 text-sm transition-colors duration-200">
           {children}
         </span>
       )}

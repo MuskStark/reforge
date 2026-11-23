@@ -11,19 +11,14 @@ import (
 
 const defaultAddr = "127.0.0.1:8080"
 
-func main() {
-	addr := defaultAddr
-	if v := os.Getenv("FLOW_ADDR"); v != "" {
-		addr = v
-	}
-	st, err := newStore(os.Getenv("DATABASE_URL"))
-	if err != nil {
-		log.Fatalf("初始化存储失败: %v", err)
-	}
-	defer st.Close()
-
+// newMux 注册全部路由。main 与端到端测试共用,保证测试走的是真实路由表。
+func newMux(st *postgresStore) *http.ServeMux {
 	mux := http.NewServeMux()
 	registerAdminRoutes(mux, st)
+	registerDefinitionRoutes(mux, st)
+	registerProjectRoutes(mux, st)
+	registerStageTemplateRoutes(mux, st)
+	registerChannelRoutes(mux, st)
 	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
@@ -32,12 +27,18 @@ func main() {
 	mux.HandleFunc("POST /api/auth/register", handleRegister(st))
 	mux.HandleFunc("POST /api/auth/login", handleLogin(st))
 	mux.HandleFunc("GET /api/auth/status", handleAuthStatus(st))
-	mux.HandleFunc("GET /api/auth/me", handleMe)
+	mux.HandleFunc("GET /api/auth/me", handleMe(st))
+	mux.HandleFunc("GET /api/users", handleUserDirectory(st))
+	mux.HandleFunc("PATCH /api/admin/users/{id}", handleAdminUpdateUser(st))
 	mux.HandleFunc("DELETE /api/auth/session", handleLogout)
 	mux.HandleFunc("GET /api/admin/users", handleListUsers(st))
 	mux.HandleFunc("POST /api/admin/users", handleAdminCreateUser(st))
 	mux.HandleFunc("DELETE /api/admin/users/{id}", handleAdminDeleteUser(st))
+	// 公开读收紧为登录可读(数据查看权限);匿名仅保留提交与健康检查
 	mux.HandleFunc("GET /api/processes", func(w http.ResponseWriter, r *http.Request) {
+		if currentUser(w, r) == nil {
+			return
+		}
 		list, err := st.List()
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "读取失败: "+err.Error())
@@ -46,8 +47,13 @@ func main() {
 		writeJSON(w, http.StatusOK, list)
 	})
 	mux.HandleFunc("POST /api/processes", func(w http.ResponseWriter, r *http.Request) {
+		// F02:匿名提交固定窗口限流(每次尝试计数,20 次/分钟)
+		if !submitWindow.allowHit("submit:" + clientIP(r)) {
+			writeError(w, http.StatusTooManyRequests, "提交过于频繁,请稍后再试")
+			return
+		}
 		var p Process
-		if err := decodeJSON(r, &p); err != nil {
+		if err := decodeJSON(w, r, &p); err != nil {
 			writeError(w, http.StatusBadRequest, "请求数据格式不正确: "+err.Error())
 			return
 		}
@@ -61,12 +67,23 @@ func main() {
 		}
 		created, err := st.Create(&p)
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, "保存失败: "+err.Error())
+			log.Printf("[POST /api/processes] 保存失败: %v", err)
+			writeError(w, http.StatusInternalServerError, "保存失败,请检查输入后重试")
 			return
+		}
+		// 流程一提交即自动立项:进入阶段 1「分析立项」,等待指派项目经理
+		if pid, perr := st.CreateProjectForProcess(r.Context(), created); perr != nil {
+			log.Printf("[POST /api/processes] 自动立项失败(可由启动时的补建兜底): %v", perr)
+		} else if admins, aerr := usersWithRoleTx(r.Context(), st.db, "admin"); aerr == nil {
+			_ = notifyManyTx(r.Context(), st.db, userIDs(admins), "project_created", pid, "", "",
+				"新流程「"+created.Name+"」已提交，等待立项与指派项目经理", "project_created:"+pid)
 		}
 		writeJSON(w, http.StatusCreated, created)
 	})
 	mux.HandleFunc("GET /api/processes/{id}", func(w http.ResponseWriter, r *http.Request) {
+		if currentUser(w, r) == nil {
+			return
+		}
 		p, err := st.Get(r.PathValue("id"))
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "读取失败: "+err.Error())
@@ -78,7 +95,11 @@ func main() {
 		}
 		writeJSON(w, http.StatusOK, p)
 	})
+	// S0 修复:公开删除 → 管理员(此前无鉴权,任何人都可删任意流程)
 	mux.HandleFunc("DELETE /api/processes/{id}", func(w http.ResponseWriter, r *http.Request) {
+		if !requireAdmin(w, r) {
+			return
+		}
 		ok, err := st.Delete(r.PathValue("id"))
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "删除失败: "+err.Error())
@@ -91,22 +112,67 @@ func main() {
 		writeJSON(w, http.StatusOK, map[string]bool{"deleted": true})
 	})
 
+	return mux
+}
+
+func main() {
+	addr := defaultAddr
+	if v := os.Getenv("FLOW_ADDR"); v != "" {
+		addr = v
+	}
+	st, err := newStore(os.Getenv("DATABASE_URL"))
+	if err != nil {
+		log.Fatalf("初始化存储失败: %v", err)
+	}
+	defer st.Close()
+
+	mux := newMux(st)
+
+	// 定时扫描:逾期、评审积压、简报到期;站内通知转发到外部渠道(企业微信 / 钉钉 / 飞书 / 邮件)
+	startScheduler(st)
+	startChannelDelivery(st)
+
 	log.Printf("ReForge（流程再造工程收集表）后端已启动: http://%s (API 前缀 /api，存储: PostgreSQL)", addr)
-	if err := http.ListenAndServe(addr, withCORS(mux)); err != nil {
+	// S5 服务器超时(防 slowloris)与安全头
+	srv := &http.Server{
+		Addr:              addr,
+		Handler:           withSecurityHeaders(withCORS(mux)),
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      60 * time.Second,
+		IdleTimeout:       120 * time.Second,
+		MaxHeaderBytes:    1 << 14,
+	}
+	if err := srv.ListenAndServe(); err != nil {
 		log.Fatal(err)
 	}
 }
 
-// sanitize 去除首尾空白、过滤空标签/空人员/空依赖，保证落库数据干净
+// stripUnsafe(F05):剥离 NUL 与 C0 控制字符(PostgreSQL JSONB 拒绝 \u0000)
+func stripUnsafe(s string) string {
+	if !strings.ContainsFunc(s, func(r rune) bool { return r < 0x20 }) {
+		return s
+	}
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		if r >= 0x20 {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+// sanitize 去除首尾空白、剥离控制字符、过滤空标签/空人员/空依赖，保证落库数据干净
 func sanitize(p *Process) {
-	p.Name = strings.TrimSpace(p.Name)
-	p.Description = strings.TrimSpace(p.Description)
-	p.Applicant = strings.TrimSpace(p.Applicant)
+	p.Name = stripUnsafe(strings.TrimSpace(p.Name))
+	p.Description = stripUnsafe(strings.TrimSpace(p.Description))
+	p.Applicant = stripUnsafe(strings.TrimSpace(p.Applicant))
 	for i := range p.Steps {
 		s := &p.Steps[i]
-		s.Name = strings.TrimSpace(s.Name)
-		s.Remark = strings.TrimSpace(s.Remark)
-		s.Online.SystemName = strings.TrimSpace(s.Online.SystemName)
+		s.Name = stripUnsafe(strings.TrimSpace(s.Name))
+		s.Remark = stripUnsafe(strings.TrimSpace(s.Remark))
+		s.Online.SystemName = stripUnsafe(strings.TrimSpace(s.Online.SystemName))
 		s.Offline.Documents = trimAll(s.Offline.Documents)
 		s.Offline.Handlers = cleanHandlers(s.Offline.Handlers)
 		s.Parties = cleanParties(s.Parties)
@@ -173,7 +239,9 @@ func cleanParties(ps []Party) []Party {
 	return out
 }
 
-func decodeJSON(r *http.Request, v any) error {
+// decodeJSON 解析请求体(S1:限制 1MB,防超大载荷耗尽内存)
+func decodeJSON(w http.ResponseWriter, r *http.Request, v any) error {
+	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
 	return dec.Decode(v)
@@ -187,18 +255,4 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 
 func writeError(w http.ResponseWriter, code int, msg string) {
 	writeJSON(w, code, map[string]string{"error": msg})
-}
-
-// withCORS 允许本地前端跨端口直连调试
-func withCORS(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
-		if r.Method == http.MethodOptions {
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
 }

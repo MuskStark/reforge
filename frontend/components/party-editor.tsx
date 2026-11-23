@@ -10,15 +10,14 @@ import {
   ListOrdered,
   Plus,
   Trash2,
-  User,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Checkbox } from "@/components/ui/checkbox";
 import { TagInput } from "@/components/tag-input";
 import { HandlerList } from "@/components/handler-list";
 import { SystemSelect } from "@/components/system-select";
 import { YesNoSelect } from "@/components/yes-no-select";
+import { subInteropPrev } from "@/lib/step-checks";
 import {
   emptyParty,
   emptySubStep,
@@ -31,7 +30,7 @@ import { cn } from "@/lib/utils";
 /** 会签方折叠状态：复杂流程（多方×多子流程）默认收起，保持界面紧凑可导航 */
 type CollapseState = Record<string, boolean>;
 
-/** 会签方编辑器：每个会签方 = 部门 + 涉及人员 + 分支内部多个子流程。
+/** 会签方编辑器（琥珀玻璃分区）：每个会签方 = 部门 + 涉及人员 + 分支内部多个子流程。
  * 各会签方并行办理，其内部子步骤按顺序执行；
  * 每个子步骤与主步骤一样完整采集线上/线下属性。
  * 支持按方折叠收纳（复杂多方流程的界面优化）。 */
@@ -93,15 +92,17 @@ export function PartyEditor({
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <Label className="inline-flex items-center gap-1.5 text-neutral-300">
-          <FileSignature className="h-3.5 w-3.5 text-amber-300/80" /> 会签部门及人员（并行办理，内部可含多步）
+        <Label className="inline-flex items-center gap-1.5 text-[color:var(--amber-deep)]">
+          <FileSignature className="h-3.5 w-3.5" /> 会签部门及人员
+          <span className="font-normal text-[color:var(--ink-2)]">并行办理，内部可含多步</span>
+          <span className="text-[color:var(--red)]">*</span>
         </Label>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1">
           {parties.length > 1 && (
             <button
               type="button"
               onClick={toggleAll}
-              className="text-xs text-neutral-400 transition hover:text-white"
+              className="rounded-full px-2.5 py-1 text-xs font-medium text-[color:var(--tint)] transition hover:bg-[color:var(--tint-soft)]"
             >
               {allCollapsed ? "全部展开" : "全部收起"}
             </button>
@@ -109,7 +110,7 @@ export function PartyEditor({
           <button
             type="button"
             onClick={addParty}
-            className="inline-flex items-center gap-1 text-xs text-neutral-400 transition hover:text-white"
+            className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium text-[color:var(--tint)] transition hover:bg-[color:var(--tint-soft)]"
           >
             <Plus className="h-3.5 w-3.5" /> 添加会签方
           </button>
@@ -117,7 +118,7 @@ export function PartyEditor({
       </div>
 
       {parties.length === 0 && (
-        <p className="rounded-md border border-dashed border-white/10 px-3 py-2.5 text-xs text-neutral-500">
+        <p className="rounded-xl border border-dashed border-black/10 bg-white/30 px-3 py-2.5 text-xs text-[color:var(--ink-3)]">
           暂未添加，点击右上角"添加会签方"增加会签分支
         </p>
       )}
@@ -129,33 +130,31 @@ export function PartyEditor({
           return (
             <div
               key={party.id}
-              className="rounded-lg border border-amber-400/20 bg-amber-400/5"
+              className="rounded-2xl bg-[linear-gradient(180deg,rgba(255,246,230,0.72),rgba(255,243,224,0.5))] shadow-[inset_0_0_0_0.5px_rgba(255,255,255,0.75),inset_0_0_0_0.5px_rgba(178,106,0,0.14)]"
             >
               {/* 折叠行：点击头部切换展开/收起 */}
               <button
                 type="button"
                 onClick={() => setCollapsed((prev) => ({ ...prev, [party.id]: !isCollapsed }))}
-                className="flex w-full items-center gap-2 px-3 py-2.5 text-left"
+                className="flex w-full items-center gap-2.5 rounded-2xl px-3.5 py-2.5 text-left"
                 aria-expanded={!isCollapsed}
               >
                 {isCollapsed ? (
-                  <ChevronRight className="h-4 w-4 shrink-0 text-amber-300/70" />
+                  <ChevronRight className="h-4 w-4 shrink-0 text-[color:var(--amber-deep)]" />
                 ) : (
-                  <ChevronDown className="h-4 w-4 shrink-0 text-amber-300/70" />
+                  <ChevronDown className="h-4 w-4 shrink-0 text-[color:var(--amber-deep)]" />
                 )}
-                <Building2 className="h-4 w-4 shrink-0 text-amber-300/80" />
-                <span className="min-w-0 flex-1 truncate text-sm font-medium text-amber-100">
+                <Building2 className="h-4 w-4 shrink-0 text-[color:var(--amber)]" />
+                <span className="min-w-0 flex-1 truncate text-sm font-semibold text-[color:var(--amber-deep)]">
                   {party.department.trim() || `会签方${i + 1}`}
                 </span>
                 {/* 收起态摘要 */}
                 {isCollapsed && (
-                  <span className="flex min-w-0 items-center gap-1.5 text-[10px] text-neutral-400">
+                  <span className="flex min-w-0 items-center gap-1.5 text-[11px] text-[color:var(--ink-2)]">
                     {stat.staff > 0 && (
-                      <span className="rounded-full bg-white/10 px-1.5 py-0.5">
-                        {stat.staff} 人
-                      </span>
+                      <span className="rounded-full bg-white/60 px-2 py-0.5">{stat.staff} 人</span>
                     )}
-                    <span className="rounded-full bg-white/10 px-1.5 py-0.5">
+                    <span className="rounded-full bg-white/60 px-2 py-0.5">
                       {stat.subs > 0 ? `${stat.subs} 个子流程` : "单步会签"}
                     </span>
                   </span>
@@ -164,13 +163,13 @@ export function PartyEditor({
 
               {/* 展开态：完整编辑表单 */}
               {!isCollapsed && (
-                <div className="space-y-2.5 border-t border-amber-400/10 px-3 pb-3 pt-3">
+                <div className="space-y-2.5 border-t border-[rgba(178,106,0,0.12)] px-3.5 pb-3.5 pt-3">
                   {/* 部门 + 删除 */}
                   <div className="flex items-center gap-2">
-                    <Building2 className="h-4 w-4 shrink-0 text-neutral-500" />
                     <Input
                       value={party.department}
                       placeholder="会签部门，如：财务部"
+                      aria-label="会签部门"
                       onChange={(e) => update(i, { department: e.target.value })}
                       className="h-9"
                     />
@@ -178,7 +177,7 @@ export function PartyEditor({
                       type="button"
                       onClick={() => onChange(parties.filter((_, idx) => idx !== i))}
                       aria-label="删除此会签方"
-                      className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md text-neutral-500 transition hover:bg-red-500/10 hover:text-red-400 sm:h-9 sm:w-9"
+                      className="icon-btn icon-danger !h-11 !w-11 shrink-0 sm:!h-9 sm:!w-9"
                     >
                       <Trash2 className="h-4 w-4" />
                     </button>
@@ -186,20 +185,19 @@ export function PartyEditor({
 
                   {/* 人员 */}
                   <div className="flex items-start gap-2 sm:pl-6">
-                    <User className="mt-2.5 h-4 w-4 shrink-0 text-neutral-500" />
                     <TagInput
                       placeholder="输入人员姓名后回车，可添加多个"
                       tags={party.staff}
                       onChange={(staff) => update(i, { staff })}
-                      className="flex-1"
+                      className="min-w-0 flex-1"
                     />
                   </div>
 
                   {/* 内部子流程（每个子步骤完整采集线上/线下属性） */}
-                  <div className="space-y-2 sm:pl-6">
-                    <div className="flex items-center justify-between">
-                      <span className="inline-flex items-center gap-1.5 text-xs text-neutral-400">
-                        <ListOrdered className="h-3.5 w-3.5 text-neutral-500" />
+                  <div className="space-y-2">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="inline-flex items-center gap-1.5 text-xs text-[color:var(--ink-2)]">
+                        <ListOrdered className="h-3.5 w-3.5 text-[color:var(--ink-3)]" />
                         内部子流程（依次执行，每步标注线上 / 线下）
                       </span>
                       <button
@@ -207,7 +205,7 @@ export function PartyEditor({
                         onClick={() =>
                           update(i, { subSteps: [...(party.subSteps ?? []), emptySubStep()] })
                         }
-                        className="inline-flex items-center gap-1 text-xs text-neutral-400 transition hover:text-white"
+                        className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium text-[color:var(--tint)] transition hover:bg-[color:var(--tint-soft)]"
                       >
                         <Plus className="h-3 w-3" /> 添加内部步骤
                       </button>
@@ -218,18 +216,22 @@ export function PartyEditor({
                       return (
                         <div
                           key={sub.id}
-                          className="space-y-2 rounded-lg border border-white/10 bg-neutral-950/70 p-2.5"
+                          className="space-y-2.5 rounded-2xl bg-[rgba(255,255,255,0.66)] p-3 shadow-[inset_0_0_0_0.5px_rgba(255,255,255,0.7),inset_0_0_0_0.5px_rgba(0,0,0,0.035)]"
                         >
                           {/* 子步骤名称 + 复制/删除 */}
-                          <div className="flex items-center gap-1.5">
-                            <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-amber-400/30 bg-amber-400/10 text-[10px] font-semibold text-amber-300">
-                              {j + 1}
+                          <div className="flex items-center gap-2">
+                            {/* 琥珀菱形序号(与会签轨点同构) */}
+                            <span
+                              aria-hidden="true"
+                              className="grid h-[22px] w-[22px] shrink-0 rotate-45 place-items-center rounded-[7px] bg-[color:var(--amber-soft)] text-[color:var(--amber-deep)]"
+                            >
+                              <span className="-rotate-45 text-[11px] font-bold">{j + 1}</span>
                             </span>
                             <Input
                               value={sub.name}
                               placeholder={`内部步骤名称，如：${j === 0 ? "初审" : "复核签署"}`}
                               onChange={(e) => updateSub(i, sub.id, { name: e.target.value })}
-                              className="h-8 flex-1 text-xs"
+                              className="h-9 min-w-0 flex-1 text-sm"
                             />
                             {/* 复制子流程行（结构相近时快速填写） */}
                             <button
@@ -237,7 +239,7 @@ export function PartyEditor({
                               onClick={() => copySub(i, j)}
                               aria-label="复制此子流程"
                               title="复制此子流程（内容原样复制，插入其后）"
-                              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-neutral-600 transition hover:bg-white/5 hover:text-white"
+                              className="icon-btn !h-9 !w-9 shrink-0"
                             >
                               <Copy className="h-3.5 w-3.5" />
                             </button>
@@ -247,14 +249,14 @@ export function PartyEditor({
                                 update(i, { subSteps: party.subSteps.filter((_, idx) => idx !== j) })
                               }
                               aria-label="删除内部步骤"
-                              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-neutral-600 transition hover:bg-red-500/10 hover:text-red-400"
+                              className="icon-btn icon-danger !h-9 !w-9 shrink-0"
                             >
                               <Trash2 className="h-3.5 w-3.5" />
                             </button>
                           </div>
 
-                          {/* 子步骤线上/线下切换（紧凑版） */}
-                          <div className="grid grid-cols-2 gap-1 rounded-lg border border-white/10 bg-black/40 p-1 sm:w-64">
+                          {/* 子步骤线上/线下切换(iOS 迷你分段) */}
+                          <div className="seg seg-mini">
                             {(
                               [
                                 { value: "online", label: "线上系统" },
@@ -265,12 +267,7 @@ export function PartyEditor({
                                 key={value}
                                 type="button"
                                 onClick={() => updateSub(i, sub.id, { mode: value })}
-                                className={cn(
-                                  "rounded-md px-2 py-1 text-xs transition-all",
-                                  sub.mode === value
-                                    ? "bg-gradient-to-b from-cyan-500/30 to-cyan-500/10 text-white ring-1 ring-cyan-400/40"
-                                    : "text-neutral-400 hover:bg-white/5",
-                                )}
+                                className={sub.mode === value ? "on" : undefined}
                               >
                                 {label}
                               </button>
@@ -279,8 +276,8 @@ export function PartyEditor({
 
                           {/* 子步骤属性 */}
                           {sub.mode === "online" ? (
-                            <div className="flex flex-wrap items-end gap-2">
-                              <div className="min-w-[180px] flex-1 space-y-1">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <div className="min-w-[180px] flex-1">
                                 <SystemSelect
                                   compact
                                   value={sub.online.systemName}
@@ -304,19 +301,13 @@ export function PartyEditor({
                                   }
                                 />
                                 {(() => {
-                                  // 分支内相邻线上-线上且系统不同：需填写数据互通
-                                  const subs = (parties[i].subSteps ?? []).map(normalizeSubStep);
-                                  const idx = subs.findIndex((x) => x.id === sub.id);
-                                  if (idx <= 0) return null;
-                                  const prev = subs[idx - 1];
-                                  if (prev.mode !== "online") return null;
-                                  const pSys = prev.online.systemName.trim();
-                                  const cSys = sub.online.systemName.trim();
-                                  if (!pSys || pSys === cSys) return null;
+                                  // 与上一个已命名子步骤均线上且系统不同：需填写数据互通
+                                  const p = subInteropPrev(parties[i].subSteps ?? [], j);
+                                  if (!p) return null;
                                   return (
                                     <YesNoSelect
                                       compact
-                                      label={`「${pSys} → ${cSys}」数据互通`}
+                                      label={`「${p.online.systemName.trim()} → ${sub.online.systemName.trim()}」数据互通`}
                                       value={sub.online.dataInteroperable ?? null}
                                       onChange={(v) =>
                                         updateSub(i, sub.id, {
@@ -330,7 +321,7 @@ export function PartyEditor({
                               </div>
                             </div>
                           ) : (
-                            <div className="space-y-2 rounded-lg border border-white/5 bg-black/30 p-2">
+                            <div className="space-y-2.5 rounded-xl bg-[rgba(255,255,255,0.55)] p-2.5">
                               <TagInput
                                 placeholder="涉及文件名称，回车添加，如：评审意见表"
                                 tags={sub.offline.documents}
@@ -352,7 +343,7 @@ export function PartyEditor({
                     })}
 
                     {(party.subSteps ?? []).length === 0 && (
-                      <p className="text-xs text-neutral-600">
+                      <p className="text-xs text-[color:var(--ink-3)]">
                         未填写内部步骤时，该会签方按单步签署处理
                       </p>
                     )}
