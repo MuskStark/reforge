@@ -2,9 +2,8 @@
 const nextConfig = {
   // Docker 生产部署：standalone 产物自带最小 server，镜像更小
   output: "standalone",
-  // 不在源站压缩：Cloudflare 边缘按客户端能力重新编码，静态资源才能拿到 brotli（比 gzip 小约 15%）；
-  // 源站一旦自己 gzip，边缘会原样缓存 gzip 版本，brotli 永远不生效
-  compress: false,
+  // 压缩保持默认（源站 gzip）：2026-11-24 实测经 Cloudflare 时，源站 gzip 比边缘自己的 gzip/brotli
+  // 都小 1%~3%；设 compress:false 让边缘来编码反而更大
   allowedDevOrigins: ["127.0.0.1", "localhost"],
   // 后端地址可在容器运行时通过 BACKEND_ORIGIN 覆盖（compose 内指向 backend 服务）
   // HTML 响应安全头(/api 由 Go 后端负责)

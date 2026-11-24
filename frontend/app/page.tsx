@@ -1,11 +1,11 @@
 "use client";
 
-import { useCallback, useState } from "react";
-import dynamic from "next/dynamic";
+import { Suspense, lazy, useCallback, useState } from "react";
 import Link from "next/link";
 import { ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
 import { FlowBuilder } from "@/components/flow-builder";
+import { FlowChartLoadBoundary } from "@/components/flow-chart-load-boundary";
 import type { ChartSource } from "@/components/flow-chart";
 import { stepIssues } from "@/lib/step-checks";
 import { emptyProcess } from "@/lib/types";
@@ -13,16 +13,34 @@ import { emptyProcess } from "@/lib/types";
 /**
  * 流程图弹窗带 React Flow(占首屏 JS 约四成),只有点"预览"才用得到:
  * 按需加载,不拖慢首屏;用户第一次操作表单后在后台预取,点开时通常已就绪。
+ * 取代码块失败(链路抖动)先自动重试;仍失败由 FlowChartLoadBoundary 只在弹窗位置提示,表单内容不受影响。
  */
-const loadFlowChart = () => import("@/components/flow-chart");
-const FlowChartModal = dynamic(() => loadFlowChart().then((m) => m.FlowChartModal), {
-  ssr: false,
-  loading: () => (
+async function loadFlowChart(attempts = 3) {
+  for (let i = 1; ; i++) {
+    try {
+      return await import("@/components/flow-chart");
+    } catch (e) {
+      if (i >= attempts) throw e;
+      await new Promise((r) => setTimeout(r, 400 * i));
+    }
+  }
+}
+
+/** lazy 会记住一次加载失败的结果,所以每次打开都新建一个,关掉再点才是真正的重试 */
+function chartModalComponent() {
+  return lazy(async () => ({ default: (await loadFlowChart()).FlowChartModal }));
+}
+
+let chartPrefetchStarted = false;
+
+/** 流程图代码块还没取到时的占位 */
+function ChartLoading() {
+  return (
     <div className="fixed inset-0 z-[80] grid place-items-center bg-neutral-900/15 backdrop-blur-sm">
       <span className="lg-chip text-[13px] text-[color:var(--ink-2)]">正在加载流程图…</span>
     </div>
-  ),
-});
+  );
+}
 
 /** 品牌图形:分叉汇聚的流程节点(与 app icon 同构) */
 function BrandMark({ className }: { className?: string }) {
@@ -47,11 +65,20 @@ function BrandMark({ className }: { className?: string }) {
 export default function Home() {
   const [draft, setDraft] = useState(emptyProcess);
   const [chart, setChart] = useState<ChartSource | null>(null);
+  const [FlowChartModal, setFlowChartModal] = useState(chartModalComponent);
 
-  // 第一次点进或聚焦表单就预取流程图代码块(失败不打扰,点"预览"时会再试)
+  // 第一次点进或聚焦表单就在后台预取流程图代码块;每个页面只发起一次(取不到也不随每次点击反复请求,
+  // 用户点"预览"时自会重试),失败不打扰
   const prefetchChart = useCallback(() => {
+    if (chartPrefetchStarted) return;
+    chartPrefetchStarted = true;
     void loadFlowChart().catch(() => {});
   }, []);
+
+  const openChart = () => {
+    setFlowChartModal(chartModalComponent);
+    setChart({ name: draft.name, steps: draft.steps });
+  };
 
   const countersignCount = draft.steps.filter((s) => s.countersign).length;
   const readyCount = draft.steps.filter((s, i) => stepIssues(s, draft.steps[i - 1]).length === 0).length;
@@ -124,11 +151,18 @@ export default function Home() {
               description: "流程已进入后台，管理员审核后可见",
             });
           }}
-          onPreviewChart={() => setChart({ name: draft.name, steps: draft.steps })}
+          onPreviewChart={openChart}
         />
       </div>
 
-      {chart && <FlowChartModal onClose={() => setChart(null)} source={chart} />}
+      {/* 代码块可能取不到(链路抖动,或页面打开后正好发了版):失败只在弹窗位置提示,表单内容不受影响 */}
+      {chart && (
+        <FlowChartLoadBoundary onClose={() => setChart(null)}>
+          <Suspense fallback={<ChartLoading />}>
+            <FlowChartModal onClose={() => setChart(null)} source={chart} />
+          </Suspense>
+        </FlowChartLoadBoundary>
+      )}
     </main>
   );
 }
