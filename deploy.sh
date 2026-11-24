@@ -8,7 +8,7 @@
 #      自动配置国内 apt 源与 Docker Hub 镜像加速）
 #   2. 中国地区深度优化：apt 清华源、Docker Hub 镜像加速、
 #      Go/npm/Alpine 依赖国内镜像、基础镜像预拉取、ufw 防火墙放行
-#   3. 构建镜像 → 启动 PostgreSQL + 后端 + 前端 → 健康等待 → 输出地址
+#   3. 构建镜像 → 启动 PostgreSQL + 后端 + 前端 → 健康等待 → 输出地址 → 公网自检
 #
 # 用法：
 #   bash deploy.sh              # 完整部署（默认，中国镜像加速）
@@ -21,6 +21,8 @@
 #
 # 镜像源可用环境变量覆盖：GOPROXY / NPM_REGISTRY / ALPINE_MIRROR /
 # APT_MIRROR / DOCKER_MIRROR
+# 公网自检(可选):.env 设置 FLOW_PUBLIC_URL=https://你的域名 后,部署结束会经该地址
+# 取回页面与本次构建核对;CDN 仍在发旧页面或缓存了 HTML 时给出处理办法
 # =============================================================
 set -euo pipefail
 
@@ -266,20 +268,22 @@ esac
 COMPOSE=("${DCMD[@]}" compose -p "$PROJECT" -f "$COMPOSE_FILE")
 
 # ---------- 安全秘密引导(F04/F08):生成/补齐 .env,弱默认不再随生产生效 ----------
+# .env 固定放在脚本所在目录:compose 只从编排文件所在目录读它,与当前工作目录无关
+ENV_FILE="$ROOT/.env"
 gen_secret() { openssl rand -hex 24 2>/dev/null || head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n'; }
-if [ ! -f .env ]; then
+if [ ! -f "$ENV_FILE" ]; then
   {
     echo "POSTGRES_PASSWORD=$(gen_secret)"
     echo "FLOW_ADMIN_USER=admin"
     echo "FLOW_ADMIN_PASS=$(gen_secret)"
-  } > .env
-  chmod 600 .env
-  echo "已生成 .env(数据库与管理员强口令,请妥善保管,勿提交入库)"
+  } > "$ENV_FILE"
+  chmod 600 "$ENV_FILE"
+  echo "已生成 $ENV_FILE(数据库与管理员强口令,请妥善保管,勿提交入库)"
 else
-  grep -q '^POSTGRES_PASSWORD=' .env || { echo "POSTGRES_PASSWORD=$(gen_secret)" >> .env; echo "已在 .env 补齐 POSTGRES_PASSWORD"; }
-  grep -q '^FLOW_ADMIN_PASS='   .env || { echo "FLOW_ADMIN_PASS=$(gen_secret)" >> .env; echo "已在 .env 补齐 FLOW_ADMIN_PASS"; }
-  grep -q '^FLOW_ADMIN_USER='   .env || echo "FLOW_ADMIN_USER=admin" >> .env
-  chmod 600 .env
+  grep -q '^POSTGRES_PASSWORD=' "$ENV_FILE" || { echo "POSTGRES_PASSWORD=$(gen_secret)" >> "$ENV_FILE"; echo "已在 .env 补齐 POSTGRES_PASSWORD"; }
+  grep -q '^FLOW_ADMIN_PASS='   "$ENV_FILE" || { echo "FLOW_ADMIN_PASS=$(gen_secret)" >> "$ENV_FILE"; echo "已在 .env 补齐 FLOW_ADMIN_PASS"; }
+  grep -q '^FLOW_ADMIN_USER='   "$ENV_FILE" || echo "FLOW_ADMIN_USER=admin" >> "$ENV_FILE"
+  chmod 600 "$ENV_FILE"
 fi
 
 # ---------- F10:镜像摘要锚定(部署时解析,网络不可达则降级 tag 并告警) ----------
@@ -336,3 +340,59 @@ echo "管理后台     : http://localhost:3000/admin   ——凭据见 .env(FLOW
 echo "后端 API     : 经前端 /api 代理访问（容器网络内部互访）"
 echo "数据         : PostgreSQL（卷 ${PROJECT}_flow-prod-pgdata 持久化）"
 echo "常用命令     : bash deploy.sh --logs ｜ --down"
+
+# ---------- 公网自检:经 CDN 取回的页面必须是本次构建 ----------
+# CDN 一旦缓存了 HTML,部署后旧 HTML 引用的 chunk 在源站已不存在,用户直接白屏。
+# 脚本没有 CDN 的 API 凭据,无法自动清除缓存,这里只核对并给出处理办法。
+env_file_value() { grep -E "^$1=" "$ENV_FILE" 2>/dev/null | tail -1 | cut -d= -f2- | tr -d '\r' || true; }
+# 取 HTML 引用的 _next/static 资源集合,作为“哪一次构建”的指纹
+build_fingerprint() { grep -o '/_next/static/[^"<> ]*' | sort -u || true; }
+
+check_public_page() {
+  # 注意:循环变量不叫 path —— zsh 下 path 与 PATH 绑定,赋值会清空命令搜索路径
+  local page="$1" url="$2" dir="$3" local_fp public_fp cf code
+  local_fp=$(curl -fsS -m 10 "http://127.0.0.1:3000$page" 2>/dev/null | build_fingerprint)
+  if [ -z "$local_fp" ]; then
+    echo "⚠ $page:本机未取到页面,跳过公网核对"
+    return 0
+  fi
+  if ! curl -sS -m 20 -D "$dir/headers" -o "$dir/body" "$url" 2>/dev/null; then
+    echo "⚠ $page:无法访问 $url,跳过公网核对"
+    return 0
+  fi
+  # curl -D 写出的响应头是 CRLF 换行,取值前去掉 \r
+  code=$(head -1 "$dir/headers" 2>/dev/null | tr -d '\r' | awk '{print $2}' || true)
+  cf=$(grep -i '^cf-cache-status:' "$dir/headers" 2>/dev/null | tr -d '\r' | tail -1 | awk '{print tolower($2)}' || true)
+  public_fp=$(build_fingerprint < "$dir/body" || true)
+  if [ "$code" != "200" ] || [ -z "$public_fp" ]; then
+    echo "⚠ $page:公网地址没有返回本站页面(HTTP ${code:-无响应}),请检查 FLOW_PUBLIC_URL"
+  elif [ "$public_fp" != "$local_fp" ]; then
+    echo "✗ $page:公网页面不是本次构建 —— CDN 还在发旧页面,打开会白屏"
+    echo "    处理:到 Cloudflare 面板 Caching → Configuration → Purge Everything 清一次缓存"
+  elif [ -n "$cf" ] && [ "$cf" != "dynamic" ] && [ "$cf" != "bypass" ]; then
+    echo "✗ $page:页面已是本次构建,但 CDN 正在缓存这个页面的 HTML(cf-cache-status: $cf)"
+    echo "    隐患:下次部署后又会白屏。到 Cloudflare 面板关闭该路径的 Cache Rule"
+  else
+    echo "✓ $page:公网页面与本次构建一致"
+  fi
+}
+
+banner "公网自检"
+if [ -z "${FLOW_PUBLIC_URL:-}" ]; then
+  FLOW_PUBLIC_URL=$(env_file_value FLOW_PUBLIC_URL)
+  # 容错 .env 里给值加的成对引号
+  FLOW_PUBLIC_URL="${FLOW_PUBLIC_URL#\"}"; FLOW_PUBLIC_URL="${FLOW_PUBLIC_URL%\"}"
+  FLOW_PUBLIC_URL="${FLOW_PUBLIC_URL#\'}"; FLOW_PUBLIC_URL="${FLOW_PUBLIC_URL%\'}"
+fi
+FLOW_PUBLIC_URL="${FLOW_PUBLIC_URL%/}"
+if [ -z "$FLOW_PUBLIC_URL" ]; then
+  echo "未设置 FLOW_PUBLIC_URL,跳过。在 .env 里加上 FLOW_PUBLIC_URL=https://你的域名,"
+  echo "以后部署结束会自动核对公网页面是否已是本次构建。"
+else
+  echo "经 $FLOW_PUBLIC_URL 取回页面,与本机 127.0.0.1:3000 核对"
+  tmp=$(mktemp -d)
+  for page in / /admin; do
+    check_public_page "$page" "$FLOW_PUBLIC_URL$page" "$tmp"
+  done
+  rm -rf "$tmp"
+fi

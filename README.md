@@ -62,7 +62,7 @@ pnpm dev
 
 > 前端通过 Next.js rewrites 将 `/api/*` 代理到 `http://127.0.0.1:8080`，无需额外跨域配置。
 > 数据库连接串可用环境变量 `DATABASE_URL` 覆盖（默认 `postgres://flow:flow@127.0.0.1:5432/flow?sslmode=disable`）；后端地址可用 `FLOW_ADDR` 覆盖。
-> `FLOW_PUBLIC_URL`（选填）是站点的访问地址,例如 `http://reforge.example.internal:3000`:设置后外部通知的消息末尾会附工作台链接。
+> `FLOW_PUBLIC_URL`（选填）是站点的访问地址,例如 `http://reforge.example.internal:3000`:设置后外部通知的消息末尾会附工作台链接;`deploy.sh` 也用它做部署后的公网自检（见下文 Docker 部署）。
 
 ### 开始使用流程管理
 
@@ -104,7 +104,9 @@ bash deploy.sh --logs   # 跟踪日志
 bash deploy.sh --down   # 停止（数据卷保留）
 ```
 
-脚本自动完成：镜像构建（GOPROXY/npmmirror/TUNA 加速）→ 启动 PostgreSQL + 后端 + 前端 → 健康等待 → 输出访问地址。前端为 Next.js standalone 生产模式，字体自托管（fontsource），构建/运行零外网请求。
+脚本自动完成：镜像构建（GOPROXY/npmmirror/TUNA 加速）→ 启动 PostgreSQL + 后端 + 前端 → 健康等待 → 输出访问地址 → 公网自检。前端为 Next.js standalone 生产模式，字体自托管（fontsource），构建/运行零外网请求。`.env` 生成在脚本所在目录（compose 只从那里读）。
+
+> 公网自检：`.env` 里设置了 `FLOW_PUBLIC_URL` 时，部署结束会经该地址取回 `/` 与 `/admin`，与本机页面核对是否同一次构建。站点在 CDN 后面时这一步有用：CDN 若缓存了 HTML，部署后旧页面引用的 chunk 已不存在，用户会白屏。CDN 仍在发旧页面、或在缓存 HTML 时，脚本会给出处理办法；它没有 CDN 的 API 凭据，不会自动清缓存。页面已统一为 `no-store`，自检若提示「CDN 正在缓存 HTML」，到 CDN 关闭该路径的缓存规则即可。
 
 > 基础镜像（golang/node/postgres/alpine）从 Docker Hub 拉取缓慢时，可先经镜像源预拉并重打标签，例如：
 > `docker pull docker.m.daocloud.io/library/golang:1.27-alpine && docker tag docker.m.daocloud.io/library/golang:1.27-alpine golang:1.27-alpine`
