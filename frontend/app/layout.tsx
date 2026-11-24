@@ -10,6 +10,13 @@ import "@fontsource/jetbrains-mono/600.css";
 import { AppToaster } from "@/components/app-toaster";
 import "./globals.css";
 
+/**
+ * 页面一律动态渲染：预渲染页默认带 `s-maxage=31536000`，而 Cloudflare 面板对
+ * /admin、/monitor 开了 HTML 缓存，会照此缓存近一年；部署新构建后旧 HTML 引用的
+ * chunk 已不存在 → 404 白屏。动态渲染改发 no-store，CDN 与浏览器都不缓存 HTML。
+ */
+export const dynamic = "force-dynamic";
+
 export const metadata: Metadata = {
   title: "流程再造工程收集表 — ReForge",
   description:
