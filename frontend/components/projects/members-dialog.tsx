@@ -2,25 +2,35 @@
 
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import type { ProjectView, UserDir } from "@/lib/types";
+import type { ProjectCaps, ProjectView, UserDir } from "@/lib/types";
 import { authFetch } from "@/lib/auth";
-import { JOB_ROLE_LABEL } from "@/lib/labels";
+import { JOB_ROLE_LABEL, PROJECT_ROLE_OWNER } from "@/lib/labels";
 import { Dialog, DialogActions, DialogHeader } from "@/components/ui/dialog";
 import { MemberChip, UserOptionLine } from "@/components/projects/stage-rail";
 import { cn } from "@/lib/utils";
 
 type Role = "pm" | "handler" | "dev" | "viewer";
 
-const ROLE_META: { role: Role; label: string; hint: string; need: "assign" | "manage" }[] = [
-  { role: "pm", label: "项目经理", hint: "对项目交付负责：制定计划、拆解任务、推进阶段、提交评审", need: "assign" },
-  { role: "handler", label: "经办", hint: "业务侧确认需求、执行试运行；需求基线与试运行结论由他们会签", need: "manage" },
-  { role: "dev", label: "开发实施", hint: "承接系统改造任务", need: "manage" },
-  { role: "viewer", label: "观察者", hint: "只读", need: "manage" },
+/**
+ * 项目里的四类成员。每类由谁分配与服务端一致:管理员分配全部;CTO 分配科技侧经办;
+ * 项目经理分配业务侧经办。flag 是服务端为当前用户下发的对应能力。
+ * 经办 = 业务侧确认需求、执行试运行;开发实施 = 科技侧承接系统改造。
+ */
+const ROLE_META: { role: Role; label: string; hint: string; flag: keyof ProjectCaps; empty: string }[] = [
+  { role: "pm", label: "项目经理", hint: "对项目交付负责：制定计划、拆解任务、推进阶段、提交评审", flag: "assign", empty: "未指派" },
+  { role: "handler", label: "业务侧经办", hint: "业务侧确认需求、执行试运行；需求基线与试运行结论由他们会签", flag: "assignHandler", empty: "尚未添加 —— 需求基线与试运行结论需要他们会签" },
+  { role: "dev", label: "科技侧经办", hint: "科技侧承接系统改造：开发、配置、联调、测试（岗位为「开发实施」的人）", flag: "assignDev", empty: "未添加" },
+  { role: "viewer", label: "观察者", hint: "只读", flag: "assignViewer", empty: "未添加" },
 ];
 
+/** 能否打开成员管理:至少能分配一类成员(服务端仍然逐请求校验) */
+export function canAssignMembers(can: ProjectCaps): boolean {
+  return can.assign || can.assignHandler || can.assignDev || can.assignViewer;
+}
+
 /**
- * 成员管理 / 立项指派。指派或更换项目经理需要管理员或 CTO;其余角色由项目经理 / CTO / 管理员管理。
- * 第一位项目经理到岗时项目正式启动。
+ * 成员管理 / 立项指派。管理员可以分配全部成员;CTO 只分配科技侧经办,项目经理只分配业务侧经办,
+ * 其余区块只读并注明由谁分配。第一位项目经理到岗时项目正式启动。
  */
 export function MembersDialog({
   project,
@@ -55,7 +65,7 @@ export function MembersDialog({
         method: "PUT",
         body: JSON.stringify({ userId, role, action }),
       });
-      toast.success(action === "add" ? `已${role === "pm" ? "指派" : "添加"} ${label}` : `已移除 ${label}`);
+      toast.success(action === "add" ? `已${role === "pm" ? "指派" : "分配"} ${label}` : `已移除 ${label}`);
       setPick((p) => ({ ...p, [role]: "" }));
       const latest = await authFetch<ProjectView>(`/api/projects/${project.id}`, { cache: "no-store" });
       setFull(latest);
@@ -72,7 +82,7 @@ export function MembersDialog({
       <DialogHeader
         id="members-title"
         title="项目成员"
-        subtitle="谁负责推进、谁确认需求、谁承接开发。第一位项目经理到岗后项目正式启动。"
+        subtitle="管理员可分配全部成员；CTO 分配科技侧经办，项目经理分配业务侧经办。第一位项目经理到岗后项目正式启动。"
         onClose={onClose}
       />
 
@@ -83,8 +93,8 @@ export function MembersDialog({
           </p>
         )}
 
-        {ROLE_META.map(({ role, label, hint, need }) => {
-          const canEdit = !ended && (need === "assign" ? project.can.assign : project.can.manage);
+        {ROLE_META.map(({ role, label, hint, flag, empty }) => {
+          const canEdit = !ended && !!project.can[flag];
           const current = project.members.filter((m) => m.role === role);
           const has = new Set(current.map((m) => m.userId));
           const candidates = users
@@ -96,9 +106,10 @@ export function MembersDialog({
             });
           return (
             <section key={role} className="rounded-2xl bg-white/55 p-3.5 shadow-[inset_0_0_0_0.5px_rgba(255,255,255,0.65),inset_0_0_0_0.5px_rgba(0,0,0,0.04)]">
-              <div className="flex items-baseline gap-2">
+              <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
                 <h3 className="text-[14px] font-semibold text-neutral-900">{label}</h3>
                 <span className="text-xs text-[color:var(--ink-2)]">{hint}</span>
+                {!canEdit && !ended && <span className="ml-auto text-[11px] text-[color:var(--ink-3)]">{PROJECT_ROLE_OWNER[role]}</span>}
               </div>
 
               {current.length > 0 ? (
@@ -113,9 +124,7 @@ export function MembersDialog({
                   ))}
                 </div>
               ) : (
-                <p className="mt-2 text-xs text-[color:var(--ink-3)]">
-                  {role === "pm" ? "未指派" : role === "handler" ? "尚未添加经办 —— 需求基线与试运行结论需要他们会签" : "未添加"}
-                </p>
+                <p className="mt-2 text-xs text-[color:var(--ink-3)]">{empty}</p>
               )}
 
               {canEdit && (
@@ -153,11 +162,6 @@ export function MembersDialog({
                   </button>
                 </div>
               )}
-              {!canEdit && !ended && current.length === 0 && (
-                <p className="mt-2 text-xs text-[color:var(--ink-3)]">
-                  {need === "assign" ? "指派项目经理需要管理员或 CTO" : "由项目经理、CTO 或管理员添加"}
-                </p>
-              )}
             </section>
           );
         })}
@@ -165,14 +169,14 @@ export function MembersDialog({
         <section className="rounded-2xl bg-[linear-gradient(180deg,rgba(240,240,255,0.5),rgba(255,255,255,0.45))] p-3.5 shadow-[inset_0_0_0_0.5px_rgba(88,86,214,0.25)]">
           <div className="flex items-baseline gap-2">
             <h3 className="text-[14px] font-semibold text-[color:var(--indigo-deep)]">CTO · 技术负责人</h3>
-            <span className="text-xs text-[color:var(--ink-2)]">全局岗位，自动拥有所有项目的评审权，无需逐项目添加</span>
+            <span className="text-xs text-[color:var(--ink-2)]">全局岗位，可查看全部流程并评审方案，无需逐项目添加</span>
           </div>
           <p className="mt-2 text-[13px] text-[color:var(--indigo-deep)]">{ctoNames.length ? ctoNames.join("、") : "尚未设置 CTO —— 请到「用户与岗位」把对应的人的岗位设为 CTO"}</p>
         </section>
 
         {unmatched.length > 0 && (
           <p className="rounded-2xl bg-white/45 px-3.5 py-2.5 text-xs leading-relaxed text-[color:var(--ink-2)]">
-            流程里登记过、但系统里没有对应账号的人员：{unmatched.join("、")}。在「用户与岗位」按姓名创建账号后，会自动出现在经办候选里。
+            流程里登记过、但系统里没有对应账号的人员：{unmatched.join("、")}。在「用户与岗位」按姓名创建账号后，会自动出现在业务侧经办的候选里。
           </p>
         )}
       </div>

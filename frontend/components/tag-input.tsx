@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils";
 /**
  * 标签输入框：输入后回车（或点击加号）追加标签，点 × 删除。
  * 用于"涉及文件名称""涉及人员"等多值字段。
+ * optional = 标签后注明"选填"(必填项另有星号标记,避免把选填项误当成必填)。
  */
 export function TagInput({
   label,
@@ -16,12 +17,14 @@ export function TagInput({
   tags,
   onChange,
   className,
+  optional = false,
 }: {
   label?: string;
   placeholder?: string;
   tags: string[];
   onChange: (tags: string[]) => void;
   className?: string;
+  optional?: boolean;
 }) {
   const [draft, setDraft] = useState("");
 
@@ -34,7 +37,12 @@ export function TagInput({
 
   return (
     <div className={cn("space-y-2", className)}>
-      {label && <Label>{label}</Label>}
+      {label && (
+        <Label>
+          {label}
+          {optional && <span className="font-normal text-[color:var(--ink-3)]">选填</span>}
+        </Label>
+      )}
       <div className="flex gap-2">
         <div className="min-w-0 flex-1">
           <Input

@@ -58,6 +58,11 @@ export default function MonitorPage() {
         setDenied(true);
         return;
       }
+      // 首次登录还没改密码:大屏的数据接口会被拒绝,回工作台先改密码
+      if (e instanceof Error && (e as { code?: string }).code === "PASSWORD_CHANGE_REQUIRED") {
+        router.replace("/work");
+        return;
+      }
       // 网络抖动:保留上一次的数据,提示已过期
       setStale(true);
     }
@@ -594,7 +599,7 @@ function ago(iso: string, now: Date) {
 
 function EventItem({ e, now }: { e: OverviewEvent; now: Date }) {
   return (
-    <Link href={`/projects/${e.projectId}`} className="inline-flex items-center gap-1.5 whitespace-nowrap transition hover:text-white" title={ago(e.createdAt, now)}>
+    <Link href={`/projects/${e.projectId}`} prefetch={false} className="inline-flex items-center gap-1.5 whitespace-nowrap transition hover:text-white" title={ago(e.createdAt, now)}>
       <span className="h-[5px] w-[5px] rounded-full" style={{ background: EVENT_DOT[e.kind] ?? "rgba(255,255,255,0.4)" }} />
       <span className="font-data" style={{ color: INK3 }}>
         {e.actor || "系统"}

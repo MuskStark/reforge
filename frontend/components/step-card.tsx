@@ -1,7 +1,8 @@
 "use client";
 
-import { motion } from "framer-motion";
+import { motion } from "motion/react";
 import {
+  AlertCircle,
   ArrowDown,
   ArrowUp,
   ChevronDown,
@@ -21,15 +22,27 @@ import { YesNoSelect } from "@/components/yes-no-select";
 import { TagInput } from "@/components/tag-input";
 import { HandlerList } from "@/components/handler-list";
 import { PartyEditor } from "@/components/party-editor";
-import { stepIssues, needsInteropWithPrev, countersignMode, OVERALL_MODE_LABEL } from "@/lib/step-checks";
+import { stepIssueList, needsInteropWithPrev, countersignMode, OVERALL_MODE_LABEL } from "@/lib/step-checks";
+import { focusAnchor, issueAnchorId } from "@/lib/form-focus";
 import { CountersignModeBadge } from "@/components/countersign-mode-badge";
 import type { FlowStep, StepMode, WaitFor } from "@/lib/types";
+import { emptyParty } from "@/lib/types";
 import { cn } from "@/lib/utils";
+
+/** 一条经办记录是否已填(部门或人员至少一项) */
+const validHandler = (h: { department: string; staff: string[] }) =>
+  h.department.trim() || h.staff.some((x) => x.trim());
+
+/** 提示条里最多直接列出几项缺失,其余的在各子步骤内部另有标注 */
+const STRIP_LIMIT = 4;
 
 /**
  * 单个流程步骤编辑卡片(液态玻璃):
  * 名称 / 会签开关 / 前置会签条件 / 线上（系统+移动端）/ 线下（文件+经办部门人员）/ 备注
  * 会签卡带琥珀色环与暖色底,与普通玻璃卡一眼区分。
+ *
+ * 必填引导:卡片顶部常驻一条"还差 N 项必填",点某一项跳到对应控件;
+ * attempted(已经点过提交)之后,仍为空的必填控件加红圈。
  */
 export function StepCard({
   step,
@@ -39,6 +52,7 @@ export function StepCard({
   onChange,
   onRemove,
   onMove,
+  attempted = false,
 }: {
   step: FlowStep;
   steps: FlowStep[];
@@ -47,6 +61,8 @@ export function StepCard({
   onChange: (patch: Partial<FlowStep>) => void;
   onRemove: () => void;
   onMove: (dir: -1 | 1) => void;
+  /** 已经点过提交:仍缺失的必填控件标红 */
+  attempted?: boolean;
 }) {
   const mode: StepMode = step.mode;
 
@@ -63,8 +79,12 @@ export function StepCard({
   // 会签整体办理方式：由各方内部子步骤汇总
   const overallMode = countersignMode(step);
 
-  const issues = stepIssues(step, prevStep);
+  const issues = stepIssueList(step, prevStep);
   const ready = issues.length === 0;
+  // 点过提交后仍为空的必填控件 → 红圈
+  const bad = attempted && !ready;
+  const handlers = step.offline.handlers ?? [];
+  const sysId = issueAnchorId(step.id, "system");
 
   return (
     <motion.div
@@ -83,10 +103,13 @@ export function StepCard({
       {/* 头部：名称 + 徽章 + 排序/删除（序号在左侧轨道节点上） */}
       <div className="flex items-center gap-2 sm:gap-3">
         <Input
+          id={issueAnchorId(step.id, "name")}
           value={step.name}
-          placeholder={`步骤名称，如：${index === 0 ? "提交申请" : "部门审批"}`}
+          placeholder={`步骤名称（必填），如：${index === 0 ? "提交申请" : "部门审批"}`}
+          aria-label="步骤名称（必填）"
+          aria-invalid={attempted && !step.name.trim()}
           onChange={(e) => onChange({ name: e.target.value })}
-          className="min-w-0 flex-1 font-medium"
+          className={cn("min-w-0 flex-1 font-medium", attempted && !step.name.trim() && "field-invalid")}
         />
         {step.countersign && (
           <>
@@ -100,9 +123,9 @@ export function StepCard({
             />
           </>
         )}
-        {/* 完整度徽章：实时提示必填缺失项 */}
+        {/* 完整度徽章：实时提示必填缺失项（明细见卡片顶部的"还差 N 项必填"） */}
         <span
-          title={ready ? "本步骤必填信息已齐全" : issues.join("；")}
+          title={ready ? "本步骤必填信息已齐全" : issues.map((i) => i.text).join("；")}
           className={cn(
             "badge hidden shrink-0 sm:inline-flex",
             ready ? "badge-ok" : "badge-warn",
@@ -145,6 +168,38 @@ export function StepCard({
         </div>
       </div>
 
+      {/* 还差什么:常驻在卡片顶部,每一项可点击跳到对应控件(手机上也显示) */}
+      {issues.length > 0 && (
+        <div
+          aria-label="本步骤还差的必填项"
+          className={cn(
+            "mt-3 flex flex-wrap items-center gap-x-2 gap-y-1.5 rounded-2xl bg-[color:var(--red-soft)] px-3.5 py-2.5",
+            bad
+              ? "shadow-[inset_0_0_0_0.5px_rgba(255,59,48,0.5)]"
+              : "shadow-[inset_0_0_0_0.5px_rgba(255,59,48,0.28)]",
+          )}
+        >
+          <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-[color:var(--red-deep)]">
+            <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+            还差 {issues.length} 项必填
+          </span>
+          {issues.slice(0, STRIP_LIMIT).map((it) => (
+            <button
+              key={it.text}
+              type="button"
+                onClick={() => focusAnchor(issueAnchorId(step.id, it.field))}
+              title="点击跳到这一项"
+              className="rounded-full bg-white/80 px-2.5 py-1 text-xs font-medium text-[color:var(--red-deep)] shadow-[inset_0_0_0_0.5px_rgba(255,59,48,0.3)] transition hover:bg-white active:scale-[0.97]"
+            >
+              {it.text}
+            </button>
+          ))}
+          {issues.length > STRIP_LIMIT && (
+            <span className="text-xs text-[color:var(--red-deep)]">另有 {issues.length - STRIP_LIMIT} 项在下方子步骤里</span>
+          )}
+        </div>
+      )}
+
       <div className="mt-4 grid gap-3.5">
         {/* 会签开关(iOS 设置行 + 开关) */}
         <div
@@ -157,7 +212,10 @@ export function StepCard({
         >
           <Checkbox
             checked={step.countersign}
-            onCheckedChange={(v) => onChange({ countersign: v })}
+            // 第一次打开会签时先给出一方空白的"会签部门及人员",不用再去找添加按钮
+            onCheckedChange={(v) =>
+              onChange(v && step.parties.length === 0 ? { countersign: v, parties: [emptyParty()] } : { countersign: v })
+            }
           >
             <span className="inline-flex flex-wrap items-center gap-x-2 gap-y-0.5">
               <span
@@ -184,6 +242,8 @@ export function StepCard({
         {step.countersign ? (
           <div className="rounded-2xl bg-[linear-gradient(180deg,rgba(255,246,231,0.6),rgba(255,243,224,0.42))] p-3 shadow-[inset_0_0_0_0.5px_rgba(255,255,255,0.7),inset_0_0_0_0.5px_rgba(178,106,0,0.14)]">
             <PartyEditor
+              id={issueAnchorId(step.id, "parties")}
+              attempted={bad}
               parties={step.parties}
               onChange={(parties) => onChange({ parties })}
             />
@@ -203,7 +263,14 @@ export function StepCard({
                   <button
                     key={value}
                     type="button"
-                    onClick={() => onChange({ mode: value })}
+                    // 切到"线下办理"时直接给出一条空白的经办记录:线下步骤必须写明由谁受理
+                    onClick={() =>
+                      onChange(
+                        value === "offline" && handlers.length === 0
+                          ? { mode: value, offline: { ...step.offline, handlers: [{ department: "", staff: [] }] } }
+                          : { mode: value },
+                      )
+                    }
                     className={mode === value ? "on" : undefined}
                   >
                     <Icon className="h-4 w-4" />
@@ -217,37 +284,43 @@ export function StepCard({
             {mode === "online" ? (
               <div className="grid gap-3 rounded-2xl bg-white/50 p-3.5 shadow-[inset_0_0_0_0.5px_rgba(255,255,255,0.65),inset_0_0_0_0.5px_rgba(0,0,0,0.04)] sm:grid-cols-[1fr_auto] sm:items-end">
                 <div className="min-w-0 space-y-1.5">
-                  <Label htmlFor={`sys-${step.id}`} className="inline-flex items-center gap-1.5">
+                  <Label htmlFor={sysId} className="inline-flex items-center gap-1.5">
                     <Monitor className="h-3.5 w-3.5 text-[color:var(--ink-3)]" /> 线上处理系统
                     <span className="text-[color:var(--red)]">*</span>
+                    <span className="text-xs font-normal text-[color:var(--ink-3)]">必填</span>
                   </Label>
                   <SystemSelect
-                    id={`sys-${step.id}`}
+                    id={sysId}
                     value={step.online.systemName}
+                    invalid={bad && !step.online.systemName.trim()}
                     onChange={(v) =>
                       onChange({ online: { ...step.online, systemName: v } })
                     }
                   />
                 </div>
                 <div className="flex flex-col gap-2 sm:items-end">
-                  <YesNoSelect
-                    compact
-                    label="是否支持移动端"
-                    value={step.online.mobileSupported}
-                    onChange={(v) =>
-                      onChange({ online: { ...step.online, mobileSupported: v } })
-                    }
-                  />
-                  {needsInterop && (
+                  <div id={issueAnchorId(step.id, "mobile")}>
                     <YesNoSelect
                       compact
-                      label={`「${prevSystems.join("、")} → ${step.online.systemName.trim()}」数据互通`}
-                      value={step.online.dataInteroperable ?? null}
+                      label="是否支持移动端"
+                      value={step.online.mobileSupported}
                       onChange={(v) =>
-                        onChange({ online: { ...step.online, dataInteroperable: v } })
+                        onChange({ online: { ...step.online, mobileSupported: v } })
                       }
-                      hint="两系统是否自动共享数据"
                     />
+                  </div>
+                  {needsInterop && (
+                    <div id={issueAnchorId(step.id, "interop")}>
+                      <YesNoSelect
+                        compact
+                        label={`「${prevSystems.join("、")} → ${step.online.systemName.trim()}」数据互通`}
+                        value={step.online.dataInteroperable ?? null}
+                        onChange={(v) =>
+                          onChange({ online: { ...step.online, dataInteroperable: v } })
+                        }
+                        hint="两系统是否自动共享数据"
+                      />
+                    </div>
                   )}
                 </div>
               </div>
@@ -255,14 +328,18 @@ export function StepCard({
               <div className="space-y-3 rounded-2xl bg-white/50 p-3.5 shadow-[inset_0_0_0_0.5px_rgba(255,255,255,0.65),inset_0_0_0_0.5px_rgba(0,0,0,0.04)]">
                 <TagInput
                   label="涉及文件名称"
+                  optional
                   placeholder="输入文件名称后回车，如：合同正本 / 用印申请单"
-                  tags={step.offline.documents}
+                  tags={step.offline.documents ?? []}
                   onChange={(documents) => onChange({ offline: { ...step.offline, documents } })}
                 />
                 <HandlerList
-                  title="线下经办部门及涉及人员"
-                  handlers={step.offline.handlers}
-                  onChange={(handlers) => onChange({ offline: { ...step.offline, handlers } })}
+                  id={issueAnchorId(step.id, "handlers")}
+                  title="经办部门及人员"
+                  required
+                  error={bad && !handlers.some(validHandler)}
+                  handlers={handlers}
+                  onChange={(h) => onChange({ offline: { ...step.offline, handlers: h } })}
                 />
               </div>
             )}

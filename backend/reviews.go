@@ -108,7 +108,7 @@ func missingRequiredTx(ctx context.Context, q runner, projectID string, seq int)
 
 // handlerMembersTx 项目内的经办成员
 func handlerMembersTx(ctx context.Context, q runner, projectID string) ([]*User, error) {
-	rows, err := q.QueryContext(ctx, `SELECT u.id, u.username, u.password_hash, u.role, u.display_name, u.department, u.job_role, u.created_at
+	rows, err := q.QueryContext(ctx, `SELECT u.id, u.username, u.password_hash, u.role, u.display_name, u.department, u.job_role, u.created_at, u.must_change_password
 		FROM project_members m JOIN users u ON u.id = m.user_id
 		WHERE m.project_id = $1 AND m.role = 'handler' ORDER BY u.created_at`, projectID)
 	if err != nil {
@@ -118,7 +118,7 @@ func handlerMembersTx(ctx context.Context, q runner, projectID string) ([]*User,
 	var out []*User
 	for rows.Next() {
 		var u User
-		if err := rows.Scan(&u.ID, &u.Username, &u.PasswordHash, &u.Role, &u.DisplayName, &u.Department, &u.JobRole, &u.CreatedAt); err != nil {
+		if err := rows.Scan(&u.ID, &u.Username, &u.PasswordHash, &u.Role, &u.DisplayName, &u.Department, &u.JobRole, &u.CreatedAt, &u.MustChangePassword); err != nil {
 			return nil, err
 		}
 		out = append(out, &u)

@@ -18,7 +18,12 @@ type sessionData struct {
 	Role      string
 	UserID    string // users.id;环境变量引导的管理员没有用户行,为空
 	ExpiresAt time.Time
+	// 登录时为 true 表示这个账号还没改过管理员设定的密码;改完密码后清除
+	MustChangePwd bool
 }
+
+// passwordChangeRequired "必须先改密码"拒绝响应里的错误码(前端据此弹出强制改密)
+const passwordChangeRequired = "PASSWORD_CHANGE_REQUIRED"
 
 // sessionStore 内存角色会话表（开发库单实例足够；重启即全量登出）
 type sessionStore struct {
@@ -31,10 +36,10 @@ func newSessionStore() *sessionStore {
 	return &sessionStore{tokens: make(map[string]sessionData), ttl: 24 * time.Hour}
 }
 
-func (s *sessionStore) create(username, role, userID string) string {
+func (s *sessionStore) create(username, role, userID string, mustChange bool) string {
 	token := newID()
 	s.mu.Lock()
-	s.tokens[token] = sessionData{Username: username, Role: role, UserID: userID, ExpiresAt: time.Now().Add(s.ttl)}
+	s.tokens[token] = sessionData{Username: username, Role: role, UserID: userID, ExpiresAt: time.Now().Add(s.ttl), MustChangePwd: mustChange}
 	s.mu.Unlock()
 	return token
 }
@@ -72,6 +77,27 @@ func (s *sessionStore) revokeByUsername(username string) {
 	s.mu.Unlock()
 }
 
+// clearMustChange 改完密码后,当前会话解除"必须先改密码"的限制
+func (s *sessionStore) clearMustChange(token string) {
+	s.mu.Lock()
+	if sd, ok := s.tokens[token]; ok {
+		sd.MustChangePwd = false
+		s.tokens[token] = sd
+	}
+	s.mu.Unlock()
+}
+
+// revokeOthers 改完密码后吊销同一账号的其余会话(改密前的登录一律失效)
+func (s *sessionStore) revokeOthers(token, username string) {
+	s.mu.Lock()
+	for t, sd := range s.tokens {
+		if t != token && sd.Username == username {
+			delete(s.tokens, t)
+		}
+	}
+	s.mu.Unlock()
+}
+
 var sessions = newSessionStore()
 
 // bearerToken 从 Authorization: Bearer <token> 提取会话令牌
@@ -89,6 +115,9 @@ func requireAdmin(w http.ResponseWriter, r *http.Request) bool {
 	sd := sessions.get(token)
 	if sd == nil {
 		writeError(w, http.StatusUnauthorized, "未登录或会话已过期")
+		return false
+	}
+	if mustChangeFirst(w, sd) {
 		return false
 	}
 	if sd.Role != "admin" {
@@ -156,7 +185,8 @@ func handleRegister(st store) http.HandlerFunc {
 			writeError(w, http.StatusInternalServerError, "注册失败: "+err.Error())
 			return
 		}
-		token := sessions.create(u.Username, u.Role, u.ID)
+		// 公开注册的密码由用户自己设定,不强制改
+		token := sessions.create(u.Username, u.Role, u.ID, false)
 		writeJSON(w, http.StatusCreated, map[string]any{
 			"token": token,
 			"user":  publicUser(u),
@@ -206,7 +236,7 @@ func handleLogin(st store) http.HandlerFunc {
 				return
 			}
 			writeJSON(w, http.StatusOK, map[string]any{
-				"token": sessions.create(u.Username, u.Role, u.ID),
+				"token": sessions.create(u.Username, u.Role, u.ID, u.MustChangePassword),
 				"user":  publicUser(u),
 			})
 			return
@@ -224,9 +254,9 @@ func handleLogin(st store) http.HandlerFunc {
 		}
 		if username == envUser && subtleEqual(body.Password, envPass) {
 			writeJSON(w, http.StatusOK, map[string]any{
-				"token": sessions.create(envUser, "admin", ""),
+				"token": sessions.create(envUser, "admin", "", false),
 				"user": map[string]any{"id": "", "username": envUser, "role": "admin",
-					"displayName": envUser, "department": "", "jobRole": ""},
+					"displayName": envUser, "department": "", "jobRole": "", "mustChangePassword": false},
 			})
 			return
 		}
@@ -269,6 +299,7 @@ func publicUser(u *User) map[string]any {
 	return map[string]any{
 		"id": u.ID, "username": u.Username, "role": u.Role,
 		"displayName": displayName(u), "department": u.Department, "jobRole": u.JobRole,
+		"mustChangePassword": u.MustChangePassword,
 	}
 }
 
@@ -359,8 +390,10 @@ func handleAdminCreateUser(st store) http.HandlerFunc {
 			writeError(w, http.StatusInternalServerError, "密码加密失败")
 			return
 		}
+		// 密码由管理员设定:首次登录必须先改成自己的密码
 		u := &User{Username: body.Username, PasswordHash: string(hash), Role: body.Role,
-			DisplayName: body.DisplayName, Department: body.Department, JobRole: body.JobRole}
+			DisplayName: body.DisplayName, Department: body.Department, JobRole: body.JobRole,
+			MustChangePassword: true}
 		if err := st.CreateUser(u); err != nil {
 			if strings.Contains(err.Error(), "duplicate key") {
 				writeError(w, http.StatusConflict, "用户名已被占用")

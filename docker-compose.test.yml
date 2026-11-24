@@ -1,0 +1,53 @@
+# 测试环境编排：直接复用生产镜像（不从源码构建）
+#   - 独立项目名 / 容器名 / 数据卷（flow-test-pgdata）
+#   - 独立宿主机端口 3100（生产占用 3000）
+# 前置：先把当前生产镜像复制一份标签（冻结快照，之后重建生产不影响测试）
+#   docker tag flow-prod-frontend flow-test-frontend:latest
+#   docker tag flow-prod-backend  flow-test-backend:latest
+# 用法：docker compose -f docker-compose.test.yml up -d
+# 管理：logs -f ｜ down（卷保留）｜ down -v（连测试数据一起清）
+
+name: flow-test
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: flow-test-postgres
+    environment:
+      POSTGRES_USER: flow
+      POSTGRES_PASSWORD: flow
+      POSTGRES_DB: flow
+      TZ: Asia/Shanghai
+    volumes:
+      - flow-test-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U flow -d flow"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  backend:
+    image: flow-test-backend:latest
+    container_name: flow-test-backend
+    environment:
+      DATABASE_URL: postgres://flow:flow@postgres:5432/flow?sslmode=disable
+      FLOW_ADDR: 0.0.0.0:8080
+      TZ: Asia/Shanghai
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  frontend:
+    image: flow-test-frontend:latest
+    container_name: flow-test-frontend
+    environment:
+      BACKEND_ORIGIN: http://backend:8080
+      TZ: Asia/Shanghai
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "3100:3000"
+
+volumes:
+  flow-test-pgdata:

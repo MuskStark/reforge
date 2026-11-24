@@ -17,6 +17,8 @@ interface RegisteredUser {
   displayName: string;
   department: string;
   jobRole: JobRole;
+  /** 管理员设定的初始密码还没换:用户首次登录后必须先改密码 */
+  mustChangePassword: boolean;
   createdAt: string;
 }
 
@@ -87,7 +89,7 @@ export function UsersManager({
       });
       setUsers((prev) => [...prev, u]);
       setDraft(emptyDraft());
-      toast.success("已创建", { description: `「${u.displayName}」· ${JOB_ROLE_LABEL[u.jobRole]}，可凭密码登录` });
+      toast.success("已创建", { description: `「${u.displayName}」· ${JOB_ROLE_LABEL[u.jobRole]}，首次登录后须先修改密码` });
     } catch (e) {
       if (e instanceof Error && e.message === "UNAUTHORIZED") onLogout();
       else toast.error("创建失败", { description: e instanceof Error ? e.message : "请重试" });
@@ -155,7 +157,7 @@ export function UsersManager({
         <div className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-3">
           <Input value={draft.username} placeholder="用户名（2-32 字符，用于登录）" autoComplete="off" onChange={(e) => setDraft({ ...draft, username: e.target.value })} className="!h-11" />
           <Input value={draft.displayName} placeholder="显示名 / 姓名（如：张三）" autoComplete="off" onChange={(e) => setDraft({ ...draft, displayName: e.target.value })} className="!h-11" />
-          <Input type="password" value={draft.password} placeholder="初始密码（至少 6 位）" autoComplete="new-password" onChange={(e) => setDraft({ ...draft, password: e.target.value })} className="!h-11" />
+          <Input type="password" value={draft.password} placeholder="初始密码（至少 6 位，用户首次登录后须修改）" autoComplete="new-password" onChange={(e) => setDraft({ ...draft, password: e.target.value })} className="!h-11" />
           <Input value={draft.department} placeholder="部门（选填，如：信息中心）" autoComplete="off" onChange={(e) => setDraft({ ...draft, department: e.target.value })} className="!h-11" />
           <select value={draft.jobRole} onChange={(e) => setDraft({ ...draft, jobRole: e.target.value as JobRole })} aria-label="岗位" className="field !h-11">
             {JOB_ROLE_OPTIONS.map((o) => (
@@ -175,7 +177,9 @@ export function UsersManager({
           </div>
         </div>
         <p className="mt-3 text-xs leading-relaxed text-[color:var(--ink-3)]">
-          岗位说明：CTO 评审立项、方案、上线与验收（全局生效）；项目经理负责推进；经办确认需求、执行试运行；开发实施承接改造任务；观察者只读。
+          岗位说明：CTO 评审立项、方案、上线与验收（全局生效），分配项目里的科技侧经办；项目经理负责推进，分配项目里的业务侧经办；经办确认需求、执行试运行；开发实施承接改造任务；观察者只读。
+          <br />
+          这里设定的密码只是初始密码：用户首次登录后必须改成自己的密码，在那之前不能使用系统。用户登录后可以在「个人信息」里自行修改显示名、部门和密码。
         </p>
       </div>
 
@@ -206,6 +210,11 @@ export function UsersManager({
                     <span className="flex flex-wrap items-center gap-1.5 text-[15px] font-medium text-neutral-900">
                       {u.displayName || u.username}
                       {isSelf && <span className="badge badge-blue !h-[19px] !px-1.5 text-[10px]">当前登录</span>}
+                      {u.mustChangePassword && (
+                        <span className="badge badge-amber !h-[19px] !px-1.5 text-[10px]" title="还没完成首次登录改密">
+                          待首次登录改密
+                        </span>
+                      )}
                     </span>
                     <span className="font-data block truncate text-[11px] text-[color:var(--ink-3)]">
                       @{u.username}

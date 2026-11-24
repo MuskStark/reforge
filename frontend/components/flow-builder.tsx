@@ -1,24 +1,69 @@
 "use client";
 
-import { AnimatePresence } from "framer-motion";
-import { useState } from "react";
-import { Plus, RotateCcw, Save, User, Waypoints } from "lucide-react";
+import { AnimatePresence } from "motion/react";
+import { useMemo, useState } from "react";
+import { AlertCircle, CheckCircle2, Plus, RotateCcw, Save, User, Waypoints } from "lucide-react";
 import { toast } from "sonner";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { MultiStepLoader } from "@/components/ui/multi-step-loader";
+import { FormIssuesDialog, type FormIssueGroup } from "@/components/form-issues-dialog";
 import { cn } from "@/lib/utils";
-import { stepIssues, interopSystems, subInteropPrev } from "@/lib/step-checks";
+import { stepIssues, stepIssueList } from "@/lib/step-checks";
+import { issueAnchorId, focusAnchor } from "@/lib/form-focus";
 import { StepCard } from "@/components/step-card";
 import type { FlowProcess, FlowStep } from "@/lib/types";
 import { emptyProcess, emptyStep, normalizeParty } from "@/lib/types";
 import { adminFetch } from "@/lib/auth";
 
+/** 流程名称输入框的锚点 id */
+const BASE_ANCHOR = "flow-name";
+
+/** 请求根本没发出去(断网、后端没启动),区别于后端返回的业务错误 */
+class NetworkError extends Error {}
+
+/**
+ * 汇总整张表单还差的全部必填项(与后端校验规则一致),按填写顺序分组。
+ * 提交时一次全部列出,而不是修一个才看到下一个。
+ */
+function collectFormIssues(name: string, steps: FlowStep[]): FormIssueGroup[] {
+  const groups: FormIssueGroup[] = [];
+  if (!name.trim()) {
+    groups.push({
+      title: "流程基本信息",
+      anchorId: BASE_ANCHOR,
+      items: [{ text: "未填写流程名称", anchorId: BASE_ANCHOR }],
+    });
+  }
+  steps.forEach((s, i) => {
+    const items: FormIssueGroup["items"] = stepIssueList(s, steps[i - 1]).map((it) => ({
+      text: it.text,
+      anchorId: issueAnchorId(s.id, it.field),
+    }));
+    // 前置会签条件指向的步骤已失效(移动、删除步骤时会自动清理,这里是防线)
+    const d = s.waitFor?.stepId ? steps.findIndex((x) => x.id === s.waitFor!.stepId) : -1;
+    if (s.waitFor?.stepId && (d < 0 || d >= i || !steps[d].countersign)) {
+      items.push({ text: "前置会签条件指向的步骤已失效，请重新选择或取消", anchorId: null });
+    }
+    if (items.length) {
+      groups.push({
+        title: `第 ${i + 1} 步${s.name.trim() ? ` · ${s.name.trim()}` : "（未命名）"}`,
+        anchorId: items[0].anchorId,
+        items,
+      });
+    }
+  });
+  return groups;
+}
+
 /**
  * 流程收集主表单（液态玻璃）：流程基本信息 + 自定义增删/排序步骤，
  * 每步可配置会签与线上/线下属性，提交到 Go 后端。
  * 桌面端提交区为内联玻璃条；移动端为底部悬浮玻璃 Dock。
+ *
+ * 必填引导:每个步骤卡片顶部常驻"还差 N 项必填";提交时若有缺失,弹清单一次列出全部,
+ * 点哪项跳到哪项,同时把仍为空的必填控件标红。
  */
 export function FlowBuilder({
   value,
@@ -36,6 +81,13 @@ export function FlowBuilder({
 }) {
   const { name, description, applicant, steps } = value;
   const [submitting, setSubmitting] = useState(false);
+  /** 点过提交之后:仍缺失的必填控件标红 */
+  const [attempted, setAttempted] = useState(false);
+  const [summaryOpen, setSummaryOpen] = useState(false);
+
+  const issueGroups = useMemo(() => collectFormIssues(name, steps), [name, steps]);
+  const missing = issueGroups.reduce((n, g) => n + g.items.length, 0);
+
   const patchStep = (id: string, patch: Partial<FlowStep>) =>
     onChange({ ...value, steps: steps.map((s) => (s.id === id ? { ...s, ...patch } : s)) });
 
@@ -66,123 +118,82 @@ export function FlowBuilder({
     onChange({ ...value, steps: cleaned });
   };
 
-  /** 前端先行校验，与后端规则一致，避免无效提交 */
-  const validate = (): string | null => {
-    if (!name.trim()) return "请填写流程名称";
-    const validHandler = (h: { department: string; staff: string[] }) =>
-      h.department.trim() || h.staff.some((x) => x.trim());
-    for (let i = 0; i < steps.length; i++) {
-      const s = steps[i];
-      const n = i + 1;
-      if (!s.name.trim()) return `第 ${n} 步的步骤名称不能为空`;
-      const prev = i > 0 ? steps[i - 1] : undefined;
-      if (s.countersign) {
-        // 会签步骤：属性下沉到子步骤，主级不再校验系统/经办
-        if (!s.parties.some(validHandler))
-          return `第 ${n} 步开启了会签，请至少添加一个会签部门及人员`;
-        for (let j = 0; j < s.parties.length; j++) {
-          const party = s.parties[j];
-          const who = party.department.trim() || `会签方${j + 1}`;
-          const subs = (party.subSteps ?? []).map((x) => ({ ...x }));
-          for (let k = 0; k < subs.length; k++) {
-            const sub = subs[k];
-            if (!sub.name.trim()) continue;
-            if (sub.mode === "online") {
-              if (!sub.online.systemName.trim())
-                return `第 ${n} 步「${who}」的子步骤「${sub.name}」为线上处理，请填写系统名称`;
-              if (sub.online.mobileSupported == null)
-                return `第 ${n} 步「${who}」的子步骤「${sub.name}」为线上处理，请选择是否支持移动端`;
-              // 与上一个已命名子步骤均线上且系统不同：必须选择是否数据互通
-              const p = subInteropPrev(subs, k);
-              if (p && sub.online.dataInteroperable == null)
-                return `第 ${n} 步「${who}」的子步骤「${p.name} → ${sub.name}」系统不同，请选择两系统是否数据互通`;
-            } else if (!sub.offline.handlers.some(validHandler)) {
-              return `第 ${n} 步「${who}」的子步骤「${sub.name}」为线下处理，请至少填写一个经办部门及人员`;
-            }
-          }
-        }
-      } else {
-        if (s.mode === "online") {
-          if (!s.online.systemName.trim())
-            return `第 ${n} 步为线上处理，请填写系统名称`;
-          if (s.online.mobileSupported == null)
-            return `第 ${n} 步为线上处理，请选择是否支持移动端`;
-          // 相邻线上且系统不同（上一步为会签时取各方末位子步骤的系统）：必须选择是否数据互通
-          const prevSystems = interopSystems(s, prev);
-          if (prevSystems.length && s.online.dataInteroperable == null)
-            return `第 ${n} 步与上一步${prev?.countersign ? "（会签）" : ""}均为线上且系统不同（${prevSystems.join("、")} → ${s.online.systemName.trim()}），请选择两系统是否数据互通`;
-        }
-        if (s.mode === "offline" && !s.offline.handlers.some(validHandler))
-          return `第 ${n} 步为线下处理，请至少填写一个经办部门及人员`;
-      }
-      if (s.waitFor?.stepId) {
-        const d = steps.findIndex((x) => x.id === s.waitFor!.stepId);
-        if (d < 0 || d >= i)
-          return `第 ${n} 步的前置会签依赖只能指向其之前的会签步骤`;
-        if (!steps[d].countersign)
-          return `第 ${n} 步的前置依赖「${steps[d].name || "未命名"}」不是会签步骤`;
-        if (
-          s.waitFor.partyId &&
-          !steps[d].parties.some((p) => p.id === s.waitFor!.partyId)
-        )
-          return `第 ${n} 步的前置会签依赖指向的会签方不存在`;
-      }
-    }
-    return null;
+  /** 从"还差什么"清单跳到某一项:先关弹窗,再滚动聚焦 */
+  const jumpTo = (anchorId: string | null) => {
+    setSummaryOpen(false);
+    focusAnchor(anchorId);
   };
 
   const submit = async () => {
-    const err = validate();
-    if (err) {
-      toast.error("提交失败", { description: err });
+    if (missing > 0) {
+      // 必填没填齐:不发请求,列出全部缺失项,并把对应控件标红
+      setAttempted(true);
+      setSummaryOpen(true);
       return;
     }
+    setSubmitting(true);
     try {
-      setSubmitting(true);
       // 载荷构造(新建 POST / 编辑 PUT 共用)
       const payload = {
         name,
         description,
         applicant,
         steps: steps.map((s, i) => {
-            // 提交前规整：会签方兜底 + 悬空的前置依赖清理
-            let waitFor = s.waitFor ?? null;
-            if (waitFor?.stepId) {
-              const d = steps.findIndex((x) => x.id === waitFor!.stepId);
-              if (d < 0 || d >= i || !steps[d].countersign) waitFor = null;
-              else if (waitFor.partyId && !steps[d].parties.some((p) => p.id === waitFor!.partyId))
-                waitFor = { stepId: waitFor.stepId, partyId: "" };
-            }
-            return { ...s, parties: s.parties.map(normalizeParty), waitFor };
-          }),
+          // 提交前规整：会签方兜底 + 悬空的前置依赖清理
+          let waitFor = s.waitFor ?? null;
+          if (waitFor?.stepId) {
+            const d = steps.findIndex((x) => x.id === waitFor!.stepId);
+            if (d < 0 || d >= i || !steps[d].countersign) waitFor = null;
+            else if (waitFor.partyId && !steps[d].parties.some((p) => p.id === waitFor!.partyId))
+              waitFor = { stepId: waitFor.stepId, partyId: "" };
+          }
+          return { ...s, parties: s.parties.map(normalizeParty), waitFor };
+        }),
       };
-      const data = existingId
-        ? await adminFetch<FlowProcess>(`/api/admin/processes/${existingId}?via=form`, {
-            method: "PUT",
-            body: JSON.stringify(payload),
-          })
-        : await fetch("/api/processes", {
+      let data: FlowProcess;
+      if (existingId) {
+        data = await adminFetch<FlowProcess>(`/api/admin/processes/${existingId}?via=form`, {
+          method: "PUT",
+          body: JSON.stringify(payload),
+        });
+      } else {
+        let res: Response;
+        try {
+          res = await fetch("/api/processes", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(payload),
-          }).then(async (res) => {
-            const d = await res.json();
-            if (!res.ok) throw new Error(d?.error ?? "服务异常，请稍后重试");
-            return d as FlowProcess;
           });
+        } catch {
+          throw new NetworkError();
+        }
+        const d = (await res.json().catch(() => null)) as (FlowProcess & { error?: string }) | null;
+        // 后端校验没过、提交太频繁等:原样显示后端给的说明,不要说成网络异常
+        if (!res.ok) throw new Error(d?.error ?? `服务返回了 ${res.status}，请稍后重试`);
+        if (!d) throw new Error("服务返回了无法识别的内容，请稍后重试");
+        data = d;
+      }
       toast.success(existingId ? "流程已更新" : "流程已提交", {
         description: `「${data.name}」共 ${data.steps.length} 个步骤`,
       });
+      setAttempted(false);
       onSubmitted();
       if (!existingId) onChange(emptyProcess());
-    } catch {
-      toast.error("网络异常", { description: "无法连接后端服务，请确认 Go 服务已启动" });
+    } catch (e) {
+      if (e instanceof NetworkError) {
+        toast.error("网络异常", { description: "无法连接后端服务，请确认 Go 服务已启动" });
+      } else {
+        toast.error(existingId ? "保存被拒绝" : "提交被拒绝", {
+          description: e instanceof Error ? e.message : "请稍后重试",
+        });
+      }
     } finally {
       setSubmitting(false);
     }
   };
 
   const readyCount = steps.filter((s, i) => stepIssues(s, steps[i - 1]).length === 0).length;
+  const nameMissing = attempted && !name.trim();
 
   return (
     <div className="space-y-7">
@@ -196,12 +207,15 @@ export function FlowBuilder({
           <div className="space-y-1.5">
             <Label htmlFor="flow-name">
               流程名称 <span className="text-[color:var(--red)]">*</span>
+              <span className="font-normal text-[color:var(--ink-3)]">必填</span>
             </Label>
             <Input
               id="flow-name"
               value={name}
+              aria-invalid={nameMissing}
               placeholder="如：采购申请审批流程"
               onChange={(e) => onChange({ ...value, name: e.target.value })}
+              className={nameMissing ? "field-invalid" : undefined}
             />
           </div>
           <div className="space-y-1.5">
@@ -307,6 +321,7 @@ export function FlowBuilder({
                     steps={steps}
                     index={i}
                     total={steps.length}
+                    attempted={attempted}
                     onChange={(patch) => patchStep(step.id, patch)}
                     onRemove={() => removeStep(step.id)}
                     onMove={(dir) => moveStep(step.id, dir)}
@@ -334,9 +349,27 @@ export function FlowBuilder({
 
       {/* 提交区(桌面:内联玻璃条;移动端隐藏,由底部 Dock 接管) */}
       <section className="glass-card mb-2 hidden flex-wrap items-center justify-between gap-3 p-4 sm:flex sm:p-5">
-        <p className="flex items-center gap-2 px-1 text-[13px] text-[color:var(--ink-2)]">
-          <span className={cn("h-2 w-2 rounded-full", readyCount === steps.length ? "bg-[color:var(--green)]" : "bg-[color:var(--red)]")} />
-          <span className="font-data">{readyCount}/{steps.length}</span> 步骤就绪 · 提交前请完善标红的必填项
+        <p className="flex flex-wrap items-center gap-2 px-1 text-[13px] text-[color:var(--ink-2)]">
+          {missing === 0 ? (
+            <>
+              <CheckCircle2 className="h-4 w-4 text-[color:var(--green)]" />
+              流程名称和全部步骤的必填项都已填好，可以提交
+            </>
+          ) : (
+            <>
+              <AlertCircle className="h-4 w-4 text-[color:var(--red)]" />
+              <span>
+                还有 <b className="font-data text-[color:var(--red-deep)]">{missing}</b> 项必填未完成
+              </span>
+              <button
+                type="button"
+                onClick={() => setSummaryOpen(true)}
+                className="rounded-full bg-white/80 px-2.5 py-1 text-xs font-semibold text-[color:var(--tint)] shadow-[inset_0_0_0_0.5px_rgba(0,113,227,0.25)] transition hover:bg-white"
+              >
+                查看是哪些
+              </button>
+            </>
+          )}
         </p>
         <div className="flex flex-wrap items-center gap-2.5">
           <button type="button" onClick={() => onChange(emptyProcess())} className="btn btn-glass">
@@ -369,10 +402,19 @@ export function FlowBuilder({
         </button>
         <button type="button" onClick={() => void submit()} className="btn btn-primary !h-12 min-w-0 flex-1 text-[16px]">
           <Save className="h-4 w-4" /> 提交流程
+          {/* 还差的必填数:点提交会列出是哪些 */}
+          {missing > 0 && (
+            <span className="ml-0.5 rounded-full bg-white/25 px-1.5 font-data text-[12px] font-semibold leading-5">缺 {missing}</span>
+          )}
         </button>
       </div>
       {/* Dock 遮挡避让:移动端内容底部留白 */}
       <div className="h-20 sm:hidden" aria-hidden="true" />
+
+      {/* 提交被拦下:一次列出全部还差的必填项 */}
+      {summaryOpen && missing > 0 && (
+        <FormIssuesDialog groups={issueGroups} total={missing} onClose={() => setSummaryOpen(false)} onJump={jumpTo} />
+      )}
 
       {/* 提交过程 loading:MultiStepLoader(亮色) */}
       <MultiStepLoader

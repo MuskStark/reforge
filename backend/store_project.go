@@ -292,7 +292,7 @@ func usersWithRoleTx(ctx context.Context, q runner, sysRole string) ([]*User, er
 	var out []*User
 	for rows.Next() {
 		var u User
-		if err := rows.Scan(&u.ID, &u.Username, &u.PasswordHash, &u.Role, &u.DisplayName, &u.Department, &u.JobRole, &u.CreatedAt); err != nil {
+		if err := rows.Scan(&u.ID, &u.Username, &u.PasswordHash, &u.Role, &u.DisplayName, &u.Department, &u.JobRole, &u.CreatedAt, &u.MustChangePassword); err != nil {
 			return nil, err
 		}
 		out = append(out, &u)
@@ -310,7 +310,7 @@ func usersWithJobTx(ctx context.Context, q runner, job string) ([]*User, error) 
 	var out []*User
 	for rows.Next() {
 		var u User
-		if err := rows.Scan(&u.ID, &u.Username, &u.PasswordHash, &u.Role, &u.DisplayName, &u.Department, &u.JobRole, &u.CreatedAt); err != nil {
+		if err := rows.Scan(&u.ID, &u.Username, &u.PasswordHash, &u.Role, &u.DisplayName, &u.Department, &u.JobRole, &u.CreatedAt, &u.MustChangePassword); err != nil {
 			return nil, err
 		}
 		out = append(out, &u)

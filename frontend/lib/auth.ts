@@ -16,6 +16,13 @@ export interface SessionUser {
   department: string;
   /** 全局岗位;引导管理员为空字符串 */
   jobRole: JobRole | "";
+  /** 为 true 表示管理员设定的初始密码还没换:改完之前只能改密码,其他接口都会被拒绝 */
+  mustChangePassword?: boolean;
+}
+
+/** 改完资料或密码后更新本地缓存的用户(与 /api/auth/me 的返回同构) */
+export function setSessionUser(user: SessionUser) {
+  sessionStorage.setItem(USER_KEY, JSON.stringify(user));
 }
 
 export function getToken(): string | null {
@@ -63,7 +70,14 @@ export async function authFetch<T>(path: string, init?: RequestInit): Promise<T>
   }
   const data = await res.json();
   if (!res.ok) {
-    throw new Error((data as { error?: string })?.error ?? "请求失败");
+    const { error, code } = (data ?? {}) as { error?: string; code?: string };
+    const err = new Error(error ?? "请求失败") as Error & { code?: string };
+    err.code = code;
+    // 服务端要求先改密码(首次登录):通知应用外壳立刻弹出强制改密
+    if (res.status === 403 && code === "PASSWORD_CHANGE_REQUIRED") {
+      window.dispatchEvent(new Event("reforge:password-required"));
+    }
+    throw err;
   }
   return data as T;
 }

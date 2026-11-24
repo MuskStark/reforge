@@ -112,47 +112,74 @@ export function subLinkBroken(
   return !!pSys && pSys !== b.online.systemName.trim() && b.online.dataInteroperable === false;
 }
 
+/** 缺失项对应的控件:点提示时据此滚过去并把焦点放进去(id 见 form-focus.ts 的 issueAnchorId) */
+export type IssueField =
+  | "name" // 步骤名称
+  | "system" // 线上处理系统
+  | "mobile" // 是否支持移动端
+  | "interop" // 与上一步系统的数据互通
+  | "handlers" // 线下经办部门及人员
+  | "parties" // 会签部门及人员
+  | { subId: string; sub: "system" | "mobile" | "interop" | "handlers" }; // 会签方的内部子步骤
+
+export interface StepIssue {
+  /** 缺失项说明 */
+  text: string;
+  field: IssueField;
+}
+
+const ONLINE_SUB = "未选择线上系统";
+const HANDLER_MISSING = "还没有添加经办部门及人员";
+
 /**
- * 步骤完整度检查：返回缺失项描述列表（空数组 = 就绪）。与后端校验规则一致。
+ * 步骤完整度检查：返回还差的必填项（空数组 = 就绪）。与后端校验规则一致。
  * prev 为上一步骤（缺省时跳过依赖上一步的数据互通检查）。
  */
-export function stepIssues(step: FlowStep, prev?: FlowStep): string[] {
-  const issues: string[] = [];
+export function stepIssueList(step: FlowStep, prev?: FlowStep): StepIssue[] {
+  const issues: StepIssue[] = [];
+
+  if (!step.name.trim()) issues.push({ text: "未填写步骤名称", field: "name" });
 
   if (step.countersign) {
     if (!step.parties.some(validHandler)) {
-      issues.push("未添加会签方");
+      issues.push({ text: "还没有添加会签部门及人员", field: "parties" });
       return issues;
     }
     step.parties.forEach((party, j) => {
       const dept = party.department.trim() || `会签方${j + 1}`;
-      const subs = (party.subSteps ?? []).map(normSub);
-      subs.forEach((sub, k) => {
+      (party.subSteps ?? []).forEach((raw, k) => {
+        const sub = normSub(raw);
+        const subId = raw.id ?? "";
+        const where = `「${dept}」的「${sub.name}」`;
         if (!sub.name.trim()) return;
         if (sub.mode === "online") {
           if (!sub.online.systemName.trim())
-            issues.push(`「${dept}」子步骤「${sub.name}」未填线上系统`);
+            issues.push({ text: `${where}${ONLINE_SUB}`, field: { subId, sub: "system" } });
           if (sub.online.mobileSupported == null)
-            issues.push(`「${dept}」子步骤「${sub.name}」未选择是否支持移动端`);
-          const p = subInteropPrev(subs, k);
+            issues.push({ text: `${where}未选择是否支持移动端`, field: { subId, sub: "mobile" } });
+          const p = subInteropPrev(party.subSteps ?? [], k);
           if (p && sub.online.dataInteroperable == null)
-            issues.push(`「${dept}」「${p.name} → ${sub.name}」未选择系统数据互通`);
+            issues.push({ text: `${where}未选择与「${p.name}」的系统是否数据互通`, field: { subId, sub: "interop" } });
         } else if (!sub.offline.handlers.some(validHandler)) {
-          issues.push(`「${dept}」子步骤「${sub.name}」未填经办部门`);
+          issues.push({ text: `${where}${HANDLER_MISSING}`, field: { subId, sub: "handlers" } });
         }
       });
     });
   } else {
     if (step.mode === "online") {
-      if (!step.online.systemName.trim()) issues.push("未填线上系统名称");
-      if (step.online.mobileSupported == null)
-        issues.push("未选择是否支持移动端");
+      if (!step.online.systemName.trim()) issues.push({ text: "未选择线上处理系统", field: "system" });
+      if (step.online.mobileSupported == null) issues.push({ text: "未选择是否支持移动端", field: "mobile" });
       const prevSys = interopSystems(step, prev);
       if (prevSys.length && step.online.dataInteroperable == null)
-        issues.push(`未选择与上一步系统（${prevSys.join("、")}）是否数据互通`);
+        issues.push({ text: `未选择与上一步系统（${prevSys.join("、")}）是否数据互通`, field: "interop" });
     } else if (!step.offline.handlers.some(validHandler)) {
-      issues.push("未填经办部门及人员");
+      issues.push({ text: `${HANDLER_MISSING}（线下办理必填）`, field: "handlers" });
     }
   }
   return issues;
+}
+
+/** 步骤完整度检查的说明文字列表（空数组 = 就绪） */
+export function stepIssues(step: FlowStep, prev?: FlowStep): string[] {
+  return stepIssueList(step, prev).map((i) => i.text);
 }

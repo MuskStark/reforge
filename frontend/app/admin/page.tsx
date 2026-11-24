@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { ArrowLeft, BellRing, Inbox, LayoutGrid, ListChecks, LogOut, Monitor, User, Users, Waypoints } from "lucide-react";
+import { ArrowLeft, BellRing, Inbox, LayoutGrid, ListChecks, LogOut, Monitor, User, UserRound, Users, Waypoints } from "lucide-react";
 import { ProcessManager } from "@/components/admin/process-manager";
 import type { FlowProcess } from "@/lib/types";
 import { SystemsManager } from "@/components/admin/systems-manager";
@@ -14,6 +14,7 @@ import { StageTemplates } from "@/components/admin/stage-templates";
 import { FlowChartModal, type ChartSource } from "@/components/flow-chart";
 import { authFetch, clearSession, getToken, type SessionUser } from "@/lib/auth";
 import { BrandMark, LoginCard } from "@/components/auth/login-card";
+import { ProfileDialog } from "@/components/auth/profile-dialog";
 import { cn } from "@/lib/utils";
 
 type Phase = "checking" | "auth" | "member" | "admin";
@@ -29,6 +30,7 @@ export default function AdminPage() {
   const [me, setMe] = useState<SessionUser | null>(null);
   const [chart, setChart] = useState<ChartSource | null>(null);
   const [tab, setTab] = useState<Tab>("processes");
+  const [profileOpen, setProfileOpen] = useState(false);
 
   // 启动:校验本地会话
   useEffect(() => {
@@ -62,6 +64,16 @@ export default function AdminPage() {
     { id: "stages", label: "阶段模板", icon: ListChecks },
     { id: "channels", label: "通知渠道", icon: BellRing },
   ];
+
+  // 首次登录(管理员设定的初始密码还没换):先改密码,改完之前后台的其他请求都会被服务端拒绝
+  if (me?.mustChangePassword) {
+    return (
+      <main className="dvh-fill relative w-full overflow-x-clip">
+        <div className="ambient-field" aria-hidden="true" />
+        <ProfileDialog me={me} forced onClose={() => {}} onSaved={setMe} onLogout={logout} />
+      </main>
+    );
+  }
 
   return (
     <main className="dvh-fill relative w-full overflow-x-clip">
@@ -97,9 +109,12 @@ export default function AdminPage() {
                 你可以在工作台里推进与评审自己参与的流程改造。
               </p>
               <div className="mt-5 flex justify-center gap-3">
-                <Link href="/work" className="btn btn-primary">
+                <Link href="/work" prefetch={false} className="btn btn-primary">
                   前往工作台
                 </Link>
+                <button type="button" onClick={() => setProfileOpen(true)} className="btn btn-glass">
+                  <UserRound className="h-4 w-4" /> 个人信息
+                </button>
                 <button type="button" onClick={logout} className="btn btn-glass">
                   <LogOut className="h-4 w-4" /> 退出
                 </button>
@@ -140,7 +155,7 @@ export default function AdminPage() {
                   管理员
                 </span>
               </span>
-              <Link href="/work" className="inline-flex h-9 items-center gap-1.5 rounded-full px-3.5 text-sm font-semibold text-[color:var(--tint)] transition hover:bg-[color:var(--tint-soft)]">
+              <Link href="/work" prefetch={false} className="inline-flex h-9 items-center gap-1.5 rounded-full px-3.5 text-sm font-semibold text-[color:var(--tint)] transition hover:bg-[color:var(--tint-soft)]">
                 <LayoutGrid className="h-4 w-4" />
                 <span className="hidden sm:inline">工作台</span>
               </Link>
@@ -151,6 +166,9 @@ export default function AdminPage() {
               >
                 <ArrowLeft className="h-4 w-4" />
                 <span className="hidden sm:inline">返回前台</span>
+              </button>
+              <button type="button" onClick={() => setProfileOpen(true)} className="icon-btn !h-9 !w-9" aria-label="个人信息" title="个人信息">
+                <UserRound className="h-4 w-4" />
               </button>
               <button type="button" onClick={logout} className="icon-btn !h-9 !w-9" aria-label="退出登录" title="退出登录">
                 <LogOut className="h-4 w-4" />
@@ -170,6 +188,7 @@ export default function AdminPage() {
                     <li key={href} className="shrink-0 sm:shrink">
                       <Link
                         href={href}
+                        prefetch={false}
                         className="flex h-11 w-full items-center gap-2.5 rounded-[13px] px-3 text-[15px] font-medium text-[color:var(--tint)] transition hover:bg-[color:var(--tint-soft)] sm:h-10"
                       >
                         <Icon className="h-[17px] w-[17px]" />
@@ -199,7 +218,7 @@ export default function AdminPage() {
                     </li>
                   ))}
                   <li className="shrink-0 sm:hidden">
-                    <Link href="/monitor" className="flex h-11 w-full items-center gap-2.5 rounded-[13px] px-3 text-[15px] font-medium text-[color:var(--tint)]">
+                    <Link href="/monitor" prefetch={false} className="flex h-11 w-full items-center gap-2.5 rounded-[13px] px-3 text-[15px] font-medium text-[color:var(--tint)]">
                       <Monitor className="h-[17px] w-[17px]" />
                       <span className="whitespace-nowrap">数据大屏</span>
                     </Link>
@@ -208,6 +227,7 @@ export default function AdminPage() {
                 <div className="mt-2 hidden border-t border-[color:var(--sep)] pt-2 sm:block">
                   <Link
                     href="/monitor"
+                    prefetch={false}
                     className="flex h-10 w-full items-center gap-2.5 rounded-[13px] px-3 text-[15px] font-medium text-[color:var(--tint)] transition hover:bg-[color:var(--tint-soft)]"
                   >
                     <Monitor className="h-[17px] w-[17px]" />
@@ -241,6 +261,8 @@ export default function AdminPage() {
           </>
         )}
       </div>
+
+      {profileOpen && me && <ProfileDialog me={me} onClose={() => setProfileOpen(false)} onSaved={setMe} />}
 
       {chart && <FlowChartModal onClose={() => setChart(null)} source={chart} />}
     </main>

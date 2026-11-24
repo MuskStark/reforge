@@ -119,14 +119,51 @@ func TestCapsMatrix(t *testing.T) {
 		{"项目经理不能指派 PM", member, []string{RolePM}, func(c caps) bool { return c.assign() }, false},
 		{"CTO 全局可评 CTO 关卡", cto, nil, func(c caps) bool { return c.canReview(RoleCTO) }, true},
 		{"CTO 不能评经办关卡", cto, nil, func(c caps) bool { return c.canReview(RoleHandler) }, false},
-		{"CTO 可指派 PM、可跳过阶段", cto, nil, func(c caps) bool { return c.assign() && c.skip() }, true},
+		{"CTO 可跳过阶段、不能指派 PM", cto, nil, func(c caps) bool { return c.skip() && !c.assign() }, true},
 		{"管理员全权", admin, nil, func(c caps) bool { return c.assign() && c.skip() && c.manage() && c.canReview(RoleHandler) }, true},
 		{"观察者只读", member, []string{RoleViewer}, func(c caps) bool { return c.member() }, false},
 		{"非成员没有任何写权", member, nil, func(c caps) bool { return c.member() || c.manage() }, false},
 	}
 	for _, tc := range cases {
-		if got := tc.check(capsFor(tc.a, tc.roles)); got != tc.want {
+		if got := tc.check(capsFor(tc.a, tc.roles)); tc.want != got {
 			t.Errorf("%s: got %v want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
+// 流程的权限分配按类划分:管理员全部;CTO 科技侧经办(开发实施);项目经理业务侧经办(经办)
+func TestAssignMatrix(t *testing.T) {
+	member := actor{SysRole: "member"}
+	all := []string{RolePM, RoleHandler, RoleDev, RoleViewer}
+	cases := []struct {
+		name  string
+		a     actor
+		roles []string
+		want  map[string]bool
+	}{
+		{"管理员分配全部", actor{SysRole: "admin"}, nil, map[string]bool{RolePM: true, RoleHandler: true, RoleDev: true, RoleViewer: true}},
+		{"CTO 只分配科技侧经办", actor{SysRole: "member", JobRole: RoleCTO}, nil, map[string]bool{RolePM: false, RoleHandler: false, RoleDev: true, RoleViewer: false}},
+		{"项目经理只分配业务侧经办", member, []string{RolePM}, map[string]bool{RolePM: false, RoleHandler: true, RoleDev: false, RoleViewer: false}},
+		{"经办不能分配任何人", member, []string{RoleHandler}, map[string]bool{RolePM: false, RoleHandler: false, RoleDev: false, RoleViewer: false}},
+		{"开发实施不能分配任何人", member, []string{RoleDev}, map[string]bool{RolePM: false, RoleHandler: false, RoleDev: false, RoleViewer: false}},
+		{"观察者不能分配任何人", member, []string{RoleViewer}, map[string]bool{RolePM: false, RoleHandler: false, RoleDev: false, RoleViewer: false}},
+		{"非成员不能分配任何人", member, nil, map[string]bool{RolePM: false, RoleHandler: false, RoleDev: false, RoleViewer: false}},
+		{"CTO 兼项目经理:两侧经办都能分配", actor{SysRole: "member", JobRole: RoleCTO}, []string{RolePM}, map[string]bool{RolePM: false, RoleHandler: true, RoleDev: true, RoleViewer: false}},
+	}
+	for _, tc := range cases {
+		c := capsFor(tc.a, tc.roles)
+		for _, role := range all {
+			if got := c.canAssign(role); got != tc.want[role] {
+				t.Errorf("%s: 分配 %s got %v want %v", tc.name, role, got, tc.want[role])
+			}
+		}
+		if c.canAssign("owner") {
+			t.Errorf("%s: 未知角色不应可分配", tc.name)
+		}
+		// 交给前端的能力表必须和实际判定一致
+		f := c.flags()
+		if f["assignHandler"] != c.canAssign(RoleHandler) || f["assignDev"] != c.canAssign(RoleDev) || f["assignViewer"] != c.canAssign(RoleViewer) || f["assign"] != c.canAssign(RolePM) {
+			t.Errorf("%s: 能力表与 canAssign 不一致: %v", tc.name, f)
 		}
 	}
 }

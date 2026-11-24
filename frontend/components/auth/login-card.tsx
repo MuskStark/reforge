@@ -80,13 +80,18 @@ export function LoginCard({
         body: JSON.stringify({ username: username.trim(), password }),
       });
       setSession(data.token, data.user);
-      toast.success(
-        mode === "register"
-          ? data.user.role === "admin"
-            ? "注册成功，你已成为管理员"
-            : "注册成功"
-          : `欢迎回来，${data.user.displayName || data.user.username}`,
-      );
+      if (data.user.mustChangePassword) {
+        // 首次登录:页面随后会弹出不可关闭的改密框
+        toast.info("首次登录，请先修改密码");
+      } else {
+        toast.success(
+          mode === "register"
+            ? data.user.role === "admin"
+              ? "注册成功，你已成为管理员"
+              : "注册成功"
+            : `欢迎回来，${data.user.displayName || data.user.username}`,
+        );
+      }
       onLoggedIn(data.user, data.token);
     } catch (e) {
       if (e instanceof Error && e.message !== "UNAUTHORIZED") {
@@ -192,6 +197,7 @@ export function LoginCard({
       <div className="mt-5">
         <Link
           href="/"
+          prefetch={false}
           className="inline-flex items-center gap-1.5 text-[13px] font-medium text-[color:var(--tint)] transition hover:brightness-110"
         >
           <ArrowLeft className="h-3.5 w-3.5" /> 返回流程收集表

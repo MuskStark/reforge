@@ -22,18 +22,27 @@ export const JOB_ROLE_LABEL: Record<JobRole, string> = {
 };
 
 export const JOB_ROLE_OPTIONS: { value: JobRole; label: string; hint: string }[] = [
-  { value: "cto", label: "CTO", hint: "评审立项 / 方案 / 上线 / 验收,全局生效" },
-  { value: "pm", label: "项目经理", hint: "负责一个流程从立项到上线的推进" },
-  { value: "handler", label: "经办", hint: "确认需求、执行试运行、办理业务" },
-  { value: "dev", label: "开发实施", hint: "承接系统改造任务" },
+  { value: "cto", label: "CTO", hint: "评审立项 / 方案 / 上线 / 验收,全局生效;分配项目里的科技侧经办" },
+  { value: "pm", label: "项目经理", hint: "负责一个流程从立项到上线的推进;分配项目里的业务侧经办" },
+  { value: "handler", label: "经办", hint: "确认需求、执行试运行、办理业务(项目里的业务侧经办)" },
+  { value: "dev", label: "开发实施", hint: "承接系统改造任务(项目里的科技侧经办)" },
   { value: "viewer", label: "观察者", hint: "只读" },
 ];
 
+/** 项目里的成员角色:经办是业务侧,开发实施是科技侧 */
 export const PROJECT_ROLE_LABEL: Record<ProjectRole, string> = {
   pm: "项目经理",
-  handler: "经办",
-  dev: "开发实施",
+  handler: "业务侧经办",
+  dev: "科技侧经办",
   viewer: "观察者",
+};
+
+/** 每类成员由谁分配(与服务端一致:管理员分配全部,CTO 分配科技侧经办,项目经理分配业务侧经办) */
+export const PROJECT_ROLE_OWNER: Record<ProjectRole, string> = {
+  pm: "由管理员指派",
+  handler: "由项目经理分配",
+  dev: "由 CTO 分配",
+  viewer: "由管理员添加",
 };
 
 export const PRIORITY_LABEL: Record<Priority, string> = { high: "高", medium: "中", low: "低" };

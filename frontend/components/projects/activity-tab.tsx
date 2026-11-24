@@ -10,7 +10,7 @@ import { AtSign, Megaphone, MessageSquare } from "lucide-react";
 import { toast } from "sonner";
 import { authFetch } from "@/lib/auth";
 import type { ProjectComment, ProjectEvent } from "@/lib/types";
-import { HEALTH_LABEL, ITEM_STATUS_LABEL, ITEM_TYPE_LABEL, STATUS_LABEL, fmtDateTime } from "@/lib/labels";
+import { HEALTH_LABEL, ITEM_STATUS_LABEL, ITEM_TYPE_LABEL, PROJECT_ROLE_LABEL, STATUS_LABEL, fmtDateTime } from "@/lib/labels";
 import { Avatar } from "@/components/projects/stage-rail";
 import type { DetailCtx } from "@/components/projects/project-detail";
 import { cn } from "@/lib/utils";
@@ -250,7 +250,7 @@ export function ActivityTab({ ctx }: { ctx: DetailCtx }) {
               .filter((u) => project.members.some((m) => m.userId === u.id) || u.jobRole === "cto")
               .sort((a, b) => Number(b.jobRole === "cto") - Number(a.jobRole === "cto"))
               .map((u) => {
-                const role = u.jobRole === "cto" ? "CTO" : project.members.filter((m) => m.userId === u.id).map((m) => (m.role === "pm" ? "项目经理" : m.role === "handler" ? "经办" : m.role === "dev" ? "开发实施" : "观察者")).join(" / ");
+                const role = u.jobRole === "cto" ? "CTO" : project.members.filter((m) => m.userId === u.id).map((m) => PROJECT_ROLE_LABEL[m.role]).join(" / ");
                 return (
                   <li key={u.id}>
                     <button

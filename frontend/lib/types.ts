@@ -302,7 +302,14 @@ export interface HandlerHint {
 export interface ProjectCaps {
   view: boolean;
   manage: boolean;
+  /** 分配项目经理:管理员 */
   assign: boolean;
+  /** 分配业务侧经办:管理员、项目经理 */
+  assignHandler: boolean;
+  /** 分配科技侧经办:管理员、CTO */
+  assignDev: boolean;
+  /** 添加观察者:管理员 */
+  assignViewer: boolean;
   skip: boolean;
   comment: boolean;
   createItem: boolean;

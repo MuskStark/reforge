@@ -106,14 +106,16 @@ type SystemOption struct {
 // User 注册用户：首个注册用户自动成为管理员，其后为普通成员。
 // Role 是系统角色(只管系统管理);JobRole 是全局岗位(CTO / 项目经理 / 经办 / 开发实施 / 观察者)。
 type User struct {
-	ID           string    `json:"id"`
-	Username     string    `json:"username"`
-	PasswordHash string    `json:"-"`
-	Role         string    `json:"role"` // admin | member
-	DisplayName  string    `json:"displayName"`
-	Department   string    `json:"department"`
-	JobRole      string    `json:"jobRole"` // cto | pm | handler | dev | viewer
-	CreatedAt    time.Time `json:"createdAt"`
+	ID           string `json:"id"`
+	Username     string `json:"username"`
+	PasswordHash string `json:"-"`
+	Role         string `json:"role"` // admin | member
+	DisplayName  string `json:"displayName"`
+	Department   string `json:"department"`
+	JobRole      string `json:"jobRole"` // cto | pm | handler | dev | viewer
+	// 管理员建号（密码由管理员设定）后为 true：首次登录必须先改密码，改完自动清除
+	MustChangePassword bool      `json:"mustChangePassword"`
+	CreatedAt          time.Time `json:"createdAt"`
 }
 
 // validateProcess 校验流程数据，返回中文错误信息供前端展示

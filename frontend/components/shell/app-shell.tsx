@@ -5,13 +5,14 @@
  * 未登录时显示登录卡;会话失效(任意请求 401)时自动回到登录。
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Bell, LayoutGrid, LogOut, Monitor, ShieldCheck, Waypoints } from "lucide-react";
+import { Bell, LayoutGrid, LogOut, Monitor, ShieldCheck, UserRound, Waypoints } from "lucide-react";
 import { toast } from "sonner";
 import { LoginCard, BrandMark } from "@/components/auth/login-card";
-import { authFetch, clearSession, getToken, type SessionUser } from "@/lib/auth";
+import { ProfileDialog } from "@/components/auth/profile-dialog";
+import { authFetch, clearSession, getToken, getUser, type SessionUser } from "@/lib/auth";
 import { JOB_ROLE_LABEL } from "@/lib/labels";
 import { cn } from "@/lib/utils";
 
@@ -34,6 +35,19 @@ export function AppShell({
   const [phase, setPhase] = useState<"checking" | "auth" | "ready">("checking");
   const [me, setMe] = useState<SessionUser | null>(null);
   const [unread, setUnread] = useState(0);
+  const [profileOpen, setProfileOpen] = useState(false);
+
+  // 本地已有会话:先用缓存用户进入就绪态,页面立刻开始取数,不必等 /api/auth/me 返回
+  // (隧道上每次往返都要几百毫秒起)。真实校验仍在下面的请求里做,令牌失效会回到登录。
+  // 放在 layout effect 里:服务端渲染与水合首帧保持"验证会话中…"一致,不会水合不匹配,
+  // 客户端切换页面时也在绘制前切到就绪态,不会闪一下"验证会话中…"。
+  useLayoutEffect(() => {
+    const cached = getToken() ? getUser() : null;
+    if (cached) {
+      setMe(cached);
+      setPhase("ready");
+    }
+  }, []);
 
   useEffect(() => {
     (async () => {
@@ -45,6 +59,7 @@ export function AppShell({
         setMe(await authFetch<SessionUser>("/api/auth/me"));
         setPhase("ready");
       } catch {
+        setMe(null);
         setPhase("auth");
       }
     })();
@@ -60,6 +75,13 @@ export function AppShell({
     return () => window.removeEventListener("reforge:unauthorized", onLost);
   }, []);
 
+  // 服务端以"必须先改密码"拒绝了某个请求:回到强制改密
+  useEffect(() => {
+    const onRequired = () => setMe((m) => (m ? { ...m, mustChangePassword: true } : m));
+    window.addEventListener("reforge:password-required", onRequired);
+    return () => window.removeEventListener("reforge:password-required", onRequired);
+  }, []);
+
   const loadUnread = useCallback(async () => {
     try {
       const d = await authFetch<{ unread: number }>("/api/notifications?unread=1");
@@ -70,7 +92,8 @@ export function AppShell({
   }, []);
 
   useEffect(() => {
-    if (phase !== "ready") return;
+    // 还没完成首次登录改密时,通知接口也会被拒绝,不必轮询
+    if (phase !== "ready" || me?.mustChangePassword) return;
     void loadUnread();
     const t = setInterval(() => void loadUnread(), 30_000);
     const poke = () => void loadUnread();
@@ -79,7 +102,7 @@ export function AppShell({
       clearInterval(t);
       window.removeEventListener("reforge:notifications-changed", poke);
     };
-  }, [phase, loadUnread]);
+  }, [phase, loadUnread, me?.mustChangePassword]);
 
   const logout = useCallback(async () => {
     void authFetch("/api/auth/session", { method: "DELETE" }).catch(() => {});
@@ -113,6 +136,16 @@ export function AppShell({
     );
   }
 
+  // 首次登录(管理员设定的初始密码还没换):除了改密码什么都做不了,服务端同样会拒绝其他请求
+  if (me.mustChangePassword) {
+    return (
+      <main className="dvh-fill relative w-full overflow-x-clip">
+        <div className="ambient-field" aria-hidden="true" />
+        <ProfileDialog me={me} forced onClose={() => {}} onSaved={setMe} onLogout={() => void logout()} />
+      </main>
+    );
+  }
+
   const roleLabel = me?.role === "admin" ? "管理员" : me?.jobRole ? JOB_ROLE_LABEL[me.jobRole] : "成员";
   const nav: { id: ShellSection; href: string; label: string; icon: typeof Bell }[] = [
     { id: "work", href: "/work", label: "工作台", icon: LayoutGrid },
@@ -126,7 +159,7 @@ export function AppShell({
       <div className="safe-viewport fold-aware relative z-10 mx-auto w-full max-w-[1440px] px-4 pb-14 pt-3 sm:px-6 sm:pt-5">
         {/* 顶栏:Clear 玻璃 */}
         <header className="lg-clear sticky top-2.5 z-40 mb-4 flex min-h-[54px] flex-wrap items-center gap-x-3 gap-y-1 px-2.5 py-1.5 pr-1.5">
-          <Link href="/work" className="flex items-center gap-2.5">
+          <Link href="/work" prefetch={false} className="flex items-center gap-2.5">
             <span
               className="grid h-7 w-7 place-items-center rounded-[8px] text-white"
               style={{
@@ -144,6 +177,10 @@ export function AppShell({
               <Link
                 key={id}
                 href={href}
+                // 整页预取:切换导航时页面框架已在本地,只剩页面自己的数据请求要过隧道。
+                // 站内其余链接一律 prefetch={false}:页面都是动态渲染、没有 loading 边界,
+                // Next 默认的部分预取结果用不上,列表里每一项都会白白发一次穿隧道的请求
+                prefetch={active !== id}
                 aria-current={active === id ? "page" : undefined}
                 className={cn(
                   "flex h-9 shrink-0 items-center gap-1.5 rounded-full px-3.5 text-sm font-semibold transition",
@@ -177,14 +214,19 @@ export function AppShell({
             {me?.role === "admin" && (
               <Link
                 href="/admin"
+                prefetch={false}
                 className="hidden h-9 items-center gap-1.5 rounded-full px-3 text-sm font-semibold text-[color:var(--tint)] transition hover:bg-[color:var(--tint-soft)] sm:inline-flex"
                 title="管理后台"
               >
                 <ShieldCheck className="h-4 w-4" /> 后台
               </Link>
             )}
+            <button type="button" onClick={() => setProfileOpen(true)} className="icon-btn !h-9 !w-9" title="个人信息" aria-label="个人信息">
+              <UserRound className="h-4 w-4" />
+            </button>
             <Link
               href="/monitor"
+              prefetch={false}
               className="icon-btn !h-9 !w-9"
               title="数据大屏"
               aria-label="数据大屏"
@@ -204,6 +246,8 @@ export function AppShell({
 
         {typeof children === "function" ? children(me) : children}
       </div>
+
+      {profileOpen && <ProfileDialog me={me} onClose={() => setProfileOpen(false)} onSaved={setMe} />}
     </main>
   );
 }
@@ -225,6 +269,7 @@ export function PageHead({
       {back && (
         <Link
           href={back.href}
+          prefetch={false}
           className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full px-3 text-sm font-semibold text-[color:var(--tint)] transition hover:bg-[color:var(--tint-soft)]"
         >
           <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">

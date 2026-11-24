@@ -142,13 +142,13 @@ function WorkbenchBody({ me }: { me: SessionUser }) {
           <Layers className="mx-auto h-9 w-9 text-[color:var(--ink-3)]" />
           <h2 className="mt-3 text-[17px] font-semibold">还没有需要你处理的事情</h2>
           <p className="mx-auto mt-2 max-w-md text-[13px] leading-relaxed text-[color:var(--ink-2)]">
-            流程一提交就会自动立项。项目经理由管理员或 CTO 指派；被加入项目后，待办会出现在这里。
+            流程一提交就会自动立项，管理员指派项目经理后启动；业务侧经办由项目经理分配，科技侧经办由 CTO 分配。被加入项目后，待办会出现在这里。
           </p>
           <div className="mt-5 flex flex-wrap justify-center gap-2.5">
-            <Link href="/projects" className="btn btn-glass">
+            <Link href="/projects" prefetch={false} className="btn btn-glass">
               查看全部项目
             </Link>
-            <Link href="/" className="btn btn-primary">
+            <Link href="/" prefetch={false} className="btn btn-primary">
               去提交流程
             </Link>
           </div>
@@ -180,6 +180,7 @@ function WorkbenchBody({ me }: { me: SessionUser }) {
                           <li key={r.id}>
                             <Link
                               href={`/projects/${r.projectId}?tab=review`}
+                              prefetch={false}
                               className="flex flex-wrap items-center gap-3 rounded-2xl bg-white/60 px-3.5 py-3 shadow-[inset_0_0_0_0.5px_rgba(255,255,255,0.65),inset_0_0_0_0.5px_rgba(88,86,214,0.22)] transition hover:bg-white/80"
                             >
                               <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-[color:var(--indigo-soft)] text-[color:var(--indigo-deep)]">
@@ -248,7 +249,7 @@ function WorkbenchBody({ me }: { me: SessionUser }) {
                     <ul className="mt-3 grid gap-1">
                       {risky.slice(0, 8).map((p) => (
                         <li key={p.id}>
-                          <Link href={`/projects/${p.id}`} className="flex items-center gap-2 rounded-xl px-2 py-1.5 transition hover:bg-white/60">
+                          <Link href={`/projects/${p.id}`} prefetch={false} className="flex items-center gap-2 rounded-xl px-2 py-1.5 transition hover:bg-white/60">
                             <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-neutral-900">{p.name}</span>
                             <span className={healthClass(p.health)}>{HEALTH_LABEL[p.health]}</span>
                           </Link>
@@ -303,7 +304,7 @@ function WorkbenchBody({ me }: { me: SessionUser }) {
                     const stage = projects.find((p) => p.id === r.projectId)?.stages[r.stageSeq - 1];
                     return (
                       <li key={r.id}>
-                        <Link href={`/projects/${r.projectId}?tab=review`} className="glass-card flex flex-wrap items-center gap-3 p-4 transition hover:-translate-y-0.5">
+                        <Link href={`/projects/${r.projectId}?tab=review`} prefetch={false} className="glass-card flex flex-wrap items-center gap-3 p-4 transition hover:-translate-y-0.5">
                           <span className="min-w-0 flex-1">
                             <span className="block truncate text-[15px] font-semibold text-neutral-900">{r.projectName}</span>
                             <span className="mt-1 block text-xs text-[color:var(--ink-2)]">
@@ -390,7 +391,7 @@ function TaskRow({ t }: { t: WorkItem }) {
   const due = dueInfo(t.dueDate);
   return (
     <li>
-      <Link href={`/projects/${t.projectId}?tab=plan&item=${t.id}`} className="flex flex-wrap items-center gap-2.5 rounded-xl px-2 py-1.5 transition hover:bg-white/60">
+      <Link href={`/projects/${t.projectId}?tab=plan&item=${t.id}`} prefetch={false} className="flex flex-wrap items-center gap-2.5 rounded-xl px-2 py-1.5 transition hover:bg-white/60">
         <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-neutral-900">{t.title}</span>
         <span className="hidden text-xs text-[color:var(--ink-3)] sm:block">{t.projectName}</span>
         <span className={cn("rounded-full px-2 py-0.5 text-[11px] font-medium", t.status === "blocked" ? "bg-[color:var(--red-soft)] text-[color:var(--red-deep)]" : t.status === "in_progress" ? "bg-[color:var(--tint-soft)] text-[color:var(--tint-deep)]" : "bg-[rgba(120,120,128,0.12)] text-[color:var(--ink-2)]")}>

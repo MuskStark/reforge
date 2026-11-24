@@ -375,7 +375,8 @@ func (s *postgresStore) handleProjectStatus(w http.ResponseWriter, r *http.Reque
 	s.writeProject(w, r, a, pathID(r))
 }
 
-// handleMembers 增删项目成员。PM 的指派与更换需要管理员或 CTO;其余角色由 PM / CTO / 管理员管理。
+// handleMembers 增删项目成员(流程的权限分配,规则见 caps.canAssign):
+// 管理员分配全部;CTO 分配科技侧经办;项目经理分配业务侧经办。
 func (s *postgresStore) handleMembers(w http.ResponseWriter, r *http.Request) {
 	a, ok := currentActor(w, r, s)
 	if !ok {
@@ -408,16 +409,13 @@ func (s *postgresStore) handleMembers(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
-		if body.Role == RolePM && !c.assign() {
-			return noPermission()
-		}
-		if body.Role != RolePM && !c.manage() {
+		if !c.canAssign(body.Role) {
 			return noPermission()
 		}
 		if pr.Status == ProjDone || pr.Status == ProjCancelled {
 			return badRequest("项目已结束，不能再调整成员")
 		}
-		roleLabel := map[string]string{RolePM: "项目经理", RoleHandler: "经办", RoleDev: "开发实施", RoleViewer: "观察者"}[body.Role]
+		roleLabel := map[string]string{RolePM: "项目经理", RoleHandler: "业务侧经办", RoleDev: "科技侧经办", RoleViewer: "观察者"}[body.Role]
 		if body.Action == "remove" {
 			if _, err := tx.ExecContext(r.Context(), `DELETE FROM project_members WHERE project_id = $1 AND user_id = $2 AND role = $3`,
 				pr.ID, u.ID, body.Role); err != nil {

@@ -287,7 +287,7 @@ function ProjectBoardBody({ me }: { me: SessionUser }) {
 
 function LinkName({ p }: { p: ProjectView }) {
   return (
-    <Link href={`/projects/${p.id}`} className="min-w-0 flex-1 truncate text-[14px] font-semibold text-neutral-900 hover:underline">
+    <Link href={`/projects/${p.id}`} prefetch={false} className="min-w-0 flex-1 truncate text-[14px] font-semibold text-neutral-900 hover:underline">
       {p.name}
     </Link>
   );

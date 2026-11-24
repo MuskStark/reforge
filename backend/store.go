@@ -66,6 +66,7 @@ CREATE TABLE IF NOT EXISTS users (
 	display_name  TEXT NOT NULL DEFAULT '',
 	department    TEXT NOT NULL DEFAULT '',
 	job_role      TEXT NOT NULL DEFAULT 'handler',
+	must_change_password BOOLEAN NOT NULL DEFAULT FALSE,
 	created_at    TIMESTAMPTZ NOT NULL
 );`
 
@@ -109,7 +110,8 @@ CREATE TABLE IF NOT EXISTS followup_events (
 	detail      JSONB NOT NULL DEFAULT '{}'::jsonb,
 	created_at  TIMESTAMPTZ NOT NULL
 );
-CREATE INDEX IF NOT EXISTS idx_fe_process ON followup_events (process_id, created_at DESC);`); err != nil {
+CREATE INDEX IF NOT EXISTS idx_fe_process ON followup_events (process_id, created_at DESC);
+ALTER TABLE users ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN NOT NULL DEFAULT FALSE;`); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("跟进表迁移失败: %w", err)
 	}
@@ -152,7 +154,7 @@ type postgresStore struct {
 }
 
 // userCols 用户表的查询列(与 User 字段扫描顺序一致)
-const userCols = `SELECT id, username, password_hash, role, display_name, department, job_role, created_at FROM users`
+const userCols = `SELECT id, username, password_hash, role, display_name, department, job_role, created_at, must_change_password FROM users`
 
 // defaultJobRole 岗位为空或非法时回落为经办
 func defaultJobRole(r string) string {
@@ -334,7 +336,8 @@ func (s *postgresStore) CountUsers() (int, error) {
 }
 
 // CreateUser 创建用户：
-//   - u.Role 非空（管理员在后台创建）：使用显式角色
+//   - u.Role 非空（管理员在后台创建）：使用显式角色；这类账号的密码由管理员设定，
+//     MustChangePassword 为 true，首次登录必须先改密码
 //   - u.Role 为空（公开注册引导）：单条 INSERT 原子判定——表为空 → admin，否则 member
 func (s *postgresStore) CreateUser(u *User) error {
 	if u.ID == "" {
@@ -346,23 +349,23 @@ func (s *postgresStore) CreateUser(u *User) error {
 	u.JobRole = defaultJobRole(u.JobRole)
 	if u.Role == "admin" || u.Role == "member" {
 		_, err := s.db.Exec(
-			`INSERT INTO users (id, username, password_hash, role, display_name, department, job_role, created_at)
-			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-			u.ID, u.Username, u.PasswordHash, u.Role, u.DisplayName, u.Department, u.JobRole, u.CreatedAt)
+			`INSERT INTO users (id, username, password_hash, role, display_name, department, job_role, must_change_password, created_at)
+			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+			u.ID, u.Username, u.PasswordHash, u.Role, u.DisplayName, u.Department, u.JobRole, u.MustChangePassword, u.CreatedAt)
 		return err
 	}
 	return s.db.QueryRow(`
-		INSERT INTO users (id, username, password_hash, role, display_name, department, job_role, created_at)
+		INSERT INTO users (id, username, password_hash, role, display_name, department, job_role, must_change_password, created_at)
 		VALUES ($1, $2, $3,
 		        CASE WHEN (SELECT count(*) FROM users) = 0 THEN 'admin' ELSE 'member' END,
-		        $4, $5, $6, $7)
+		        $4, $5, $6, FALSE, $7)
 		RETURNING role`, u.ID, u.Username, u.PasswordHash, u.DisplayName, u.Department, u.JobRole, u.CreatedAt,
 	).Scan(&u.Role)
 }
 func (s *postgresStore) GetUserByID(id string) (*User, error) {
 	var u User
 	err := s.db.QueryRow(userCols+` WHERE id = $1`, id).
-		Scan(&u.ID, &u.Username, &u.PasswordHash, &u.Role, &u.DisplayName, &u.Department, &u.JobRole, &u.CreatedAt)
+		Scan(&u.ID, &u.Username, &u.PasswordHash, &u.Role, &u.DisplayName, &u.Department, &u.JobRole, &u.CreatedAt, &u.MustChangePassword)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -391,7 +394,7 @@ func (s *postgresStore) CountAdmins() (int, error) {
 func (s *postgresStore) GetUserByUsername(username string) (*User, error) {
 	var u User
 	err := s.db.QueryRow(userCols+` WHERE username = $1`, username).
-		Scan(&u.ID, &u.Username, &u.PasswordHash, &u.Role, &u.DisplayName, &u.Department, &u.JobRole, &u.CreatedAt)
+		Scan(&u.ID, &u.Username, &u.PasswordHash, &u.Role, &u.DisplayName, &u.Department, &u.JobRole, &u.CreatedAt, &u.MustChangePassword)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -409,7 +412,7 @@ func (s *postgresStore) ListUsers() ([]*User, error) {
 	out := []*User{}
 	for rows.Next() {
 		var u User
-		if err := rows.Scan(&u.ID, &u.Username, &u.PasswordHash, &u.Role, &u.DisplayName, &u.Department, &u.JobRole, &u.CreatedAt); err != nil {
+		if err := rows.Scan(&u.ID, &u.Username, &u.PasswordHash, &u.Role, &u.DisplayName, &u.Department, &u.JobRole, &u.CreatedAt, &u.MustChangePassword); err != nil {
 			return nil, err
 		}
 		out = append(out, &u)

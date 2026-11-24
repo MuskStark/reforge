@@ -5,7 +5,8 @@ import (
 	"time"
 )
 
-// currentUser 取当前登录用户（未登录写 401 返回 nil）
+// currentUser 取当前登录用户（未登录写 401 返回 nil）。
+// 首次登录还没改密码的会话只放行个人信息相关接口，其余一律拒绝（见 mustChangeFirst）。
 func currentUser(w http.ResponseWriter, r *http.Request) *sessionData {
 	token := bearerToken(r)
 	sd := sessions.get(token)
@@ -13,7 +14,22 @@ func currentUser(w http.ResponseWriter, r *http.Request) *sessionData {
 		writeError(w, http.StatusUnauthorized, "未登录或会话已过期")
 		return nil
 	}
+	if mustChangeFirst(w, sd) {
+		return nil
+	}
 	return sd
+}
+
+// mustChangeFirst 会话对应的账号是否"必须先改密码"。为真时写 403 并返回 true：
+// 改完密码之前，除身份、改资料、改密码、注销外的一切接口都不可用。
+func mustChangeFirst(w http.ResponseWriter, sd *sessionData) bool {
+	if sd == nil || !sd.MustChangePwd {
+		return false
+	}
+	writeJSON(w, http.StatusForbidden, map[string]string{
+		"error": "首次登录，请先修改密码", "code": passwordChangeRequired,
+	})
+	return true
 }
 
 // loadProcess 取流程,不存在时写 404

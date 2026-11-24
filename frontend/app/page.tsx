@@ -1,13 +1,28 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useState } from "react";
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import { ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
 import { FlowBuilder } from "@/components/flow-builder";
-import { FlowChartModal, type ChartSource } from "@/components/flow-chart";
+import type { ChartSource } from "@/components/flow-chart";
 import { stepIssues } from "@/lib/step-checks";
 import { emptyProcess } from "@/lib/types";
+
+/**
+ * 流程图弹窗带 React Flow(占首屏 JS 约四成),只有点"预览"才用得到:
+ * 按需加载,不拖慢首屏;用户第一次操作表单后在后台预取,点开时通常已就绪。
+ */
+const loadFlowChart = () => import("@/components/flow-chart");
+const FlowChartModal = dynamic(() => loadFlowChart().then((m) => m.FlowChartModal), {
+  ssr: false,
+  loading: () => (
+    <div className="fixed inset-0 z-[80] grid place-items-center bg-neutral-900/15 backdrop-blur-sm">
+      <span className="lg-chip text-[13px] text-[color:var(--ink-2)]">正在加载流程图…</span>
+    </div>
+  ),
+});
 
 /** 品牌图形:分叉汇聚的流程节点(与 app icon 同构) */
 function BrandMark({ className }: { className?: string }) {
@@ -33,11 +48,16 @@ export default function Home() {
   const [draft, setDraft] = useState(emptyProcess);
   const [chart, setChart] = useState<ChartSource | null>(null);
 
+  // 第一次点进或聚焦表单就预取流程图代码块(失败不打扰,点"预览"时会再试)
+  const prefetchChart = useCallback(() => {
+    void loadFlowChart().catch(() => {});
+  }, []);
+
   const countersignCount = draft.steps.filter((s) => s.countersign).length;
   const readyCount = draft.steps.filter((s, i) => stepIssues(s, draft.steps[i - 1]).length === 0).length;
 
   return (
-    <main className="dvh-fill relative w-full overflow-x-clip">
+    <main className="dvh-fill relative w-full overflow-x-clip" onFocusCapture={prefetchChart} onPointerDownCapture={prefetchChart}>
       {/* 环境光场:亮色极光(fixed,为玻璃提供可折射的色彩) */}
       <div className="ambient-field" aria-hidden="true" />
 
@@ -60,6 +80,7 @@ export default function Home() {
           <div className="flex-1" />
           <Link
             href="/admin"
+            prefetch={false}
             className="inline-flex h-9 items-center gap-1.5 rounded-full px-3.5 text-sm font-semibold text-[color:var(--tint)] transition hover:bg-[color:var(--tint-soft)]"
           >
             <ShieldCheck className="h-4 w-4" />

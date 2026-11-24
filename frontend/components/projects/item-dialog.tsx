@@ -10,7 +10,7 @@ import { Link2, Split, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import type { ChecklistItem, ItemStatus, ItemType, Priority, WorkItem } from "@/lib/types";
 import { authFetch } from "@/lib/auth";
-import { ITEM_STATUS_LABEL, ITEM_TYPE_LABEL, PRIORITY_LABEL, fmtDateTime } from "@/lib/labels";
+import { ITEM_STATUS_LABEL, ITEM_TYPE_LABEL, PRIORITY_LABEL, PROJECT_ROLE_LABEL, fmtDateTime } from "@/lib/labels";
 import { Dialog, DialogActions, DialogHeader, Field } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -89,7 +89,7 @@ export function ItemDialog({
   /** 可被指派的人:项目成员 + CTO */
   const candidates = useMemo(() => {
     const seen = new Map<string, { id: string; name: string; note: string }>();
-    project.members.forEach((m) => seen.set(m.userId, { id: m.userId, name: m.displayName, note: m.role === "pm" ? "项目经理" : m.role === "handler" ? "经办" : m.role === "dev" ? "开发实施" : "观察者" }));
+    project.members.forEach((m) => seen.set(m.userId, { id: m.userId, name: m.displayName, note: PROJECT_ROLE_LABEL[m.role] }));
     users
       .filter((u) => u.jobRole === "cto")
       .forEach((u) => {

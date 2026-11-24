@@ -146,7 +146,7 @@ func TestLegacyMigration(t *testing.T) {
 	e.fail(admin, "POST", "/api/admin/processes/proc-follow/analyze", map[string]any{"pass": true}, 404, "")
 	e.fail(admin, "POST", "/api/admin/processes/proc-follow/stage", map[string]any{"stage": 4}, 404, "")
 	// 迁入的项目照常可以继续推进:老跟进人(现为项目经理)直接提交 G4 之外的当前阶段——先补齐必交付物
-	pmToken := e.must("", "POST", "/api/auth/login", map[string]any{"username": "u_老跟进", "password": "pass1234"})["token"].(string)
+	pmToken := e.login("老跟进", userPassword)
 	e.completeRequired(pmToken, f["id"].(string), 4)
 	e.submit(pmToken, f["id"].(string), "迁入后继续推进")
 	if _, p := e.list(admin, "/api/projects?pending=cto"); len(p) != 1 || dig(p[0], "id") != f["id"].(string) {

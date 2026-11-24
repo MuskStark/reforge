@@ -17,7 +17,7 @@ import { acceptStageOf, fmtDateTime, HEALTH_LABEL, healthClass, MODE_LABEL, OVER
 import { OVERALL_MODE_LABEL, countersignMode } from "@/lib/step-checks";
 import { AppShell, PageHead, StateLine } from "@/components/shell/app-shell";
 import { StageRail, PendingOnBadge, Avatar } from "@/components/projects/stage-rail";
-import { MembersDialog } from "@/components/projects/members-dialog";
+import { MembersDialog, canAssignMembers } from "@/components/projects/members-dialog";
 import { PlanTab } from "@/components/projects/plan-tab";
 import { ReviewTab } from "@/components/projects/review-tab";
 import { FlowTab } from "@/components/projects/flow-tab";
@@ -213,7 +213,7 @@ function ProjectDetailBody({ id, me }: { id: string; me: SessionUser }) {
             写简报
           </button>
         )}
-        {(project.can.manage || project.can.assign) && project.status !== "done" && project.status !== "cancelled" && (
+        {canAssignMembers(project.can) && project.status !== "done" && project.status !== "cancelled" && (
           <button type="button" onClick={() => setMembersOpen(true)} className="btn btn-glass !h-10">
             <UserCog className="h-4 w-4" /> 成员
           </button>
@@ -467,6 +467,7 @@ function OverviewTab({ ctx, onStatus }: { ctx: DetailCtx; onStatus: (s: "on_hold
                       <span className={cn("min-w-0 flex-1 truncate", r.status === "done" ? "text-[color:var(--ink-2)] line-through" : "text-neutral-900")}>{r.title}</span>
                       <Link
                         href={`/projects/${project.id}?tab=plan&item=${r.id}`}
+                        prefetch={false}
                         onClick={(e) => {
                           e.preventDefault();
                           ctx.goTab("plan", { item: r.id });
@@ -512,6 +513,7 @@ function OverviewTab({ ctx, onStatus }: { ctx: DetailCtx; onStatus: (s: "on_hold
             流程概要
             <Link
               href={`/projects/${project.id}?tab=flow`}
+              prefetch={false}
               onClick={(e) => {
                 e.preventDefault();
                 ctx.goTab("flow");
@@ -685,7 +687,7 @@ function OverviewTab({ ctx, onStatus }: { ctx: DetailCtx; onStatus: (s: "on_hold
         <section className="glass-card p-5">
           <h2 className="flex items-center gap-2 text-[15px] font-semibold text-neutral-900">
             成员
-            {(project.can.manage || project.can.assign) && project.status !== "done" && project.status !== "cancelled" && (
+            {canAssignMembers(project.can) && project.status !== "done" && project.status !== "cancelled" && (
               <button type="button" onClick={() => ctx.setMembersOpen(true)} className="ml-auto text-xs font-medium text-[color:var(--tint)] hover:underline">
                 管理
               </button>
@@ -693,8 +695,8 @@ function OverviewTab({ ctx, onStatus }: { ctx: DetailCtx; onStatus: (s: "on_hold
           </h2>
           <ul className="mt-3 space-y-2.5 text-[13px]">
             <MemberRow label="项目经理" people={pms} hint={pms.length ? "" : "未指派"} warn />
-            <MemberRow label="经办" people={handlers} hint={handlers.length ? "" : "尚未添加"} />
-            {devs.length > 0 && <MemberRow label="开发实施" people={devs} />}
+            <MemberRow label="业务侧经办" people={handlers} hint={handlers.length ? "" : "尚未添加"} />
+            {devs.length > 0 && <MemberRow label="科技侧经办" people={devs} />}
             {viewers.length > 0 && <MemberRow label="观察者" people={viewers} />}
             <MemberRow label="CTO" people={ctos.map((u) => ({ userId: u.id, username: u.username, displayName: u.displayName, role: "pm" as const }))} hint={ctos.length ? "" : "未设置"} />
           </ul>

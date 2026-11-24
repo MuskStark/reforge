@@ -15,9 +15,11 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { TagInput } from "@/components/tag-input";
 import { HandlerList } from "@/components/handler-list";
+import { RequiredEmpty } from "@/components/required-empty";
 import { SystemSelect } from "@/components/system-select";
 import { YesNoSelect } from "@/components/yes-no-select";
 import { subInteropPrev } from "@/lib/step-checks";
+import { subAnchorId } from "@/lib/form-focus";
 import {
   emptyParty,
   emptySubStep,
@@ -30,16 +32,25 @@ import { cn } from "@/lib/utils";
 /** 会签方折叠状态：复杂流程（多方×多子流程）默认收起，保持界面紧凑可导航 */
 type CollapseState = Record<string, boolean>;
 
+/** 一条经办记录是否已填(部门或人员至少一项) */
+const validHandler = (h: { department: string; staff: string[] }) =>
+  h.department.trim() || h.staff.some((x) => x.trim());
+
 /** 会签方编辑器（琥珀玻璃分区）：每个会签方 = 部门 + 涉及人员 + 分支内部多个子流程。
  * 各会签方并行办理，其内部子步骤按顺序执行；
  * 每个子步骤与主步骤一样完整采集线上/线下属性。
- * 支持按方折叠收纳（复杂多方流程的界面优化）。 */
+ * 支持按方折叠收纳（复杂多方流程的界面优化）。
+ * attempted = 已经点过提交:仍缺失的必填控件标红。 */
 export function PartyEditor({
   parties,
   onChange,
+  id,
+  attempted = false,
 }: {
   parties: CountersignParty[];
   onChange: (parties: CountersignParty[]) => void;
+  id?: string;
+  attempted?: boolean;
 }) {
   const [collapsed, setCollapsed] = useState<CollapseState>({});
   const [allCollapsed, setAllCollapsed] = useState(false);
@@ -90,12 +101,13 @@ export function PartyEditor({
   };
 
   return (
-    <div className="space-y-3">
+    <div id={id} className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <Label className="inline-flex items-center gap-1.5 text-[color:var(--amber-deep)]">
+        <Label className="inline-flex flex-wrap items-center gap-x-1.5 text-[color:var(--amber-deep)]">
           <FileSignature className="h-3.5 w-3.5" /> 会签部门及人员
-          <span className="font-normal text-[color:var(--ink-2)]">并行办理，内部可含多步</span>
           <span className="text-[color:var(--red)]">*</span>
+          <span className="text-xs font-normal text-[color:var(--ink-3)]">必填</span>
+          <span className="text-xs font-normal text-[color:var(--ink-2)]">并行办理，内部可含多步</span>
         </Label>
         <div className="flex items-center gap-1">
           {parties.length > 1 && (
@@ -107,20 +119,26 @@ export function PartyEditor({
               {allCollapsed ? "全部展开" : "全部收起"}
             </button>
           )}
-          <button
-            type="button"
-            onClick={addParty}
-            className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium text-[color:var(--tint)] transition hover:bg-[color:var(--tint-soft)]"
-          >
-            <Plus className="h-3.5 w-3.5" /> 添加会签方
-          </button>
+          {parties.length > 0 && (
+            <button
+              type="button"
+              onClick={addParty}
+              className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium text-[color:var(--tint)] transition hover:bg-[color:var(--tint-soft)]"
+            >
+              <Plus className="h-3.5 w-3.5" /> 添加会签方
+            </button>
+          )}
         </div>
       </div>
 
       {parties.length === 0 && (
-        <p className="rounded-xl border border-dashed border-black/10 bg-white/30 px-3 py-2.5 text-xs text-[color:var(--ink-3)]">
-          暂未添加，点击右上角"添加会签方"增加会签分支
-        </p>
+        <RequiredEmpty
+          title="还没有添加会签部门及人员"
+          hint="开启会签后，至少需要一方：填写会签部门或人员。各方并行办理，每一方内部可以再拆成多个子步骤。"
+          actionLabel="添加会签部门及人员"
+          error={attempted}
+          onAdd={addParty}
+        />
       )}
 
       <div className="space-y-2.5">
@@ -213,6 +231,8 @@ export function PartyEditor({
 
                     {(party.subSteps ?? []).map((raw, j) => {
                       const sub = normalizeSubStep(raw);
+                      // 没填名称的子步骤按"不存在"处理(不参与校验),只有命名过的才提示必填
+                      const named = !!sub.name.trim();
                       return (
                         <div
                           key={sub.id}
@@ -266,7 +286,16 @@ export function PartyEditor({
                               <button
                                 key={value}
                                 type="button"
-                                onClick={() => updateSub(i, sub.id, { mode: value })}
+                                // 切到"线下办理"时直接给出一条空白的经办记录:线下子步骤必须写明由谁受理
+                                onClick={() =>
+                                  updateSub(
+                                    i,
+                                    sub.id,
+                                    value === "offline" && (sub.offline.handlers ?? []).length === 0
+                                      ? { mode: value, offline: { ...sub.offline, handlers: [{ department: "", staff: [] }] } }
+                                      : { mode: value },
+                                  )
+                                }
                                 className={sub.mode === value ? "on" : undefined}
                               >
                                 {label}
@@ -274,14 +303,17 @@ export function PartyEditor({
                             ))}
                           </div>
 
-                          {/* 子步骤属性 */}
+                          {/* 子步骤属性(没填名称的子步骤不参与校验,也就不标必填) */}
                           {sub.mode === "online" ? (
                             <div className="flex flex-wrap items-center gap-2">
                               <div className="min-w-[180px] flex-1">
                                 <SystemSelect
                                   compact
+                                  id={subAnchorId(sub.id, "system")}
                                   value={sub.online.systemName}
                                   placeholder="选择线上系统"
+                                  required={named}
+                                  invalid={attempted && named && !sub.online.systemName.trim()}
                                   onChange={(v) =>
                                     updateSub(i, sub.id, {
                                       online: { ...sub.online, systemName: v },
@@ -290,32 +322,38 @@ export function PartyEditor({
                                 />
                               </div>
                               <div className="flex flex-col gap-1.5">
-                                <YesNoSelect
-                                  compact
-                                  label="支持移动端"
-                                  value={sub.online.mobileSupported}
-                                  onChange={(v) =>
-                                    updateSub(i, sub.id, {
-                                      online: { ...sub.online, mobileSupported: v },
-                                    })
-                                  }
-                                />
+                                <div id={subAnchorId(sub.id, "mobile")}>
+                                  <YesNoSelect
+                                    compact
+                                    required={named}
+                                    label="支持移动端"
+                                    value={sub.online.mobileSupported}
+                                    onChange={(v) =>
+                                      updateSub(i, sub.id, {
+                                        online: { ...sub.online, mobileSupported: v },
+                                      })
+                                    }
+                                  />
+                                </div>
                                 {(() => {
                                   // 与上一个已命名子步骤均线上且系统不同：需填写数据互通
                                   const p = subInteropPrev(parties[i].subSteps ?? [], j);
                                   if (!p) return null;
                                   return (
-                                    <YesNoSelect
-                                      compact
-                                      label={`「${p.online.systemName.trim()} → ${sub.online.systemName.trim()}」数据互通`}
-                                      value={sub.online.dataInteroperable ?? null}
-                                      onChange={(v) =>
-                                        updateSub(i, sub.id, {
-                                          online: { ...sub.online, dataInteroperable: v },
-                                        })
-                                      }
-                                      hint="两系统是否自动共享数据"
-                                    />
+                                    <div id={subAnchorId(sub.id, "interop")}>
+                                      <YesNoSelect
+                                        compact
+                                        required={named}
+                                        label={`「${p.online.systemName.trim()} → ${sub.online.systemName.trim()}」数据互通`}
+                                        value={sub.online.dataInteroperable ?? null}
+                                        onChange={(v) =>
+                                          updateSub(i, sub.id, {
+                                            online: { ...sub.online, dataInteroperable: v },
+                                          })
+                                        }
+                                        hint="两系统是否自动共享数据"
+                                      />
+                                    </div>
                                   );
                                 })()}
                               </div>
@@ -323,15 +361,18 @@ export function PartyEditor({
                           ) : (
                             <div className="space-y-2.5 rounded-xl bg-[rgba(255,255,255,0.55)] p-2.5">
                               <TagInput
-                                placeholder="涉及文件名称，回车添加，如：评审意见表"
-                                tags={sub.offline.documents}
+                                placeholder="涉及文件名称（选填），回车添加，如：评审意见表"
+                                tags={sub.offline.documents ?? []}
                                 onChange={(documents) =>
                                   updateSub(i, sub.id, { offline: { ...sub.offline, documents } })
                                 }
                               />
                               <HandlerList
+                                id={subAnchorId(sub.id, "handlers")}
                                 title="经办部门及人员"
-                                handlers={sub.offline.handlers}
+                                required={named}
+                                error={attempted && named && !(sub.offline.handlers ?? []).some(validHandler)}
+                                handlers={sub.offline.handlers ?? []}
                                 onChange={(handlers) =>
                                   updateSub(i, sub.id, { offline: { ...sub.offline, handlers } })
                                 }

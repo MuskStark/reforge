@@ -22,7 +22,7 @@ export function ProjectCard({ p, dense, footer }: { p: ProjectView; dense?: bool
           "shadow-[inset_0_0_0_0.5px_rgba(255,255,255,0.65),inset_0_0_0_1.5px_rgba(255,149,0,0.35),0_28px_64px_-28px_rgba(23,42,80,0.28)]",
       )}
     >
-      <Link href={`/projects/${p.id}`} className={cn("block transition hover:-translate-y-0.5", dense ? "p-3.5" : "p-4", footer && "pb-3")}>
+      <Link href={`/projects/${p.id}`} prefetch={false} className={cn("block transition hover:-translate-y-0.5", dense ? "p-3.5" : "p-4", footer && "pb-3")}>
         <div className="flex items-start gap-2">
           <span className="min-w-0 flex-1 truncate text-[15px] font-semibold leading-snug text-neutral-900" title={p.name}>
             {p.name}

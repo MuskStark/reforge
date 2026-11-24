@@ -192,14 +192,29 @@ func got(t *testing.T, v any, rest ...any) {
 	}
 }
 
+// 测试账号的密码:管理员建号时设定的初始密码,以及首次登录后换成的密码
+const (
+	initPassword = "pass1234"
+	userPassword = "pass1235"
+)
+
+// createUser 管理员建号并返回这个用户的会话。管理员设定的初始密码在首次登录后必须更换,
+// 所以这里登录后立刻改密,返回的是"已完成首次登录"的会话。
 func (e *env) createUser(adminToken, name, job string) (token, id string) {
 	e.t.Helper()
 	out := e.must(adminToken, "POST", "/api/admin/users", map[string]any{
-		"username": "u_" + name, "password": "pass1234", "role": "member",
+		"username": "u_" + name, "password": initPassword, "role": "member",
 		"displayName": name, "department": "测试部", "jobRole": job,
 	})
-	login := e.must("", "POST", "/api/auth/login", map[string]any{"username": "u_" + name, "password": "pass1234"})
-	return login["token"].(string), out["id"].(string)
+	token = e.login(name, initPassword)
+	e.must(token, "POST", "/api/auth/password", map[string]any{"oldPassword": initPassword, "newPassword": userPassword})
+	return token, out["id"].(string)
+}
+
+// login 用测试账号的登录名登录,返回会话令牌
+func (e *env) login(name, password string) string {
+	e.t.Helper()
+	return e.must("", "POST", "/api/auth/login", map[string]any{"username": "u_" + name, "password": password})["token"].(string)
 }
 
 // completeRequired 把某阶段的必交付物全部标记完成
@@ -322,7 +337,7 @@ func TestProjectLifecycle(t *testing.T) {
 	if len(proj["members"].([]any)) != 3 {
 		t.Fatalf("应有 3 名成员: %+v", proj["members"])
 	}
-	// 项目经理不能自己增删项目经理;CTO 可以
+	// 项目经理不能增删项目经理(分配规则见 TestAssignmentRules)
 	e.fail(pm, "PUT", "/api/projects/"+pid+"/members", map[string]any{"userId": pmID, "role": "pm", "action": "remove"}, 403, "权限")
 	e.fail(pm, "PUT", "/api/projects/"+pid+"/members", map[string]any{"userId": h1ID, "role": "pm", "action": "add"}, 403, "权限")
 
