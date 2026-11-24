@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ReForge · 手机端 — 设计稿 04</title>
+<link rel="stylesheet" href="../liquid-glass/assets/tokens.css">
+<link rel="stylesheet" href="console.css">
+<style>
+  /* 三块屏幕横排:让画板容器自己决定换行,避免第四块落单 */
+  .board { flex-wrap: nowrap; justify-content: flex-start; overflow-x: auto; }
+  @media (max-width: 1360px) { .board { flex-wrap: wrap; justify-content: center; } }
+</style>
+</head>
+<body class="app">
+<div class="wallpaper" aria-hidden="true"></div>
+
+<header class="board-head large-title">
+  <p class="kicker">ReForge · 工作台与后台重设计</p>
+  <h1>手机端 · 同一个外壳</h1>
+  <p>侧栏收起，底部 Tab 栏接管主导航：工作台 / 项目 / 通知 / 我的。管理后台从「我的」进入，是全屏推入的二级区域。三块屏幕里都是真实页面，可以直接滚动、点击。</p>
+</header>
+
+<div class="board">
+  <div class="frame">
+    <p class="cap"><span class="no">04-A</span><b>工作台</b><span>/work · 一级页</span></p>
+    <div class="phone"><div class="screen"><iframe src="workbench.html?embed=1&role=admin" title="工作台"></iframe></div><span class="notch"></span><span class="home-bar"></span></div>
+  </div>
+  <div class="frame">
+    <p class="cap"><span class="no">04-B</span><b>我的</b><span>/me · 一级页</span></p>
+    <div class="phone"><div class="screen"><iframe src="me.html?embed=1" title="我的"></iframe></div><span class="notch"></span><span class="home-bar"></span></div>
+  </div>
+  <div class="frame">
+    <p class="cap"><span class="no">04-C</span><b>管理后台 · 流程定义</b><span>/admin/processes · 二级页</span></p>
+    <div class="phone"><div class="screen"><iframe src="admin.html?embed=1#/admin/processes" title="管理后台"></iframe></div><span class="notch"></span><span class="home-bar"></span></div>
+  </div>
+</div>
+</body>
+</html>

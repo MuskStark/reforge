@@ -1,0 +1,360 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ReForge · 工作台与后台重设计 — 设计稿总览</title>
+<link rel="stylesheet" href="../liquid-glass/assets/tokens.css">
+<link rel="stylesheet" href="console.css">
+<style>
+  body.app { font-size: 15px; }
+  .doc { position: relative; z-index: 1; max-width: 1120px; margin: 0 auto; padding: 56px 40px 96px; }
+
+  .doc-hero { margin-bottom: 34px; }
+  .doc-hero h1 { font-size: 44px; line-height: 1.08; letter-spacing: -0.025em; max-width: 16em; }
+  .doc-hero .lede { max-width: 46em; margin-top: 12px; font: var(--t-callout); color: var(--ink-2); }
+  .doc-hero .lede b { color: var(--ink); font-weight: 600; }
+
+  /* 画板缩略图:嵌入真实页面再等比缩小 */
+  .shots { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; margin-bottom: 44px; }
+  .shot { display: block; padding: 10px; transition: transform 0.18s ease; }
+  .shot:hover { transform: translateY(-3px); }
+  .shot-view { position: relative; aspect-ratio: 16 / 10; border-radius: 16px; overflow: hidden; background: #eef0f4; box-shadow: inset 0 0 0 0.5px rgba(0, 0, 0, 0.08); }
+  .shot-view img { position: absolute; left: 0; top: 0; width: 100%; display: block; }
+  .shot-view::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 34%; background: linear-gradient(180deg, rgba(238, 240, 244, 0), rgba(238, 240, 244, 0.9)); pointer-events: none; }
+  .shot .t { display: flex; align-items: baseline; gap: 9px; margin: 11px 6px 4px; }
+  .shot .t .no { font: 700 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--tint-deep); letter-spacing: 0.1em; }
+  .shot .t b { font: 600 16px/1.3 var(--font); }
+  .shot .t span { font: 400 12.5px/1.3 var(--font); color: var(--ink-3); }
+  .shot .t .go { margin-left: auto; display: inline-flex; align-items: center; gap: 3px; font: 500 13px/1 var(--font); color: var(--tint); }
+  .shot .t .go .ic { font-size: 14px; }
+
+  .sec { margin-top: 30px; }
+  .sec-head { display: flex; align-items: baseline; gap: 12px; margin-bottom: 14px; padding: 0 4px; }
+  .sec-head .no { font: 700 12px/1 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--tint-deep); letter-spacing: 0.1em; }
+  .sec-head h2 { font: var(--t-title2); letter-spacing: -0.02em; }
+  .sec-head p { font: var(--t-footnote); color: var(--ink-2); }
+  .panel { padding: 8px 24px; }
+  .panel.tight { padding: 2px 24px; }
+
+  /* 对照表:问题 → 对策 */
+  .fix { width: 100%; border-collapse: collapse; }
+  .fix th { padding: 14px 10px 8px; text-align: left; font: 600 12px/1 var(--font); letter-spacing: 0.06em; color: var(--ink-3); }
+  .fix td { padding: 14px 10px; border-top: 0.5px solid var(--sep); vertical-align: top; font: 400 14px/1.55 var(--font); }
+  .fix tr:last-child td { padding-bottom: 20px; }
+  .fix td.n { width: 28px; padding-top: 17px; font: 600 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--ink-3); }
+  .fix td.q { width: 44%; color: var(--ink-2); }
+  .fix td.q b { display: block; margin-bottom: 2px; font-weight: 600; color: var(--ink); }
+  .fix td.a b { font-weight: 600; }
+  .fix .arrow { width: 26px; text-align: center; color: var(--ink-3); }
+  .fix .arrow .ic { font-size: 15px; }
+
+  /* 架构对比 */
+  .cmp { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+  .cmp-col { padding: 18px 18px 14px; border-radius: var(--r-inner); }
+  .cmp-col.before { background: rgba(120, 120, 128, 0.08); box-shadow: inset 0 0 0 0.5px rgba(0, 0, 0, 0.05); }
+  .cmp-col.after { background: rgba(0, 113, 227, 0.07); box-shadow: inset 0 0 0 0.5px rgba(0, 113, 227, 0.2); }
+  .cmp-col h3 { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; font: 600 15px/1.3 var(--font); }
+  .cmp-col h3 .ic { font-size: 16px; }
+  .cmp-col.before h3 .ic { color: var(--ink-2); }
+  .cmp-col.after h3 .ic { color: var(--tint); }
+  .box { padding: 10px 12px; border-radius: 12px; background: rgba(255, 255, 255, 0.72); box-shadow: inset 0 0 0 0.5px rgba(0, 0, 0, 0.07); font: 400 12.5px/1.55 var(--font); }
+  .box + .box { margin-top: 8px; }
+  .box .cap { display: flex; align-items: center; gap: 8px; margin-bottom: 3px; font-weight: 600; font-size: 13px; }
+  .box .cap code { margin-left: auto; font: 500 11.5px/1 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--ink-3); }
+  .box .row { color: var(--ink-2); }
+  .box .row .sep { margin: 0 5px; color: var(--ink-3); }
+  .box .dup { color: var(--red-deep); font-weight: 500; }
+  .box .key { color: var(--ink); font-weight: 500; }
+  .cmp-col.after .box { background: rgba(255, 255, 255, 0.86); }
+  .flow { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 12px; font: 500 13px/1.3 var(--font); }
+  .flow code, .routes code { padding: 2px 7px; border-radius: 6px; background: rgba(255, 255, 255, 0.82); box-shadow: inset 0 0 0 0.5px rgba(0, 0, 0, 0.08); font: 500 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--ink); }
+  .flow .ic { font-size: 14px; color: var(--ink-3); }
+  .flow .to b { color: var(--tint-deep); }
+
+  /* 路由表 / 角色矩阵 */
+  .routes { width: 100%; border-collapse: collapse; }
+  .routes th { padding: 14px 10px 8px; text-align: left; font: 600 12px/1 var(--font); letter-spacing: 0.06em; color: var(--ink-3); }
+  .routes td { padding: 11px 10px; border-top: 0.5px solid var(--sep); font: 400 14px/1.5 var(--font); vertical-align: top; }
+  .routes td:first-child { white-space: nowrap; }
+  .routes .grp { display: inline-flex; align-items: center; height: 22px; padding: 0 9px; border-radius: 980px; font: 600 12px/1 var(--font); white-space: nowrap; }
+  .routes .grp.work { background: var(--tint-soft); color: var(--tint-deep); }
+  .routes .grp.admin { background: var(--indigo-soft); color: var(--indigo-deep); }
+  .routes .grp.pub { background: var(--fill); color: var(--ink-2); }
+  .routes .note { display: block; margin-top: 2px; font-size: 12.5px; color: var(--ink-3); }
+  .routes tr:last-child td { padding-bottom: 18px; }
+
+  .cols { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; }
+  .rules { display: flex; flex-direction: column; gap: 9px; padding: 4px 0 10px; }
+  .rules li { display: flex; gap: 10px; font: 400 14px/1.55 var(--font); color: var(--ink-2); }
+  .rules li .ic { flex-shrink: 0; margin-top: 4px; font-size: 14px; color: var(--tint); }
+  .rules li b { font-weight: 600; color: var(--ink); }
+
+  /* 模板示意 */
+  .tpl { display: flex; flex-direction: column; gap: 10px; padding: 4px 0 10px; }
+  .tpl .bar { display: flex; align-items: center; gap: 12px; min-height: 44px; padding: 8px 14px; border-radius: 14px; background: rgba(255, 255, 255, 0.78); box-shadow: inset 0 0 0 0.5px rgba(0, 0, 0, 0.07); font: 400 13px/1.4 var(--font); }
+  .tpl .bar .lbl { width: 58px; flex-shrink: 0; font: 600 11.5px/1 var(--font); color: var(--ink-3); }
+  .tpl .bar.head { min-height: 62px; }
+  .tpl .bar.head .h1 { font: 600 20px/1.2 var(--font); letter-spacing: -0.02em; }
+  .tpl .bar.head .lede { margin-top: 2px; font-size: 12.5px; color: var(--ink-2); }
+  .tpl .bar.head .btn { margin-left: auto; height: 32px; padding: 0 14px; font-size: 13px; }
+  .tpl .bar .ghost { height: 30px; padding: 0 12px; display: inline-flex; align-items: center; border-radius: 9px; background: var(--fill); font-size: 12.5px; color: var(--ink-2); }
+  .tpl .bar.body { min-height: 84px; align-items: flex-start; color: var(--ink-3); }
+  .tpl .bar .sub { font-size: 12px; color: var(--ink-3); }
+
+  /* 待定事项 */
+  .asks { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+  .ask { padding: 20px 20px 16px; display: flex; flex-direction: column; }
+  .ask .k { font: 700 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--tint-deep); letter-spacing: 0.1em; }
+  .ask h3 { margin-top: 8px; font: 600 16px/1.35 var(--font); letter-spacing: -0.01em; }
+  .ask p { margin-top: 8px; font: 400 13.5px/1.55 var(--font); color: var(--ink-2); }
+  .ask .pick { margin-top: auto; padding-top: 14px; }
+  .ask .pick span { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 11px; border-radius: 980px; background: var(--green-soft); color: var(--green-deep); font: 600 12.5px/1 var(--font); }
+  .ask .pick span .ic { font-size: 13px; }
+
+  /* 落地顺序 */
+  .steps { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; padding: 4px 0 10px; }
+  .step { padding: 14px 16px; border-radius: 16px; background: rgba(255, 255, 255, 0.74); box-shadow: inset 0 1px 0 #fff, inset 0 0 0 0.5px rgba(0, 0, 0, 0.06); }
+  .step .n { font: 700 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--tint-deep); letter-spacing: 0.1em; }
+  .step h3 { margin-top: 7px; font: 600 15px/1.35 var(--font); }
+  .step p { margin-top: 5px; font: 400 12.5px/1.5 var(--font); color: var(--ink-2); }
+  .step code { font: 500 11.5px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--ink); }
+
+  @media (max-width: 900px) {
+    .doc { padding: 36px 18px 72px; }
+    .doc-hero h1 { font-size: 32px; }
+    .shots, .cmp, .cols, .asks { grid-template-columns: minmax(0, 1fr); }
+    .steps { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .fix td.q { width: auto; }
+    .fix .arrow { display: none; }
+  }
+</style>
+</head>
+<body class="app">
+<div class="wallpaper" aria-hidden="true"></div>
+
+<main class="doc">
+  <header class="doc-hero">
+    <p class="eyebrow" style="color:var(--tint-deep);margin-bottom:10px">ReForge · 工作台与后台重设计 · 设计稿</p>
+    <h1>一个外壳，两组导航</h1>
+    <p class="lede">现在的乱，根子在结构不在视觉：<b>两套外壳、两套登录态、导航互相穿插</b>。这次把所有登录后的页面收进同一个外壳，导航分成「工作空间」和「系统管理」两组；<b>工作台只回答“我现在要做什么”</b>；后台五个分区套同一个模板、各有一条地址；<b>登录成功一律进工作台</b>。视觉沿用已定稿的 Liquid Glass，不改风格。</p>
+  </header>
+
+  <!-- 画板 -->
+  <section class="shots">
+    <a class="shot lg-card" href="login.html">
+      <div class="shot-view"><img src="shots/01-login.png" alt="登录页"></div>
+      <div class="t"><span class="no">01</span><b>登录</b><span>唯一入口</span><span class="go">打开</span></div>
+    </a>
+    <a class="shot lg-card" href="workbench.html">
+      <div class="shot-view"><img src="shots/02-workbench-pm.png" alt="工作台（项目经理视角）"></div>
+      <div class="t"><span class="no">02</span><b>工作台</b><span>底部可切 5 个视角</span><span class="go">打开</span></div>
+    </a>
+    <a class="shot lg-card" href="admin.html#/admin/users">
+      <div class="shot-view"><img src="shots/03-admin-users.png" alt="管理后台 · 用户与岗位"></div>
+      <div class="t"><span class="no">03</span><b>管理后台</b><span>点侧栏切换 5 个分区</span><span class="go">打开</span></div>
+    </a>
+    <a class="shot lg-card" href="mobile.html">
+      <div class="shot-view"><img src="shots/04-mobile.png" alt="手机端"></div>
+      <div class="t"><span class="no">04</span><b>手机端</b><span>工作台 · 我的 · 管理后台</span><span class="go">打开</span></div>
+    </a>
+  </section>
+
+  <!-- 问题 → 对策 -->
+  <section class="sec">
+    <div class="sec-head"><span class="no">A</span><h2>为什么乱，怎么改</h2><p>左边是从代码里读出来的现状，右边是对策</p></div>
+    <div class="lg-card panel tight">
+      <table class="fix">
+        <thead><tr><th></th><th>现在</th><th></th><th>改成</th></tr></thead>
+        <tbody>
+          <tr><td class="n">1</td><td class="q"><b>两套外壳、两套登录态</b>工作台 / 项目 / 通知用一套悬浮顶栏；<code>/admin</code> 自己另写了顶栏和侧栏，把会话校验、登录卡、强制改密、退出各复制了一遍。</td><td class="arrow"></td><td class="a"><b>一个外壳。</b>所有登录后的页面共用：桌面是左侧悬浮侧栏，手机是底部 Tab 栏。后台只是外壳里的一个分组。</td></tr>
+          <tr><td class="n">2</td><td class="q"><b>导航互相穿插</b>「工作台」既是前台顶栏第一项，又是后台侧栏第一项；「后台」在前台是个文字链，进了后台再用「工作台」「返回前台」两个文字链回去。</td><td class="arrow"></td><td class="a"><b>两组导航，互不重复。</b>「工作空间」= 工作台 / 流程项目 / 通知 / 数据大屏；「系统管理」= 后台五个分区，只有管理员看得到。「提交流程」固定在侧栏底部。</td></tr>
+          <tr><td class="n">3</td><td class="q"><b>顶栏右侧 5 个图标并排</b>后台、个人信息、数据大屏、返回前台、退出。其中「返回前台」是个没有文字的左箭头。</td><td class="arrow"></td><td class="a"><b>顶栏取消。</b>数据大屏进侧栏；个人信息和退出收进账号菜单；「返回前台」换成有文字的「提交流程」。</td></tr>
+          <tr><td class="n">4</td><td class="q"><b>后台分区不进地址栏</b>五个分区靠页面内部状态切换：刷新回到第一项，没法分享和后退。侧栏叫「流程定义」，面板标题却写「流程管理」。</td><td class="arrow"></td><td class="a"><b>每个分区一条地址。</b><code>/admin/processes</code> 等五条；页头统一成「大标题 + 一句话说明 + 主操作」，侧栏和页头用同一个名字。</td></tr>
+          <tr><td class="n">5</td><td class="q"><b>工作台 4 个 tab 互相包含</b>「待我处理」里已经装了另外三个 tab 的全部内容；「我参与的项目」和「流程项目」页基本重复；全局统计挤在页头。</td><td class="arrow"></td><td class="a"><b>取消 tab。</b>主列是一张按动作分组的清单，右栏放项目和风险。「全部项目」只留在「流程项目」，全局统计归「数据大屏」。</td></tr>
+          <tr><td class="n">6</td><td class="q"><b>登录去向不统一</b>四个页面各自渲染登录卡，登完原地不动；在 <code>/admin</code> 登录就留在后台，普通成员还会看到一张「需要管理员账号」的卡片；首页没有登录入口。</td><td class="arrow"></td><td class="a"><b>唯一登录页 <code>/login</code>，成功后一律进 <code>/work</code>。</b>首页顶栏按登录状态显示「登录」或「工作台」。</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- 架构对比 -->
+  <section class="sec">
+    <div class="sec-head"><span class="no">B</span><h2>结构对比</h2><p>红字是重复的部分</p></div>
+    <div class="cmp">
+      <div class="cmp-col before">
+        <h3>现在 · 三套外壳</h3>
+        <div class="box"><div class="cap">外壳 A · 悬浮顶栏 <code>/work /projects /inbox</code></div>
+          <div class="row">ReForge<span class="sep">·</span>工作台<span class="sep">·</span>流程项目<span class="sep">·</span>通知<span class="sep">·</span><span class="dup">后台</span><span class="sep">·</span>个人<span class="sep">·</span>大屏<span class="sep">·</span><span class="dup">返回前台</span><span class="sep">·</span><span class="dup">退出</span></div></div>
+        <div class="box"><div class="cap">外壳 B · 后台自己的顶栏 + 侧栏 <code>/admin</code></div>
+          <div class="row">ReForge / 管理后台<span class="sep">·</span><span class="dup">工作台</span><span class="sep">·</span><span class="dup">返回前台</span><span class="sep">·</span>个人<span class="sep">·</span><span class="dup">退出</span></div>
+          <div class="row" style="margin-top:6px">侧栏「协作」：<span class="dup">工作台 · 流程项目</span></div>
+          <div class="row">侧栏「系统管理」：流程定义 · 线上系统库 · 用户与岗位 · 阶段模板 · 通知渠道 <span class="dup">（不进地址栏）</span></div></div>
+        <div class="box"><div class="cap">外壳 C · 数据大屏 <code>/monitor</code></div><div class="row">暗色全屏，自己的「返回管理后台」按钮</div></div>
+        <div class="box"><div class="cap">登录卡 <code>4 份</code></div><div class="row">四个页面各渲染一份，<span class="dup">登完原地不动</span></div></div>
+      </div>
+      <div class="cmp-col after">
+        <h3>之后 · 一个外壳</h3>
+        <div class="box"><div class="cap">侧栏（桌面）<code>/work /projects /inbox /monitor /admin/*</code></div>
+          <div class="row">工作空间：<span class="key">工作台</span> · <span class="key">流程项目</span> · <span class="key">通知</span> · <span class="key">数据大屏</span></div>
+          <div class="row" style="margin-top:6px">系统管理（仅管理员）：<span class="key">流程定义</span> · <span class="key">线上系统库</span> · <span class="key">用户与岗位</span> · <span class="key">阶段模板</span> · <span class="key">通知渠道</span></div>
+          <div class="row" style="margin-top:6px">底部：<span class="key">＋ 提交流程</span> · <span class="key">账号菜单</span></div></div>
+        <div class="box"><div class="cap">底部 Tab 栏（手机）<code>工作台 / 项目 / 通知 / 我的</code></div>
+          <div class="row">管理后台从「我的」进入，是全屏推入的二级区域</div></div>
+        <div class="box"><div class="cap">内容区</div><div class="row">每个页面都是：大标题 · 一句话说明 · 主操作 · 正文</div></div>
+        <div class="flow"><code>/login</code><span class="ic">→</span><span class="to">成功后 <b>/work</b></span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 路由 -->
+  <section class="sec">
+    <div class="sec-head"><span class="no">C</span><h2>地址表</h2><p>页面内容没变的也列出来，方便对照</p></div>
+    <div class="lg-card panel tight">
+      <table class="routes">
+        <thead><tr><th>地址</th><th>归属</th><th>内容</th></tr></thead>
+        <tbody>
+          <tr><td><code>/</code></td><td><span class="grp pub">公开</span></td><td>流程收集表。顶栏：未登录显示「登录」，已登录显示「工作台」。</td></tr>
+          <tr><td><code>/login</code></td><td><span class="grp pub">公开</span></td><td>唯一的登录页。<span class="note">成功后一律进 /work；首次登录先改密，改完同样进 /work。</span></td></tr>
+          <tr><td><code>/work</code></td><td><span class="grp work">工作空间</span></td><td>工作台，登录后的首页。</td></tr>
+          <tr><td><code>/projects</code><br><code>/projects/[id]</code></td><td><span class="grp work">工作空间</span></td><td>流程项目、项目详情。<span class="note">页面本身不变，只是换进新外壳。</span></td></tr>
+          <tr><td><code>/inbox</code></td><td><span class="grp work">工作空间</span></td><td>通知。<span class="note">页面本身不变。</span></td></tr>
+          <tr><td><code>/monitor</code></td><td><span class="grp work">工作空间</span></td><td>数据大屏。<span class="note">全屏、不套外壳，右上角一个「返回」。</span></td></tr>
+          <tr><td><code>/admin/processes</code></td><td><span class="grp admin">系统管理</span></td><td>流程定义</td></tr>
+          <tr><td><code>/admin/systems</code></td><td><span class="grp admin">系统管理</span></td><td>线上系统库</td></tr>
+          <tr><td><code>/admin/users</code></td><td><span class="grp admin">系统管理</span></td><td>用户与岗位</td></tr>
+          <tr><td><code>/admin/stages</code></td><td><span class="grp admin">系统管理</span></td><td>阶段模板</td></tr>
+          <tr><td><code>/admin/channels</code></td><td><span class="grp admin">系统管理</span></td><td>通知渠道</td></tr>
+          <tr><td><code>/me</code></td><td><span class="grp pub">手机</span></td><td>「我的」Tab：数据大屏、提交流程、管理后台、个人信息、退出。<span class="note">桌面端这些入口在侧栏底部，不用这一页。</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- 工作台 -->
+  <section class="sec">
+    <div class="sec-head"><span class="no">D</span><h2>工作台：一张清单，四类行动</h2><p>同一套布局，不同的人看到不同的分组</p></div>
+    <div class="cols">
+      <div class="lg-card panel tight">
+        <table class="routes">
+          <thead><tr><th>分组</th><th>什么时候出现</th><th>点进去</th></tr></thead>
+          <tbody>
+            <tr><td>待我评审</td><td>我是当前关卡的评审人，且有等我决定的评审</td><td>项目详情 · 评审</td></tr>
+            <tr><td>待我指派</td><td>仅管理员。有新流程在等项目经理</td><td>指派弹窗</td></tr>
+            <tr><td>等我推进</td><td>仅项目经理。我负责的项目轮到我了，或者已经逾期、阻塞</td><td>项目详情</td></tr>
+            <tr><td>我的任务</td><td>所有人。分配给我的未完成任务</td><td>项目详情 · 计划</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="lg-card panel">
+        <ul class="rules">
+          <li><span><b>有内容才成卡。</b>空的分组收成一行「没有等你评审的关卡」；四类全空时显示「都处理完了」和几个快捷入口。</span></li>
+          <li><span><b>每组最多 3 行</b>，其余「显示全部 N 项」就地展开，不跳页。</span></li>
+          <li><span><b>页头只有一句话摘要</b>，例如「7 件事等你处理，其中 2 件已逾期」。在途 / 待评审 / 逾期 / 阻塞这些全局数字不再放这里。</span></li>
+          <li><span><b>右栏。</b>管理员和 CTO 看「在途项目」，其他人看「我负责（参与）的项目」；「需要关注」只给管理员、CTO、项目经理。</span></li>
+          <li><span><b>侧栏的数字。</b>「工作台」后面是以上四类的合计，「通知」后面是未读数，从任何页面都看得到。</span></li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- 后台模板 -->
+  <section class="sec">
+    <div class="sec-head"><span class="no">E</span><h2>后台：五个分区，一个模板</h2><p>分区不同，骨架相同</p></div>
+    <div class="cols">
+      <div class="lg-card panel">
+        <div class="tpl">
+          <div class="bar head"><div><div class="h1">大标题</div><div class="lede">一句话说明这一页管什么</div></div><span class="btn btn-primary">主操作</span></div>
+          <div class="bar"><span class="lbl">工具条</span><span class="ghost" style="flex:1">搜索</span><span class="ghost">筛选</span><span class="sub" style="margin-left:auto">共 N 条</span></div>
+          <div class="bar body"><span class="lbl">正文</span><span>表格 · 网格卡片 · 时间轨<br>按数据特点选，行内操作鼠标移上去才出现</span></div>
+        </div>
+      </div>
+      <div class="lg-card panel">
+        <ul class="rules">
+          <li><span><b>新增类操作收进弹层。</b>「创建账号」原来是一大块常驻在列表上方的表单，现在改成页头的一个按钮；「新增系统」「新增渠道」同理。列表页只剩看和找。</span></li>
+          <li><span><b>权限写在页头。</b>「用户与岗位」第一句就是「公开注册已关闭，账号由管理员在这里创建」，不再靠表单下面的小字补充。</span></li>
+          <li><span><b>阶段模板保留时间轨。</b>每个阶段一张摘要卡：出口关卡、评审方式、评审人、必交付物、默认任务；点开才编辑。</span></li>
+          <li><span><b>手机上从「我的」进入。</b>全屏二级页，分区用顶部横向切换条，表格变成一张张卡片行。</span></li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- 登录去向 -->
+  <section class="sec">
+    <div class="sec-head"><span class="no">F</span><h2>登录之后去哪</h2><p>只有一条默认路径</p></div>
+    <div class="lg-card panel">
+      <div class="flow" style="margin-top:6px">
+        <span>任意页面未登录</span><span class="ic">→</span><code>/login</code><span class="ic">→</span><span class="to">成功后 <b>/work</b></span>
+        <span style="width:18px"></span><span>首次登录需改密</span><span class="ic">→</span><span>改密弹层</span><span class="ic">→</span><span class="to"><b>/work</b></span>
+        <span style="width:18px"></span><span>会话失效</span><span class="ic">→</span><code>/login</code>
+      </div>
+      <ul class="rules" style="margin-top:14px">
+        <li><span><b>普通成员打开 <code>/admin/*</code></b>：直接回工作台，不再显示「管理后台需要管理员账号」那张卡片，侧栏里也看不到「系统管理」这一组。</span></li>
+        <li><span><b>首页「管理后台」入口</b>换成「登录」/「工作台」。首页是公开的提交表单，不该人人都看到一个点进去会被拒的入口。</span></li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- 待定 -->
+  <section class="sec">
+    <div class="sec-head"><span class="no">G</span><h2>需要你定的三件事</h2><p>每件我都给了一个默认做法，不反对就按它落地</p></div>
+    <div class="asks">
+      <div class="ask lg-card">
+        <span class="k">01</span>
+        <h3>侧栏，还是保留悬浮顶栏？</h3>
+        <p>我选了左侧悬浮侧栏：八个入口一眼看全，后台五项都有文字，不会挤。代价是工作台、项目、通知三页的布局会跟着变。</p>
+        <p>如果你更想留住现在的药丸顶栏，后台五个分区就得做成顶栏下面的第二行标签。</p>
+        <div class="pick"><span>默认：侧栏</span></div>
+      </div>
+      <div class="ask lg-card">
+        <span class="k">02</span>
+        <h3>登录后要不要留一个例外？</h3>
+        <p>按你的要求，登录后一律进工作台。唯一的例外场景：从项目链接或通知点进来、被要求登录，登完是回那个项目，还是照样进工作台？</p>
+        <p>目前站内没有任何链接会带着目标地址跳到登录页，所以默认不留例外。</p>
+        <div class="pick"><span>默认：不留例外</span></div>
+      </div>
+      <div class="ask lg-card">
+        <span class="k">03</span>
+        <h3>手机上要不要「我的」这一页？</h3>
+        <p>手机底部只有四个位置：工作台、项目、通知、我的。数据大屏、提交流程、管理后台、退出都收在「我的」里。</p>
+        <p>不加这一页的话，手机上只能像现在这样把导航挤成两行，后台入口也不好放。</p>
+        <div class="pick"><span>默认：加「我的」</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 落地顺序 -->
+  <section class="sec">
+    <div class="sec-head"><span class="no">H</span><h2>落地顺序</h2><p>四步都在前端，接口和数据不动，每步可以单独验收</p></div>
+    <div class="steps">
+      <div class="step"><span class="n">STEP 1</span><h3>外壳与地址</h3><p>外壳换成侧栏 + 底部 Tab，后台并进来；加 <code>/admin/[分区]</code> 路由，旧地址 <code>/admin</code> 自动转过去。</p></div>
+      <div class="step"><span class="n">STEP 2</span><h3>登录</h3><p>加 <code>/login</code>，成功后统一跳 <code>/work</code>；首页顶栏按登录状态换入口；去掉「需要管理员账号」卡片。</p></div>
+      <div class="step"><span class="n">STEP 3</span><h3>工作台</h3><p>四个 tab 换成一张清单；全局统计移出；侧栏加待办和未读数字。</p></div>
+      <div class="step"><span class="n">STEP 4</span><h3>后台分区</h3><p>五个分区套统一页头；创建账号、新增系统、新增渠道改成弹层；表格适配手机。</p></div>
+    </div>
+  </section>
+</main>
+
+<script src="icons.js"></script>
+<script>
+// 说明页里的线性图标:与画板同一套(lucide),在渲染后注入,免得在 HTML 里手写几十段路径
+(function () {
+  const I = window.ICONS;
+  const svg = (name) =>
+    `<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${(I[name] || []).map(([t, a]) => `<${t} ${Object.entries(a).map(([k, v]) => `${k}="${v}"`).join(" ")} />`).join("")}</svg>`;
+  const put = (sel, name, where) =>
+    document.querySelectorAll(sel).forEach((el) => el.insertAdjacentHTML(where === "start" ? "afterbegin" : "beforeend", svg(name)));
+
+  put(".shot .go", "arrow-up-right", "end");
+  put(".fix .arrow", "arrow-right", "end");
+  put(".cmp-col.before h3", "x", "start");
+  put(".cmp-col.after h3", "check", "start");
+  put(".rules li", "check", "start");
+  put(".ask .pick span", "check", "start");
+  put(".tpl .bar.head .btn", "plus", "start");
+
+})();
+</script>
+</body>
+</html>

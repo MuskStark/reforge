@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>ReForge · 工作台 — 设计稿 02</title>
+<link rel="stylesheet" href="../liquid-glass/assets/tokens.css">
+<link rel="stylesheet" href="console.css">
+</head>
+<body class="app">
+<div id="root"></div>
+
+<script src="icons.js"></script>
+<script src="mock.js"></script>
+<script>
+(function () {
+  "use strict";
+  const M = window.Mock;
+  const q = new URLSearchParams(location.search);
+  const ROLE_LABEL = { admin: "管理员", cto: "CTO", pm: "项目经理", handler: "经办", clear: "空状态" };
+  let role = ROLE_LABEL[q.get("role")] ? q.get("role") : "admin";
+
+  const sep = () => `<i class="sep">·</i>`;
+  const when = (text, warn) => `<span class="when${warn ? " warn" : ""}">${text}</span>`;
+  const go = (label) => `#todo:${label}`;
+
+  /* ---------- 行动清单:四类行动,有内容的成卡,空的收成一行 ---------- */
+
+  const GROUPS = [
+    {
+      key: "review", icon: "file-signature", tone: "indigo", title: "待我评审", empty: "没有等你评审的关卡",
+      row: (r) => `<a class="act-row" href="${go("项目详情 · 评审")}">
+        <span class="act-main">
+          <span class="act-title"><span class="name">${r.project}</span></span>
+          <span class="act-meta">阶段 ${r.stage} · ${M.STAGES[r.stage - 1]}${sep()}${r.gate}${sep()}${r.mode} · 第 ${r.round} 轮${sep()}${r.by} 提交</span>
+        </span>
+        <span class="act-tags">${M.badge(...M.PRIORITY[r.priority], "sm")}${when(r.when, r.wait >= 3)}</span>
+        <span class="btn-tint">去评审</span>
+      </a>`,
+    },
+    {
+      key: "assign", icon: "user-plus", tone: "amber", title: "待我指派", empty: "没有等你指派的流程", adminOnly: true,
+      row: (r) => `<a class="act-row" href="${go("指派项目经理")}">
+        <span class="act-main">
+          <span class="act-title"><span class="name">${r.project}</span></span>
+          <span class="act-meta">${r.by} · ${r.dept} 提交${sep()}${r.steps} 个步骤${r.countersign ? `${sep()}会签 ${r.countersign} 处` : ""}</span>
+        </span>
+        <span class="act-tags">${when(r.when, r.wait >= 3)}</span>
+        <span class="btn-tint">${M.icon("user-plus")}指派项目经理</span>
+      </a>`,
+    },
+    {
+      key: "advance", icon: "hourglass", tone: "blue", title: "等我推进", empty: "没有等你推进的项目", pmOnly: true,
+      row: (r) => {
+        const p = M.PROJECTS.find((x) => x.name === r.project);
+        const risky = p && p.health !== "on_track";
+        return `<a class="act-row" href="${go("项目详情")}">
+        <span class="act-main">
+          <span class="act-title"><span class="name">${r.project}</span></span>
+          <span class="act-meta">阶段 ${r.stage} · ${M.STAGES[r.stage - 1]}${sep()}${r.need}</span>
+        </span>
+        <span class="act-tags">${risky ? M.badge(M.HEALTH[p.health][0], M.HEALTH[p.health][1], "sm") : ""}${when(r.when, r.wait >= 3)}</span>
+        <span class="btn-tint">去推进</span>
+      </a>`;
+      },
+    },
+    {
+      key: "tasks", icon: "clipboard-check", tone: "plain", title: "我的任务", empty: "没有分配给你的任务",
+      row: (r) => {
+        const st = { todo: ["待办", "plain"], in_progress: ["进行中", "blue"], blocked: ["阻塞", "warn"] }[r.status];
+        return `<a class="act-row" href="${go("项目详情 · 计划")}">
+        <span class="act-main">
+          <span class="act-title"><span class="name">${r.title}</span></span>
+          <span class="act-meta">${r.project}${r.blockReason ? `${sep()}<b class="warn">阻塞：${r.blockReason}</b>` : ""}</span>
+        </span>
+        <span class="act-tags">${M.badge(st[0], st[1], "sm")}${when(r.when, r.wait >= 3)}</span>
+        <span class="btn-tint">去处理</span>
+      </a>`;
+      },
+    },
+  ];
+
+  const FOLD = 3; // 每组默认最多显示几行,其余折叠
+
+  function render() {
+    const user = M.USERS[role];
+    const w = M.WORK[role];
+    const total = w.review.length + w.assign.length + w.advance.length + w.tasks.length;
+
+    const visible = GROUPS.filter((g) => !(g.adminOnly && role !== "admin") && !(g.pmOnly && role !== "pm"));
+    const filled = visible.filter((g) => w[g.key].length > 0);
+    const idle = visible.filter((g) => w[g.key].length === 0);
+
+    /* 主列 */
+    let main;
+    if (total === 0) {
+      const links = {
+        admin: [["workflow", "流程定义", "admin.html#/admin/processes"], ["users", "用户与岗位", "admin.html#/admin/users"], ["presentation", "数据大屏", go("数据大屏")], ["plus", "提交流程", go("提交流程")]],
+        cto: [["waypoints", "流程项目", go("流程项目")], ["presentation", "数据大屏", go("数据大屏")], ["plus", "提交流程", go("提交流程")]],
+      }[role] || [["waypoints", "流程项目", go("流程项目")], ["plus", "提交流程", go("提交流程")]];
+      main = `<section class="lg-card allclear">
+        <span class="bead">${M.icon("check")}</span>
+        <h2>都处理完了</h2>
+        <p>现在没有等你评审、指派或办理的事情。新的待办一出现就会列在这里。</p>
+        <div class="links">${links.map(([ic, t, h]) => `<a href="${h}">${M.icon(ic)}${t}</a>`).join("")}</div>
+      </section>`;
+    } else {
+      main =
+        filled
+          .map((g) => {
+            const rows = w[g.key];
+            const shown = rows.slice(0, FOLD).map(g.row).join("");
+            const more =
+              rows.length > FOLD
+                ? `<button type="button" class="act-more" onclick="Mock.toast('就地展开其余 ${rows.length - FOLD} 项')">显示全部 ${rows.length} 项 ${M.icon("chevron-down", "font-size:14px")}</button>`
+                : "";
+            return `<section class="lg-card act">
+              <header class="act-head"><span class="act-ic ${g.tone}">${M.icon(g.icon)}</span><h2>${g.title}</h2>${M.badge(rows.length, "plain", "sm")}</header>
+              ${shown}${more}
+            </section>`;
+          })
+          .join("") +
+        (idle.length
+          ? `<p class="act-quiet">${idle.map((g) => `<span>${M.icon("check")}${g.empty}</span>`).join("")}</p>`
+          : "");
+    }
+
+    /* 右栏:项目 + 需要关注 */
+    const pendingTone = { admin: "amber", cto: "indigo", pm: "blue", handler: "plain" };
+    const pRow = (p) => {
+      const risky = p.health !== "on_track";
+      const tag = risky ? M.badge(M.HEALTH[p.health][0], M.HEALTH[p.health][1], "sm") : M.badge(M.PENDING[p.pendingOn], pendingTone[p.pendingOn], "sm");
+      return `<a class="p-row" href="${go("项目详情")}">
+        <span class="p-top"><span class="p-name">${p.name}</span>${tag}</span>
+        <span class="p-bottom"><span class="p-stage"><b>${p.stage}</b>/7 · ${M.STAGES[p.stage - 1]}</span><span class="bar"><i class="${p.health === "off_track" ? "warn" : ""}" style="width:${p.pct}%"></i></span><span class="p-pct">${p.pct}%</span></span>
+      </a>`;
+    };
+    const mine = w.mine.map((id) => M.PROJECTS.find((p) => p.id === id));
+    const side = `
+      <section class="lg-card side-card">
+        <header class="side-head"><h2>${w.mineTitle}</h2><a class="side-more" href="${go("流程项目")}">查看全部${M.icon("chevron-right")}</a></header>
+        ${mine.slice(0, 5).map(pRow).join("")}
+      </section>
+      ${
+        !["admin", "cto", "pm"].includes(role)
+          ? ""
+          : `<section class="lg-card side-card">
+        <header class="side-head">${M.icon("triangle-alert", "color:var(--amber)")}<h2>需要关注</h2>${M.badge(String(w.watch.length), w.watch.length ? "warn" : "plain", "sm")}</header>
+        ${
+          w.watch.length
+            ? w.watch
+                .map((id) => {
+                  const p = M.PROJECTS.find((x) => x.id === id);
+                  const why = [p.overdue ? `逾期 ${p.overdue} 项` : "", p.blocked ? `阻塞 ${p.blocked} 项` : ""].filter(Boolean).join(" · ");
+                  return `<a class="r-row" href="${go("项目详情")}">${M.icon(p.health === "off_track" ? "triangle-alert" : "circle-alert", `color:var(--${p.health === "off_track" ? "red" : "amber"})`)}<span class="p-name">${p.name}</span><span class="why${p.health === "at_risk" ? " warn" : ""}">${why}</span></a>`;
+                })
+                .join("")
+            : `<p class="side-empty">所有在途项目状态正常。</p>`
+        }
+      </section>`
+      }`;
+
+    document.getElementById("root").innerHTML =
+      M.WALLPAPER +
+      M.sidebar({ active: "work", user, unread: 3, todo: total }) +
+      `<div class="page">
+        ${M.mTop({ user })}
+        <header class="pg-head">
+          <div class="pg-head-text"><h1>工作台</h1><p class="lede">${w.lede}</p></div>
+        </header>
+        <div class="wb"><div class="wb-main">${main}</div><aside class="wb-side">${side}</aside></div>
+      </div>` +
+      M.mTabs({ active: "work", unread: 3, todo: total }) +
+      M.anno({
+        no: "02",
+        name: document.body.classList.contains("mob") ? "工作台 · 手机" : `工作台 · ${window.innerWidth}px`,
+        url: "/work",
+        extra: `<span class="seg mini">${Object.entries(ROLE_LABEL)
+          .map(([k, t]) => `<button type="button" class="${role === k ? "on" : ""}" onclick="setRole('${k}')">${t}</button>`)
+          .join("")}</span>`,
+      });
+  }
+
+  window.setRole = (r) => {
+    role = r;
+    render();
+  };
+  render();
+  M.refreshSidebarOverflow();
+})();
+</script>
+</body>
+</html>
