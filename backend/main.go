@@ -20,6 +20,7 @@ func newMux(st *postgresStore) *http.ServeMux {
 	registerProjectRoutes(mux, st)
 	registerStageTemplateRoutes(mux, st)
 	registerChannelRoutes(mux, st)
+	registerIntakeRoutes(mux, st)
 	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
@@ -77,12 +78,22 @@ func newMux(st *postgresStore) *http.ServeMux {
 			writeError(w, http.StatusInternalServerError, "保存失败,请检查输入后重试")
 			return
 		}
-		// 流程一提交即自动立项:进入阶段 1「分析立项」,等待指派 PM
+		// 流程一提交即自动立项,进入阶段 1。新流程进来后等谁,看模板:第一个阶段是承接阶段时等 PMO 初级分析与指派;
+		// 旧模板(没有承接阶段)仍由管理员指派 PM
+		waiting := "新流程「" + created.Name + "」已提交，等待指派 PM"
+		if tpl, terr := loadStageTemplates(r.Context(), st.db); terr == nil && len(tpl) > 0 && tpl[0].Key == keyIntake {
+			waiting = "新流程「" + created.Name + "」已提交，等待初级分析与指派 PM"
+		}
 		if pid, perr := st.CreateProjectForProcess(r.Context(), created); perr != nil {
 			requestLogger(r).Error("自动立项失败(可由启动时的补建兜底)", "process", created.ID, "err", perr)
-		} else if admins, aerr := usersWithRoleTx(r.Context(), st.db, "admin"); aerr == nil {
-			_ = notifyManyTx(r.Context(), st.db, userIDs(admins), "project_created", pid, "", "",
-				"新流程「"+created.Name+"」已提交，等待立项与指派 PM", "project_created:"+pid)
+		} else {
+			// 需求承接:新流程知会 PMO。管理员始终知会(系统里还没有 PMO 岗位时由管理员兜底)
+			if pmos, aerr := usersWithJobTx(r.Context(), st.db, RoleViewer); aerr == nil {
+				_ = notifyManyTx(r.Context(), st.db, userIDs(pmos), "project_created", pid, "", "", waiting, "project_created:"+pid)
+			}
+			if admins, aerr := usersWithRoleTx(r.Context(), st.db, "admin"); aerr == nil {
+				_ = notifyManyTx(r.Context(), st.db, userIDs(admins), "project_created", pid, "", "", waiting, "project_created:"+pid)
+			}
 		}
 		requestLogger(r).Info("新流程提交", "process", created.ID, "steps", len(created.Steps))
 		writeJSON(w, http.StatusCreated, created)

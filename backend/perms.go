@@ -16,6 +16,7 @@ type actor struct {
 
 func (a *actor) isAdmin() bool { return a.SysRole == "admin" }
 func (a *actor) isCTO() bool   { return a.JobRole == RoleCTO }
+func (a *actor) isPMO() bool   { return a.JobRole == RoleViewer }
 
 // name 时间线上显示的名字
 func (a *actor) name() string {
@@ -26,7 +27,7 @@ func (a *actor) name() string {
 }
 
 // caps 行为人在某个项目里的有效能力。
-// 系统管理员与 CTO 是全局的;PM / BH / TH / PMO 按项目授予。
+// 系统管理员、CTO、PMO 是全局的;PM / BH / TH / PMO 成员按项目授予。
 type caps struct {
 	Admin   bool
 	CTO     bool
@@ -34,10 +35,11 @@ type caps struct {
 	Handler bool
 	Dev     bool
 	Viewer  bool
+	PMO     bool // 岗位为 PMO:做需求承接的初级分析、指派 PM 与终审(全局生效,不需要逐项目添加)
 }
 
 func capsFor(a actor, projectRoles []string) caps {
-	c := caps{Admin: a.isAdmin(), CTO: a.isCTO()}
+	c := caps{Admin: a.isAdmin(), CTO: a.isCTO(), PMO: a.isPMO()}
 	for _, r := range projectRoles {
 		switch r {
 		case RolePM:
@@ -59,6 +61,12 @@ func (c caps) member() bool { return c.Admin || c.CTO || c.PM || c.Handler || c.
 // manage 能否计划与推进:改计划、提交评审、回退阶段(成员的分配另见 canAssign)
 func (c caps) manage() bool { return c.Admin || c.CTO || c.PM }
 
+// triage 能否做需求承接的初级分析:PMO 做,管理员兜底(见 intake.go)
+func (c caps) triage() bool { return c.Admin || c.PMO }
+
+// finalReview 能否做需求承接的终审:PMO 做,管理员兜底
+func (c caps) finalReview() bool { return c.Admin || c.PMO }
+
 // editFlow 能否修改流程定义(表单与流程图)。节点上的经办人最清楚流程实际怎么走,
 // 所以项目里的 PM、BH、TH 都能改,管理员与 CTO 照旧;PMO 在项目里仍是只读。
 func (c caps) editFlow() bool { return c.Admin || c.CTO || c.PM || c.Handler || c.Dev }
@@ -71,17 +79,19 @@ func (c caps) canReview(reviewerRole string) bool {
 	return (reviewerRole == RoleCTO && c.CTO) || (reviewerRole == RoleHandler && c.Handler)
 }
 
-// assign 能否指派 / 更换项目经理:流程的全部权限分配只有管理员持有
-func (c caps) assign() bool { return c.Admin }
+// assign 能否指派 / 更换项目经理:需求承接里由 PMO 在初级分析之后指派,管理员兜底
+func (c caps) assign() bool { return c.Admin || c.PMO }
 
 // canAssign 能否增删某一类项目成员。流程的权限分配按类划分:
 //
-//	管理员 —— 全部;CTO —— TH(科技经办);PM —— BH(业务经办)
+//	管理员 —— 全部;PMO —— PM(项目经理);CTO —— TH(科技经办);PM —— BH(业务经办)
 //
-// PMO 不属于任何一侧,只有管理员能添加。
+// PMO 成员(只读)不属于任何一侧,只有管理员能添加。
 func (c caps) canAssign(role string) bool {
 	switch role {
-	case RolePM, RoleViewer:
+	case RolePM:
+		return c.assign()
+	case RoleViewer:
 		return c.Admin
 	case RoleHandler:
 		return c.Admin || c.PM
@@ -109,9 +119,12 @@ func (c caps) flags() map[string]bool {
 		"createItem":    c.member(),
 		"reviewCTO":     c.canReview(RoleCTO),
 		"reviewHandler": c.canReview(RoleHandler),
+		"triage":        c.triage(),
+		"final":         c.finalReview(),
 		"isPM":          c.PM,
 		"isHandler":     c.Handler,
 		"isCTO":         c.CTO,
+		"isPMO":         c.PMO,
 		"isAdmin":       c.Admin,
 	}
 }

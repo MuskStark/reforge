@@ -129,6 +129,7 @@ func runScheduledJobs(ctx context.Context, st *postgresStore) error {
 		{"逾期工作项", scanOverdueItems},
 		{"逾期阶段", scanOverdueStages},
 		{"评审积压", scanReviewAging},
+		{"终审积压", scanFinalAging},
 		{"简报到期", scanUpdateDue},
 	} {
 		if err := job.run(ctx, st); err != nil {
@@ -301,13 +302,56 @@ func scanReviewAging(ctx context.Context, st *postgresStore) error {
 	return nil
 }
 
-// scanUpdateDue 在途项目超过 7 天没有简报:每周提醒一次项目经理
+// scanFinalAging 技术可行性评估通过后,等 PMO 终审超过 3 天:每天提醒一次 PMO,知会管理员
+func scanFinalAging(ctx context.Context, st *postgresStore) error {
+	rows, err := st.db.QueryContext(ctx, `SELECT pr.id, pr.name, pr.final_review_id FROM projects pr
+		JOIN gate_reviews r ON r.id = pr.final_review_id
+		WHERE pr.status = 'active' AND pr.final_status = $1 AND r.decided_at < now() - interval '3 days'`, FinalPending)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	type row struct{ pid, pname, rid string }
+	var all []row
+	for rows.Next() {
+		var x row
+		if err := rows.Scan(&x.pid, &x.pname, &x.rid); err != nil {
+			return err
+		}
+		all = append(all, x)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for _, x := range all {
+		err := st.withTx(ctx, func(tx *sql.Tx) error {
+			pmos, err := usersWithJobTx(ctx, tx, RoleViewer)
+			if err != nil {
+				return err
+			}
+			admins, err := usersWithRoleTx(ctx, tx, "admin")
+			if err != nil {
+				return err
+			}
+			return notifyManyTx(ctx, tx, uniq(append(userIDs(pmos), userIDs(admins)...)), "intake_final_aging", x.pid, "", x.rid,
+				"「"+x.pname+"」的技术可行性评估已通过超过 3 天，等待 PMO 终审", "intake_final_aging:"+x.rid+":"+todayKey())
+		})
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// scanUpdateDue 在途项目超过 7 天没有简报:每周提醒一次项目经理。
+// 从没写过简报的项目,从进入当前阶段算起(刚过立项、刚进阶段 2 的项目不会被当成已经逾期 7 天)。
 func scanUpdateDue(ctx context.Context, st *postgresStore) error {
 	year, week := time.Now().ISOWeek()
 	key := func(pid string) string { return "update_due:" + pid + ":" + itoa(year) + itoa(week) }
 	rows, err := st.db.QueryContext(ctx, `SELECT pr.id, pr.name,
-		(SELECT max(c.created_at) FROM comments c WHERE c.project_id = pr.id AND c.kind = 'update')
-		FROM projects pr WHERE pr.status = 'active' AND pr.current_stage > 1`) // 分析立项阶段较短,不要求简报
+		COALESCE((SELECT max(c.created_at) FROM comments c WHERE c.project_id = pr.id AND c.kind = 'update'), ps.entered_at)
+		FROM projects pr JOIN project_stages ps ON ps.project_id = pr.id AND ps.seq = pr.current_stage
+		WHERE pr.status = 'active' AND pr.current_stage > 1`) // 分析立项阶段较短,不要求简报
 	if err != nil {
 		return err
 	}
@@ -328,7 +372,8 @@ func scanUpdateDue(ctx context.Context, st *postgresStore) error {
 		return err
 	}
 	for _, x := range all {
-		if x.last.Valid && time.Since(x.last.Time) < 7*24*time.Hour {
+		// 没有简报也没有进入时间:无从判断是否逾期,不提醒
+		if !x.last.Valid || time.Since(x.last.Time) < 7*24*time.Hour {
 			continue
 		}
 		err := st.withTx(ctx, func(tx *sql.Tx) error {

@@ -1,10 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import type { ProjectCaps, ProjectView, UserDir } from "@/lib/types";
 import { authFetch } from "@/lib/auth";
 import { JOB_ROLE_LABEL, PROJECT_ROLE_OWNER } from "@/lib/labels";
+import { intakeHref } from "@/lib/intake";
 import { Dialog, DialogActions, DialogHeader } from "@/components/ui/dialog";
 import { MemberChip, UserOptionLine } from "@/components/projects/stage-rail";
 import { cn } from "@/lib/utils";
@@ -12,15 +14,15 @@ import { cn } from "@/lib/utils";
 type Role = "pm" | "handler" | "dev" | "viewer";
 
 /**
- * 项目里的四类成员。每类由谁分配与服务端一致:管理员分配全部;CTO 分配 TH(科技经办);
- * PM 分配 BH(业务经办)。flag 是服务端为当前用户下发的对应能力。
+ * 项目里的四类成员。每类由谁分配与服务端一致:管理员分配全部;PMO 指派 PM(项目经理);
+ * CTO 分配 TH(科技经办);PM 分配 BH(业务经办)。flag 是服务端为当前用户下发的对应能力。
  * 名称一律用英文缩写,中文全称放在说明的开头。
  */
 const ROLE_META: { role: Role; label: string; hint: string; flag: keyof ProjectCaps; empty: string }[] = [
-  { role: "pm", label: "PM", hint: "项目经理：对项目交付负责，制定计划、拆解任务、推进阶段、提交评审", flag: "assign", empty: "未指派" },
+  { role: "pm", label: "PM", hint: "项目经理：承接需求、对项目交付负责，制定计划、拆解任务、推进阶段、提交评审", flag: "assign", empty: "未指派" },
   { role: "handler", label: "BH", hint: "业务经办：确认需求、执行试运行；需求基线与试运行结论由他们会签", flag: "assignHandler", empty: "尚未添加 —— 需求基线与试运行结论需要他们会签" },
   { role: "dev", label: "TH", hint: "科技经办：承接系统改造，开发、配置、联调、测试", flag: "assignDev", empty: "未添加" },
-  { role: "viewer", label: "PMO", hint: "项目管理办公室：只读", flag: "assignViewer", empty: "未添加" },
+  { role: "viewer", label: "PMO", hint: "项目管理办公室：作为项目成员时只读；初级分析、指派 PM 与终审是岗位自带的职责", flag: "assignViewer", empty: "未添加" },
 ];
 
 /** 能否打开成员管理:至少能分配一类成员(服务端仍然逐请求校验) */
@@ -29,8 +31,8 @@ export function canAssignMembers(can: ProjectCaps): boolean {
 }
 
 /**
- * 成员管理 / 立项指派。管理员可以分配全部成员;CTO 只分配 TH,PM 只分配 BH,
- * 其余区块只读并注明由谁分配。第一位 PM 到岗时项目正式启动。
+ * 成员管理 / 立项指派。管理员可分配全部成员;PMO 指派 PM,CTO 分配 TH,PM 分配 BH。
+ * PM 可以有多名,其中一名主负责;第一位到岗的 PM 自动成为主负责。项目从承接阶段启动。
  */
 export function MembersDialog({
   project,
@@ -43,6 +45,7 @@ export function MembersDialog({
   onClose: () => void;
   onSaved: () => Promise<void> | void;
 }) {
+  const router = useRouter();
   const [pick, setPick] = useState<Record<Role, string>>({ pm: "", handler: "", dev: "", viewer: "" });
   const [busy, setBusy] = useState(false);
   // 从看板打开时传入的是列表里的项目(不带经办候选):先拉一次详情
@@ -57,15 +60,18 @@ export function MembersDialog({
   const ctoNames = users.filter((u) => u.jobRole === "cto").map((u) => u.displayName);
   const hinted = new Set(project.handlerHints.filter((h) => h.matched).map((h) => h.userId));
   const unmatched = project.handlerHints.filter((h) => !h.matched).map((h) => h.raw);
+  // 需求承接:第一个阶段是承接阶段、且还没指派 PM 时,先由 PMO 做初级分析
+  const intake = project.intake;
+  const needsTriage = !!intake && !project.hasPm && !intake.triageDone;
 
-  const act = async (userId: string, role: Role, action: "add" | "remove", label: string) => {
+  const act = async (userId: string, role: Role, action: "add" | "remove", label: string, lead = false) => {
     setBusy(true);
     try {
       await authFetch(`/api/projects/${project.id}/members`, {
         method: "PUT",
-        body: JSON.stringify({ userId, role, action }),
+        body: JSON.stringify({ userId, role, action, ...(lead ? { lead: true } : {}) }),
       });
-      toast.success(action === "add" ? `已${role === "pm" ? "指派" : "分配"} ${label}` : `已移除 ${label}`);
+      toast.success(action === "add" ? `已${role === "pm" ? "指派" : "分配"} ${label}${lead ? "为主负责" : ""}` : `已移除 ${label}`);
       setPick((p) => ({ ...p, [role]: "" }));
       const latest = await authFetch<ProjectView>(`/api/projects/${project.id}`, { cache: "no-store" });
       setFull(latest);
@@ -82,15 +88,35 @@ export function MembersDialog({
       <DialogHeader
         id="members-title"
         title="项目成员"
-        subtitle="管理员可分配全部成员；CTO 分配 TH，PM 分配 BH。第一位 PM 到岗后项目正式启动。"
+        subtitle="PMO 在初级分析后指派 PM（管理员可兜底）；CTO 分配 TH，PM 分配 BH。PM 可以有多名，其中一名主负责。"
         onClose={onClose}
       />
 
       <div className="mt-5 space-y-3">
         {!project.hasPm && !ended && (
-          <p className="rounded-2xl bg-[color:var(--amber-soft)] px-3.5 py-2.5 text-[13px] leading-relaxed text-[color:var(--amber-deep)] shadow-[inset_0_0_0_0.5px_rgba(255,149,0,0.25)]">
-            尚未指派 PM。流程已自动立项，指派后进入阶段 1「{project.stages[0]?.name ?? "分析立项"}」。
-          </p>
+          <div className="rounded-2xl bg-[color:var(--amber-soft)] px-3.5 py-2.5 text-[13px] leading-relaxed text-[color:var(--amber-deep)] shadow-[inset_0_0_0_0.5px_rgba(255,149,0,0.25)]">
+            {needsTriage ? (
+              <>
+                <p>这条流程刚收集完成，先由 PMO 看自动诊断、做初级分析，完成后再指派一名或多名 PM。</p>
+                {project.can.triage && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onClose();
+                      router.push(intakeHref(project));
+                    }}
+                    className="btn btn-primary mt-2 !h-9 !px-3.5 text-[13px]"
+                  >
+                    去做初级分析
+                  </button>
+                )}
+              </>
+            ) : (
+              <p>
+                尚未指派 PM。{intake ? "流程已自动立项，指派后进入承接阶段的 PM 推进。" : `流程已自动立项，指派后进入阶段 1「${project.stages[0]?.name ?? "分析立项"}」。`}
+              </p>
+            )}
+          </div>
         )}
 
         {ROLE_META.map(({ role, label, hint, flag, empty }) => {
@@ -119,6 +145,9 @@ export function MembersDialog({
                       key={m.userId}
                       name={m.displayName}
                       role={role}
+                      lead={role === "pm" && project.leadPmId === m.userId}
+                      onMakeLead={role === "pm" && canEdit ? () => void act(m.userId, role, "add", m.displayName, true) : undefined}
+                      disabled={busy}
                       onRemove={canEdit ? () => void act(m.userId, role, "remove", m.displayName) : undefined}
                     />
                   ))}
@@ -167,9 +196,9 @@ export function MembersDialog({
         })}
 
         <section className="rounded-2xl bg-[linear-gradient(180deg,rgba(240,240,255,0.5),rgba(255,255,255,0.45))] p-3.5 shadow-[inset_0_0_0_0.5px_rgba(88,86,214,0.25)]">
-          <div className="flex items-baseline gap-2">
-            <h3 className="text-[14px] font-semibold text-[color:var(--indigo-deep)]">CTO · 技术负责人</h3>
-            <span className="text-xs text-[color:var(--ink-2)]">全局岗位，可查看全部流程并评审方案，无需逐项目添加</span>
+          <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+            <h3 className="shrink-0 text-[14px] font-semibold text-[color:var(--indigo-deep)]">CTO · 技术负责人</h3>
+            <span className="text-xs text-[color:var(--ink-2)]">全局岗位：评估技术可行性、评审方案与验收，可查看全部流程，无需逐项目添加</span>
           </div>
           <p className="mt-2 text-[13px] text-[color:var(--indigo-deep)]">{ctoNames.length ? ctoNames.join("、") : "尚未设置 CTO —— 请到「用户与岗位」把对应的人的岗位设为 CTO"}</p>
         </section>

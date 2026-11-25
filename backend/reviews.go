@@ -231,15 +231,33 @@ func submitReviewTx(ctx context.Context, tx *sql.Tx, pr *Project, stages []Proje
 	if cur.Status != StageInProgress {
 		return nil, conflict("当前阶段不在进行中（已在评审或已通过）")
 	}
-	missing, err := missingRequiredTx(ctx, tx, pr.ID, cur.Seq)
-	if err != nil {
-		return nil, err
-	}
-	if len(missing) > 0 {
-		return nil, badRequest("还有必交付物未完成：" + strings.Join(missing, "、"))
-	}
-	if cur.Seq == 1 && (pr.Value == "" || pr.Complexity == "") {
-		return nil, badRequest("请先在概览里填写改造价值与复杂度")
+	// 需求承接阶段:准入条件是承接方案齐备(流程完整性、三条推进线的原因与方案、总述、技术点),
+	// 代替模板里的必交付物——它们已由结构化的承接方案满足,提交时一并记为完成(见 satisfyRequiredTx)
+	intake := false
+	if st, ok := pr.intakeStage(); ok && st.Seq == cur.Seq {
+		intake = true
+		asIs, _, err := asIsStepsTx(ctx, tx, pr.ID)
+		if err != nil {
+			return nil, err
+		}
+		problems, err := intakeMissingTx(ctx, tx, pr, asIs)
+		if err != nil {
+			return nil, err
+		}
+		if len(problems) > 0 {
+			return nil, badRequest("承接方案还不完整：" + strings.Join(problems, "；"))
+		}
+	} else {
+		missing, err := missingRequiredTx(ctx, tx, pr.ID, cur.Seq)
+		if err != nil {
+			return nil, err
+		}
+		if len(missing) > 0 {
+			return nil, badRequest("还有必交付物未完成：" + strings.Join(missing, "、"))
+		}
+		if cur.Seq == 1 && (pr.Value == "" || pr.Complexity == "") {
+			return nil, badRequest("请先在概览里填写改造价值与复杂度")
+		}
 	}
 	reviewers, err := reviewersForTx(ctx, tx, pr.ID, t.ReviewerRole)
 	if err != nil {
@@ -274,13 +292,22 @@ func submitReviewTx(ctx context.Context, tx *sql.Tx, pr *Project, stages []Proje
 	if err := setStageStatusTx(ctx, tx, pr.ID, cur.Seq, StageInReview); err != nil {
 		return nil, err
 	}
+	if intake {
+		if err := satisfyRequiredTx(ctx, tx, pr.ID, cur.Seq, a); err != nil {
+			return nil, err
+		}
+	}
 	if err := addEventTx(ctx, tx, pr.ID, "review", rv.ID, a, "review_submitted", map[string]any{
-		"stage": cur.Seq, "stageName": t.Name, "gate": t.Gate, "round": rv.Round, "summary": rv.Summary, "reviewers": names,
+		"stage": cur.Seq, "stageName": t.Name, "gate": t.Gate, "round": rv.Round, "summary": rv.Summary, "reviewers": names, "intake": intake,
 	}); err != nil {
 		return nil, err
 	}
-	if err := notifyManyTx(ctx, tx, userIDs(reviewers), "review_submitted", pr.ID, "", rv.ID,
-		"「"+pr.Name+"」提交了 "+t.Gate+"，请你评审", "review:"+rv.ID); err != nil {
+	// 需求承接阶段的 G1 是逐项的技术可行性评估,通知里直接说清楚要做什么
+	title := "「" + pr.Name + "」提交了 " + t.Gate + "，请你评审"
+	if intake {
+		title = "「" + pr.Name + "」提交了技术可行性评估，请你逐项评估"
+	}
+	if err := notifyManyTx(ctx, tx, userIDs(reviewers), "review_submitted", pr.ID, "", rv.ID, title, "review:"+rv.ID); err != nil {
 		return nil, err
 	}
 	return rv, nil
@@ -388,7 +415,7 @@ func decideReviewTx(ctx context.Context, tx *sql.Tx, pr *Project, stages []Proje
 	}
 	t, _ := pr.stageAt(rv.StageSeq)
 	if err := addEventTx(ctx, tx, pr.ID, "review", rv.ID, a, "review_voted", map[string]any{
-		"stage": rv.StageSeq, "stageName": t.Name, "round": rv.Round, "decision": decision, "comment": comment,
+		"stage": rv.StageSeq, "stageName": t.Name, "round": rv.Round, "decision": decision, "comment": comment, "intake": pr.intakeReview(rv.StageSeq),
 	}); err != nil {
 		return "", err
 	}
@@ -437,6 +464,10 @@ func finishReviewTx(ctx context.Context, tx *sql.Tx, pr *Project, stages []Proje
 		return err
 	}
 	if outcome == ReviewApproved {
+		// 需求承接阶段:技术可行性评估通过后不直接进入下一阶段,等 PMO 终审(见 handleIntakeFinal)
+		if st, ok := pr.intakeStage(); ok && st.Seq == rv.StageSeq {
+			return awaitFinalTx(ctx, tx, pr, st, rv, a, members)
+		}
 		if err := advanceAfterApprovalTx(ctx, tx, pr, stages, rv.StageSeq, false); err != nil {
 			return err
 		}
@@ -455,9 +486,13 @@ func finishReviewTx(ctx context.Context, tx *sql.Tx, pr *Project, stages []Proje
 		return err
 	}
 	if err := addEventTx(ctx, tx, pr.ID, "review", rv.ID, a, "review_rejected", map[string]any{
-		"stage": rv.StageSeq, "stageName": t.Name, "gate": t.Gate, "round": rv.Round,
+		"stage": rv.StageSeq, "stageName": t.Name, "gate": t.Gate, "round": rv.Round, "intake": pr.intakeReview(rv.StageSeq),
 	}); err != nil {
 		return err
+	}
+	if pr.intakeReview(rv.StageSeq) {
+		return notifyManyTx(ctx, tx, members, "review_rejected", pr.ID, "", rv.ID,
+			"「"+pr.Name+"」的技术可行性评估被退回，请修改后重新提交", "review_result:"+rv.ID)
 	}
 	return notifyManyTx(ctx, tx, members, "review_rejected", pr.ID, "", rv.ID,
 		"「"+pr.Name+"」的 "+t.Gate+" 被驳回，退回修改", "review_result:"+rv.ID)
@@ -490,13 +525,17 @@ func withdrawReviewTx(ctx context.Context, tx *sql.Tx, pr *Project, stages []Pro
 	}
 	t, _ := pr.stageAt(rv.StageSeq)
 	if err := addEventTx(ctx, tx, pr.ID, "review", rv.ID, a, "review_withdrawn", map[string]any{
-		"stage": rv.StageSeq, "stageName": t.Name, "round": rv.Round,
+		"stage": rv.StageSeq, "stageName": t.Name, "round": rv.Round, "intake": pr.intakeReview(rv.StageSeq),
 	}); err != nil {
 		return err
 	}
 	ids, err := reviewerUserIDsTx(ctx, tx, rv.ID)
 	if err != nil {
 		return err
+	}
+	if pr.intakeReview(rv.StageSeq) {
+		return notifyManyTx(ctx, tx, ids, "review_withdrawn", pr.ID, "", rv.ID,
+			"「"+pr.Name+"」的技术可行性评估第 "+itoa(rv.Round)+" 轮已被撤回", "review_withdrawn:"+rv.ID)
 	}
 	return notifyManyTx(ctx, tx, ids, "review_withdrawn", pr.ID, "", rv.ID,
 		"「"+pr.Name+"」的 "+t.Gate+" 第 "+itoa(rv.Round)+" 轮已被撤回", "review_withdrawn:"+rv.ID)

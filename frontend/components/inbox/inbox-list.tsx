@@ -1,6 +1,6 @@
 "use client";
 
-/** 通知中心:评审、指派、@提及、逾期、评审积压、阶段变动、简报到期。 */
+/** 通知中心:评审、指派、@提及、逾期、阶段变动，以及需求承接的终审与 CTO 协助。 */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -14,7 +14,9 @@ import {
   FolderGit2,
   GitBranch,
   HeartPulse,
+  LifeBuoy,
   MessageSquare,
+  Stamp,
   UserPlus,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -31,7 +33,17 @@ export function describe(n: NotificationItem): { Icon: typeof BellOff; tone: str
   const base = `/projects/${n.projectId}`;
   const inProject = (tab?: string) => (n.projectId ? (tab ? `${base}?tab=${tab}` : base) : "");
   if (n.itemId) return { Icon: ClipboardCheck, tone: "bg-[color:var(--tint-soft)] text-[color:var(--tint-deep)]", target: inProject("plan") + `&item=${n.itemId}` };
-  if (n.kind.startsWith("review")) return { Icon: FileSignature, tone: "bg-[color:var(--indigo-soft)] text-[color:var(--indigo-deep)]", target: inProject("review") };
+  // 评审类通知落到「当前关卡」:承接阶段的技术可行性评估在「承接」标签里,其余关卡在「评审」标签里,由项目页按阶段决定
+  if (n.kind.startsWith("review")) return { Icon: FileSignature, tone: "bg-[color:var(--indigo-soft)] text-[color:var(--indigo-deep)]", target: inProject("gate") };
+  // 需求承接:终审与 CTO 协助都在「承接」标签里
+  if (n.kind.startsWith("intake_")) {
+    const tone =
+      n.kind === "intake_final_passed" ? "bg-[color:var(--green-soft)] text-[color:var(--green-deep)]" : n.kind === "intake_final_returned" ? "bg-[color:var(--red-soft)] text-[color:var(--red-deep)]" : "bg-[color:var(--indigo-soft)] text-[color:var(--indigo-deep)]";
+    return { Icon: Stamp, tone, target: inProject("intake") };
+  }
+  if (n.kind.startsWith("cto_support")) {
+    return { Icon: LifeBuoy, tone: n.kind === "cto_support_joined" ? "bg-[color:var(--green-soft)] text-[color:var(--green-deep)]" : "bg-[color:var(--amber-soft)] text-[color:var(--amber-deep)]", target: inProject("intake") };
+  }
   switch (n.kind) {
     case "overdue":
       return { Icon: AlertTriangle, tone: "bg-[color:var(--red-soft)] text-[color:var(--red-deep)]", target: inProject(n.reviewId ? "review" : "plan") };

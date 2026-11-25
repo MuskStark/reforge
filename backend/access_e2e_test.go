@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-// 端到端:流程的权限分配(管理员全部 / CTO 查看全部并分配 TH / PM 分配 BH)、流程定义的修改权限,
+// 端到端:流程的权限分配(管理员全部 / PMO 指派 PM / CTO 查看全部并分配 TH / PM 分配 BH)、流程定义的修改权限,
 // 与用户自助(修改个人信息、修改密码、首次登录强制改密码)。走真实路由表与真实 PostgreSQL。
 
 // submitProject 匿名提交一条流程,返回自动立项的项目 ID
@@ -62,7 +62,7 @@ func TestAssignmentRules(t *testing.T) {
 	_, h2ID := e.createUser(admin, "赵经办", RoleHandler)
 	d1, d1ID := e.createUser(admin, "钱开发", RoleDev)
 	_, d2ID := e.createUser(admin, "吴开发", RoleDev)
-	v2, v2ID := e.createUser(admin, "李观察二", RoleViewer)
+	v2, _ := e.createUser(admin, "李观察二", RoleViewer)
 	_, v1ID := e.createUser(admin, "孙观察", RoleViewer)
 	_, pm2ID := e.createUser(admin, "周经理", RolePM)
 
@@ -142,21 +142,44 @@ func TestAssignmentRules(t *testing.T) {
 		t.Fatalf("项目经理的越权操作不应改动成员")
 	}
 
-	// ---- 业务侧经办、科技侧经办、观察者:都不能分配任何人 ----
+	// ---- 业务侧经办、科技侧经办,以及被加进项目当只读成员的普通经办:都不能分配任何人 ----
+	// 能指派 PM 的是「岗位为 PMO」的人;被加进项目当 PMO 成员(role = viewer)本身不带来任何分配权
+	plain, plainID := e.createUser(admin, "只读成员", RoleHandler)
 	e.must(admin, "PUT", "/api/projects/"+pid+"/members", map[string]any{"userId": h1ID, "role": RoleHandler, "action": "add"})
-	e.must(admin, "PUT", "/api/projects/"+pid+"/members", map[string]any{"userId": v2ID, "role": RoleViewer, "action": "add"})
+	e.must(admin, "PUT", "/api/projects/"+pid+"/members", map[string]any{"userId": plainID, "role": RoleViewer, "action": "add"})
 	for _, who := range []struct {
 		token, name string
-	}{{h1, "业务侧经办"}, {d1, "科技侧经办"}, {v2, "观察者"}} {
+	}{{h1, "业务侧经办"}, {d1, "科技侧经办"}, {plain, "只读的 PMO 成员"}} {
 		for _, tc := range []struct{ user, role string }{{h2ID, RoleHandler}, {d2ID, RoleDev}, {pm2ID, RolePM}, {v1ID, RoleViewer}} {
 			e.expectCode(e.member(who.token, pid, tc.user, tc.role, "add"), 403, who.name+"不能分配 "+tc.role)
 		}
 		view = e.must(who.token, "GET", "/api/projects/"+pid, nil)
-		got(t, view, "can", "assign", false)
-		got(t, view, "can", "assignHandler", false)
-		got(t, view, "can", "assignDev", false)
-		got(t, view, "can", "assignViewer", false)
+		for _, f := range []string{"assign", "assignHandler", "assignDev", "assignViewer", "triage", "final"} {
+			got(t, view, "can", f, false)
+		}
 	}
+
+	// ---- PMO(岗位):只指派项目经理,不分配 BH / TH / PMO 成员 ----
+	// 这个项目已经有 PM、不在等初级分析,所以 PMO 可以直接再指派一名
+	view = e.must(v2, "GET", "/api/projects/"+pid, nil)
+	for _, f := range []string{"assign", "triage", "final", "isPMO"} {
+		got(t, view, "can", f, true)
+	}
+	for _, f := range []string{"assignHandler", "assignDev", "assignViewer", "manage", "comment"} {
+		got(t, view, "can", f, false)
+	}
+	e.expectCode(e.member(v2, pid, pm2ID, RolePM, "add"), 200, "PMO 应能指派项目经理")
+	if !e.hasMember(v2, pid, pm2ID, RolePM) {
+		t.Fatalf("PMO 指派的项目经理应出现在成员里")
+	}
+	for _, tc := range []struct {
+		user, role, what string
+	}{
+		{h2ID, RoleHandler, "PMO 不能分配业务侧经办"}, {d2ID, RoleDev, "PMO 不能分配科技侧经办"}, {v1ID, RoleViewer, "PMO 不能添加 PMO 成员"},
+	} {
+		e.expectCode(e.member(v2, pid, tc.user, tc.role, "add"), 403, tc.what)
+	}
+	e.expectCode(e.member(v2, pid, pm2ID, RolePM, "remove"), 200, "PMO 应能更换项目经理")
 
 	// ---- 未登录一律 401 ----
 	e.fail("", "PUT", "/api/projects/"+pid+"/members", map[string]any{"userId": d2ID, "role": RoleDev, "action": "add"}, 401, "未登录")

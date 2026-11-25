@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
@@ -124,6 +125,10 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN NOT NULL
 		db.Close()
 		return nil, fmt.Errorf("阶段模板 / 通知渠道表初始化失败: %w", err)
 	}
+	if _, err := db.ExecContext(ctx, intakeSchema); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("需求承接表初始化失败: %w", err)
+	}
 
 	s := &postgresStore{db: db}
 	// 首次启动:把内置的阶段模板写进配置表,之后管理员可以在后台修改
@@ -151,6 +156,13 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN NOT NULL
 
 type postgresStore struct {
 	db *sql.DB
+	// 线上系统涉及度的缓存(见 overview.go 的 systemTop)。挂在实例上而不是包级变量:
+	// 不同的 store(测试里每个用例各建一个)各缓存各的,不会串数据
+	systemTopCache struct {
+		sync.Mutex
+		at   time.Time
+		data []overviewNamedCount
+	}
 }
 
 // userCols 用户表的查询列(与 User 字段扫描顺序一致)

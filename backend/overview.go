@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 )
 
@@ -69,6 +68,7 @@ type overview struct {
 	DepartmentTop  []overviewNamedCount `json:"departmentTop"`
 	SystemTop      []overviewNamedCount `json:"systemTop"`
 	RecentEvents   []overviewEvent      `json:"recentEvents"`
+	Intake         *IntakeOverview      `json:"intake,omitempty"` // 需求承接:全池诊断与承接环节的积压(见 intake_store.go)
 }
 
 func (s *postgresStore) handleOverview(w http.ResponseWriter, r *http.Request) {
@@ -217,6 +217,12 @@ func (s *postgresStore) overviewFull(ctx context.Context, ov *overview) error {
 		avg = float64(int(avg*10)) / 10
 		ov.AvgCycleDays = &avg
 	}
+	// 需求承接:全池诊断(三类节点合计)与承接环节上的积压
+	pool, err := s.intakePool(ctx)
+	if err != nil {
+		return err
+	}
+	ov.Intake = pool
 
 	// 近 6 个月:每月新收集的流程数与完成的项目数
 	trows, err := s.db.QueryContext(ctx, `WITH m AS (
@@ -305,7 +311,7 @@ func (s *postgresStore) overviewFull(ctx context.Context, ov *overview) error {
 	// 最新动态:只取节点性事件(允许名单),细粒度动态不上墙
 	erows, err := s.db.QueryContext(ctx, `SELECT e.id, e.project_id, COALESCE(pr.name, ''), e.actor_name, e.kind, e.detail, e.created_at
 		FROM events e LEFT JOIN projects pr ON pr.id = e.project_id
-		WHERE e.kind = ANY($1)
+		WHERE e.kind = ANY($1) AND (e.kind <> 'intake_triaged' OR e.detail->>'done' = 'true')
 		ORDER BY e.created_at DESC, e.id DESC LIMIT 12`, tickerKinds)
 	if err != nil {
 		return err
@@ -325,26 +331,24 @@ func (s *postgresStore) overviewFull(ctx context.Context, ov *overview) error {
 
 // tickerKinds 大屏"最新动态"只展示这些节点性事件。用允许名单而不是排除名单:
 // 逐票表决、逐条建任务、评论这类细粒度动态不上墙,以后新增的事件类型也不会意外漏上来。
+// 需求承接里上墙的是三个节点:完成初级分析、终审通过、终审退回(intake_triaged 只取「完成」的那一条,
+// 中途的填写也是这个类型,由上面的查询按 detail.done 过滤)。
 var tickerKinds = []string{
 	"project_created", "review_submitted", "review_approved", "review_rejected", "review_withdrawn", "review_admin_decided",
 	"stage_rewound", "stage_skipped", "project_status",
+	"intake_triaged", "intake_final_passed", "intake_final_returned",
 }
 
-// systemTopCache 线上系统涉及度要读全部流程定义,是大屏里最重的一项;缓存 30 秒(大屏自己也是 30 秒刷一次)
-var systemTopCache struct {
-	sync.Mutex
-	at   time.Time
-	data []overviewNamedCount
-}
-
+// systemTop 线上系统涉及度:要读全部流程定义,是大屏里最重的一项,所以缓存 30 秒(大屏自己也是 30 秒刷一次)。
+// 缓存挂在 store 实例上(见 postgresStore.systemTopCache)。
 func (s *postgresStore) systemTop(ctx context.Context) ([]overviewNamedCount, error) {
-	systemTopCache.Lock()
-	if systemTopCache.data != nil && time.Since(systemTopCache.at) < 30*time.Second {
-		data := systemTopCache.data
-		systemTopCache.Unlock()
+	s.systemTopCache.Lock()
+	if s.systemTopCache.data != nil && time.Since(s.systemTopCache.at) < 30*time.Second {
+		data := s.systemTopCache.data
+		s.systemTopCache.Unlock()
 		return data, nil
 	}
-	systemTopCache.Unlock()
+	s.systemTopCache.Unlock()
 
 	procs, err := s.List()
 	if err != nil {
@@ -361,9 +365,9 @@ func (s *postgresStore) systemTop(ctx context.Context) ([]overviewNamedCount, er
 		}
 	}
 	out := topNamedCounts(counts, 8)
-	systemTopCache.Lock()
-	systemTopCache.at, systemTopCache.data = time.Now(), out
-	systemTopCache.Unlock()
+	s.systemTopCache.Lock()
+	s.systemTopCache.at, s.systemTopCache.data = time.Now(), out
+	s.systemTopCache.Unlock()
 	return out, nil
 }
 

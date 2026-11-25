@@ -2,7 +2,9 @@
 
 import Link from "next/link";
 import type { ProjectView } from "@/lib/types";
-import { HEALTH_LABEL, PRIORITY_LABEL, STAGE_STATUS_LABEL, STATUS_LABEL, dueInfo, healthClass, pct, statusClass } from "@/lib/labels";
+import { DIAGNOSIS_LABEL, HEALTH_LABEL, INTAKE_LINES, INTAKE_PHASE, PRIORITY_LABEL, STATUS_LABEL, dueInfo, healthClass, pct, statusClass } from "@/lib/labels";
+import { inIntakeStage, stageStatusText } from "@/lib/intake";
+import { MixBar } from "@/components/projects/intake-bits";
 import { PendingOnBadge } from "@/components/projects/stage-rail";
 import { cn } from "@/lib/utils";
 
@@ -13,6 +15,8 @@ export function ProjectCard({ p, dense, footer }: { p: ProjectView; dense?: bool
   const progress = pct(p.stats.done, p.stats.total);
   const pms = p.members.filter((m) => m.role === "pm");
   const risky = p.status === "active" && p.health !== "on_track";
+  // 还停在承接阶段:卡片上显示自动诊断出的三类节点,而不是工作项完成度(这一段的准入条件是承接方案)
+  const atIntake = inIntakeStage(p);
 
   return (
     <div
@@ -36,15 +40,31 @@ export function ProjectCard({ p, dense, footer }: { p: ProjectView; dense?: bool
               <span className="badge badge-blue !h-[20px] text-[11px]">
                 阶段 {p.currentStage} · {stage?.name ?? ""}
               </span>
-              <span className="badge badge-plain !h-[20px] text-[11px]">{stage ? STAGE_STATUS_LABEL[stage.status] : ""}</span>
+              <span className="badge badge-plain !h-[20px] text-[11px]">{stage ? stageStatusText(p, stage.status) : ""}</span>
               <PendingOnBadge on={p.pendingOn} />
+              {atIntake && p.intake && <span className="text-[11px] text-[color:var(--ink-3)]">承接 · {INTAKE_PHASE[p.intake.phase].label}</span>}
             </>
           ) : (
             <span className={cn(statusClass(p.status), "!h-[20px] text-[11px]")}>{STATUS_LABEL[p.status]}</span>
           )}
         </div>
 
-        {p.status === "active" && (
+        {p.status === "active" && atIntake && p.intake && (
+          <div className="mt-2">
+            <div className="flex flex-wrap gap-1.5">
+              {INTAKE_LINES.map(({ key, soft, deep }) => (
+                <span key={key} className="badge !h-[20px] !px-2 text-[11px]" style={{ background: soft, color: deep }}>
+                  {DIAGNOSIS_LABEL[key]} <b className="ml-0.5 font-data">{p.intake ? p.intake[key] : 0}</b>
+                </span>
+              ))}
+            </div>
+            <div className="mt-2">
+              <MixBar offline={p.intake.offline} interop={p.intake.interop} mobile={p.intake.mobile} />
+            </div>
+          </div>
+        )}
+
+        {p.status === "active" && !atIntake && (
           <div className="mt-2.5 flex items-center gap-2">
             <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-[rgba(120,120,128,0.14)]">
               <div
@@ -71,9 +91,9 @@ export function ProjectCard({ p, dense, footer }: { p: ProjectView; dense?: bool
             </span>
           )}
           {pms.length > 0 ? (
-            <span className="truncate">PM {pms.map((m) => m.displayName).join("、")}</span>
+            <span className="truncate">PM {pms.map((m) => (m.userId === p.leadPmId ? `${m.displayName}（主负责）` : m.displayName)).join("、")}</span>
           ) : p.status === "active" ? (
-            <span className="text-[color:var(--amber-deep)]">尚未指派 PM</span>
+            <span className="text-[color:var(--amber-deep)]">{p.intake && !p.intake.triageDone ? "待 PMO 初级分析后指派" : "尚未指派 PM"}</span>
           ) : null}
           {due && (
             <span className={cn("font-data tabular-nums", due.overdue ? "font-semibold text-[color:var(--red-deep)]" : undefined)}>

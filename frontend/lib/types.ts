@@ -230,6 +230,25 @@ export interface Project {
   version: number;
   createdAt: string;
   updatedAt: string;
+  /** ---- 需求承接 ---- */
+  /** 主负责 PM 的用户 ID;为空时取最早到岗的 PM */
+  leadPmId: string;
+  /** PMO 完成初级分析的时间 */
+  triageDoneAt: string | null;
+  /** "" | pending:技术可行性评估已通过,正在等 PMO 终审 */
+  finalStatus: string;
+}
+
+/** 申请 CTO 协助的现状 */
+export interface CtoSupport {
+  status: "none" | "requested" | "joined";
+  reason: string;
+  requestedById: string;
+  requestedByName: string;
+  requestedAt: string | null;
+  joinedById: string;
+  joinedByName: string;
+  joinedAt: string | null;
 }
 
 export interface StageView {
@@ -307,31 +326,38 @@ export interface ProjectCaps {
   manage: boolean;
   /** 修改流程定义(表单与流程图):管理员、CTO,以及项目里的 PM、BH、TH */
   editFlow: boolean;
-  /** 分配 PM:管理员 */
+  /** 指派 / 更换 PM:PMO 岗位与管理员 */
   assign: boolean;
   /** 分配 BH(业务经办):管理员、PM */
   assignHandler: boolean;
   /** 分配 TH(科技经办):管理员、CTO */
   assignDev: boolean;
-  /** 添加 PMO:管理员 */
+  /** 添加 PMO 成员:管理员 */
   assignViewer: boolean;
   skip: boolean;
   comment: boolean;
   createItem: boolean;
   reviewCTO: boolean;
   reviewHandler: boolean;
+  /** 需求承接的初级分析:PMO 岗位与管理员 */
+  triage: boolean;
+  /** 需求承接的终审:PMO 岗位与管理员 */
+  final: boolean;
   isPM: boolean;
   isHandler: boolean;
   isCTO: boolean;
+  /** 岗位为 PMO(项目管理办公室) */
+  isPMO: boolean;
   isAdmin: boolean;
 }
 
 export interface ProjectView extends Project {
-  /** 待谁处理:admin(待指派) | pm | cto | handler | "" */
-  pendingOn: "admin" | "pm" | "cto" | "handler" | "";
+  /** 待谁处理:pmo(待 PMO 初析、指派或终审) | admin(待指派) | pm | cto | handler | "" */
+  pendingOn: "pmo" | "admin" | "pm" | "cto" | "handler" | "";
   applicant: string;
   countersignN: number;
   hasPm: boolean;
+  leadPmName: string;
   stages: StageView[];
   members: MemberView[];
   /** 当前阶段最新一轮评审(无则 null) */
@@ -339,7 +365,185 @@ export interface ProjectView extends Project {
   stats: ItemStats;
   handlerHints: HandlerHint[];
   metrics: FlowMetrics;
+  /** 需求承接的摘要;项目的第一个阶段不是承接阶段时为 null(完整内容见 IntakeView) */
+  intake: IntakeSummary | null;
+  /** 申请 CTO 协助的现状 */
+  ctoSupport: CtoSupport;
   can: ProjectCaps;
+}
+
+/* ============================================================
+   需求承接(流程收集完成之后、改造实施之前)
+   收集完成 → PMO 初级分析 → 指派 PM → PM 按优先级推进 → CTO 技术可行性评估 → PMO 终审
+   ============================================================ */
+
+/** 承接所处环节 */
+export type IntakePhase = "triage" | "assign" | "advance" | "assess" | "final" | "done";
+
+/** 三条推进线;数组顺序即解决顺序 */
+export type IntakeLineKey = "offline" | "interop" | "mobile";
+
+/** 节点的处理状态 */
+export type PlanStatus = "pending" | "planned" | "na";
+
+/** 评审人对技术点的结论 */
+export type Verdict = "feasible" | "conditional" | "infeasible";
+
+/** PMO 终审结论 */
+export type FinalDecision = "passed" | "passed_with_notes" | "returned";
+
+/** 自动诊断出的一个节点。key 是稳定标识,逐节点的处理状态按它关联 */
+export interface NodeRef {
+  key: string;
+  /** 主步骤序号(1 起) */
+  step: number;
+  name: string;
+  /** 会签子步骤所在的会签方 */
+  path?: string;
+  /** 线上节点所在的系统 */
+  system?: string;
+  /** 系统不互通:上一步(或会签各方)的系统 */
+  from?: string;
+}
+
+/** 一组步骤的三类节点诊断。同一节点可能同时出现在两类里 */
+export interface Diagnosis {
+  steps: number;
+  onlineSteps: number;
+  /** 办理方式为「线下办理」的节点 */
+  offline: NodeRef[];
+  /** 与上一步系统不同、且标注了「数据不互通」的节点 */
+  interop: NodeRef[];
+  /** 线上办理、但不支持移动端的节点 */
+  mobile: NodeRef[];
+}
+
+/** 项目列表里的承接摘要 */
+export interface IntakeSummary {
+  /** 承接阶段已过去却没有做过任何承接动作（上线前就立项的项目，或该阶段被跳过）：不展示「承接完成」 */
+  legacy?: boolean;
+  phase: IntakePhase;
+  seq: number;
+  triageDone: boolean;
+  finalPending: boolean;
+  /** 立项时诊断出的三类节点数 */
+  offline: number;
+  interop: number;
+  mobile: number;
+}
+
+export interface IntakeNode extends NodeRef {
+  status: PlanStatus;
+  note: string;
+  updatedByName: string;
+  updatedAt: string | null;
+}
+
+/** 一条推进线:自动诊断出的节点、原因、解决方案与负责人 */
+export interface IntakeLine {
+  key: IntakeLineKey;
+  reason: string;
+  solution: string;
+  ownerId: string;
+  ownerName: string;
+  updatedByName: string;
+  updatedAt: string | null;
+  nodes: IntakeNode[];
+  /** 当前工作副本里仍未消除的节点数(流程定义被修改后,用来和立项时对比) */
+  remaining: number;
+}
+
+export interface IntakeAssessment {
+  userId: string;
+  userName: string;
+  verdict: Verdict;
+  note: string;
+  decidedAt: string;
+}
+
+/** 送 CTO 评估的技术点 */
+export interface IntakePoint {
+  id: string;
+  line: IntakeLineKey | "";
+  title: string;
+  note: string;
+  createdByName: string;
+  createdAt: string;
+  updatedAt: string;
+  /** 最近一轮评审里各位评审人的结论 */
+  assessments: IntakeAssessment[];
+  /** 复评(第 2 轮起)时上一轮里各位评审人的结论:没变过的技术点可以直接沿用 */
+  prevAssessments?: IntakeAssessment[];
+}
+
+/** PMO 终审的一次结论 */
+export interface IntakeFinal {
+  id: string;
+  reviewId: string;
+  round: number;
+  decision: FinalDecision;
+  note: string;
+  decidedByName: string;
+  decidedAt: string;
+}
+
+/** 当前登录人在承接里能做什么(服务端逐请求校验,这里只做显隐) */
+export interface IntakeCaps {
+  /** 现在就能做初级分析(还没指派 PM) */
+  triage: boolean;
+  assign: boolean;
+  /** 能改承接方案的全部内容 */
+  edit: boolean;
+  /** 是某几条推进线的负责人,能改自己那几条 */
+  editLines: boolean;
+  requestCto: boolean;
+  /** CTO:可以响应正在等待的协助申请 */
+  joinCto: boolean;
+  /** 现在就能给技术点下结论并表决 */
+  assess: boolean;
+  /** 现在就能终审 */
+  final: boolean;
+  manage: boolean;
+}
+
+/** 承接的完整视图 */
+export interface IntakeView {
+  /** 承接阶段已过去却没有做过任何承接动作,见 IntakeSummary.legacy */
+  legacy?: boolean;
+  phase: IntakePhase;
+  seq: number;
+  stageName: string;
+  gate: string;
+  reviewerRole: "cto" | "handler" | "";
+  mode: "all" | "any" | "";
+  /** 最近一轮评审 */
+  reviewId: string;
+  round: number;
+  reviewStatus: string;
+  triageDoneAt: string | null;
+  triageByName: string;
+  leadPmId: string;
+  leadPmName: string;
+  finalPending: boolean;
+  /** 立项时的诊断(推进与评估的工作清单) */
+  asIs: Diagnosis;
+  /** 当前工作副本的诊断(流程定义被修改后用来对比) */
+  current: Diagnosis;
+  /** 流程是否完整:complete | gaps | ""(尚未确认) */
+  completeness: string;
+  completenessNote: string;
+  /** 综合方案总述 */
+  summary: string;
+  lines: IntakeLine[];
+  points: IntakePoint[];
+  /** 历次终审结论,新到旧 */
+  finals: IntakeFinal[];
+  ctoSupport: CtoSupport;
+  /** 提交评估前还差什么(与服务端提交时的校验同一份规则) */
+  missing: string[];
+  /** 当前登录人是哪几条推进线的负责人 */
+  ownLines: IntakeLineKey[];
+  can: IntakeCaps;
 }
 
 export type ItemType = "task" | "deliverable" | "issue" | "risk" | "change";
@@ -472,6 +676,23 @@ export interface OverviewEvent {
   createdAt: string;
 }
 
+/** 数据大屏上的需求承接:全池诊断(已立项流程的三类节点合计)与承接环节上的积压 */
+export interface IntakeOverview {
+  /** 第一个阶段是承接阶段的已立项流程数 */
+  projects: number;
+  offline: number;
+  interop: number;
+  mobile: number;
+  /** 有这类节点的流程数 */
+  offlineAffected: number;
+  interopAffected: number;
+  mobileAffected: number;
+  /** 待 PMO 初级分析或指派 PM 的在途项目 */
+  triage: number;
+  /** 技术可行性评估已通过、等 PMO 终审的在途项目 */
+  final: number;
+}
+
 export interface Overview {
   collected: number;
   monthlyNew: number;
@@ -503,6 +724,8 @@ export interface Overview {
   pmLoad: OverviewLoad[] | null;
   departmentTop: OverviewCount[] | null;
   systemTop: OverviewCount[] | null;
+  /** 只在 ?full=1 时返回:需求承接的全池诊断与积压 */
+  intake: IntakeOverview | null;
   recentEvents: OverviewEvent[] | null;
 }
 

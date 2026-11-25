@@ -188,19 +188,22 @@ CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications (user_id, rea
 
 const projectCols = `pr.id, pr.process_id, pr.name, pr.status, pr.current_stage, pr.priority,
 	pr.value, pr.complexity, pr.analysis, pr.health, COALESCE(pr.due_date::text, ''),
-	pr.started_at, pr.completed_at, pr.version, pr.created_by, pr.created_at, pr.updated_at, pr.template`
+	pr.started_at, pr.completed_at, pr.version, pr.created_by, pr.created_at, pr.updated_at, pr.template,
+	pr.lead_pm_id, pr.triage_done_at, pr.triage_by, pr.final_status, pr.final_review_id, pr.cto_support, pr.intake_passed_at`
 
 func scanProject(sc scanner) (*Project, error) {
 	var pr Project
-	var analysis, tpl []byte
-	var started, completed sql.NullTime
+	var analysis, tpl, support []byte
+	var started, completed, triaged, intakePassed sql.NullTime
 	if err := sc.Scan(&pr.ID, &pr.ProcessID, &pr.Name, &pr.Status, &pr.CurrentStage, &pr.Priority,
 		&pr.Value, &pr.Complexity, &analysis, &pr.Health, &pr.DueDate,
-		&started, &completed, &pr.Version, &pr.CreatedBy, &pr.CreatedAt, &pr.UpdatedAt, &tpl); err != nil {
+		&started, &completed, &pr.Version, &pr.CreatedBy, &pr.CreatedAt, &pr.UpdatedAt, &tpl,
+		&pr.LeadPmID, &triaged, &pr.TriageBy, &pr.FinalStatus, &pr.FinalReviewID, &support, &intakePassed); err != nil {
 		return nil, err
 	}
 	pr.Analysis = rawOrNull(analysis)
 	pr.tpl = parseTemplate(tpl)
+	pr.CtoSupport = rawOrNull(support)
 	if started.Valid {
 		t := started.Time
 		pr.StartedAt = &t
@@ -209,6 +212,8 @@ func scanProject(sc scanner) (*Project, error) {
 		t := completed.Time
 		pr.CompletedAt = &t
 	}
+	pr.TriageDoneAt = nullTimePtr(triaged)
+	pr.IntakePassedAt = nullTimePtr(intakePassed)
 	return &pr, nil
 }
 
@@ -598,6 +603,7 @@ func (s *postgresStore) CreateProjectForProcess(ctx context.Context, p *Process)
 
 type projectBundle struct {
 	procs   map[string]*Process
+	asis    map[string][]Step // 各项目立项时的流程定义(As-Is 快照):自动诊断的基准
 	stages  map[string][]ProjectStage
 	rounds  map[string]map[int]int
 	members map[string][]MemberView
@@ -617,6 +623,7 @@ func nullTimePtr(ns sql.NullTime) *time.Time {
 func loadBundle(ctx context.Context, q runner, ids []string) (*projectBundle, error) {
 	b := &projectBundle{
 		procs:   map[string]*Process{},
+		asis:    map[string][]Step{},
 		stages:  map[string][]ProjectStage{},
 		rounds:  map[string]map[int]int{},
 		members: map[string][]MemberView{},
@@ -626,6 +633,11 @@ func loadBundle(ctx context.Context, q runner, ids []string) (*projectBundle, er
 	if len(ids) == 0 {
 		return b, nil
 	}
+	asis, err := asIsStepsOf(ctx, q, ids)
+	if err != nil {
+		return nil, err
+	}
+	b.asis = asis
 
 	// 传入的是项目 ID;流程定义要按其 process_id 去取
 	rows, err := q.QueryContext(ctx, `SELECT process_id FROM projects WHERE id = ANY($1)`, ids)
@@ -895,6 +907,11 @@ func (b *projectBundle) view(pr *Project, users []*User, c caps) *ProjectView {
 			v.HasPM = true
 		}
 	}
+	v.LeadPmID, v.LeadPmName = leadPmOf(pr, v.Members)
+	// 需求承接摘要:第一个阶段是承接阶段的项目才有
+	if st, ok := pr.intakeStage(); ok {
+		v.Intake = intakeSummaryOf(pr, st, stages[st.Seq], v.HasPM, b.asis[pr.ID], p)
+	}
 	v.Review = b.reviews[pr.ID]
 	if v.Review != nil {
 		// 批量加载时不知道项目模板,这里按项目自己的快照补上这一轮的规则
@@ -913,10 +930,14 @@ func (b *projectBundle) view(pr *Project, users []*User, c caps) *ProjectView {
 	return v
 }
 
-// pendingOnOf 推导"待谁处理":admin(待指派) | pm | cto | handler | ""。tpl 是项目的模板快照
+// pendingOnOf 推导"待谁处理":pmo(待初级分析、指派或终审) | admin(待指派) | pm | cto | handler | ""。tpl 是项目的模板快照
 func pendingOnOf(tpl []StageTemplate, pr *Project, cur ProjectStage, hasPM bool) string {
 	if pr.Status != ProjActive {
 		return ""
+	}
+	// 需求承接:技术可行性评估已通过,等 PMO 终审
+	if pr.FinalStatus == FinalPending {
+		return PendingPMO
 	}
 	if cur.Status == StageInReview {
 		if t, ok := templateAt(tpl, cur.Seq); ok && t.ReviewerRole != "" {
@@ -925,6 +946,11 @@ func pendingOnOf(tpl []StageTemplate, pr *Project, cur ProjectStage, hasPM bool)
 		return RolePM
 	}
 	if !hasPM {
+		// 还停在承接阶段的项目由 PMO 初级分析后指派;没有承接阶段的项目、或已经离开承接阶段(比如直接跳过了)的,
+		// 仍是待指派——不能算到 PMO 的初级分析头上
+		if t, ok := templateAt(tpl, 1); ok && t.Key == keyIntake && pr.CurrentStage == t.Seq {
+			return PendingPMO
+		}
 		return "admin"
 	}
 	return RolePM

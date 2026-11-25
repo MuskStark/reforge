@@ -7,17 +7,19 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { Download, Search, Users } from "lucide-react";
+import { Download, Route, Search, Users } from "lucide-react";
 import { toast } from "sonner";
 import { authFetch, authFetchBlob, saveBlob, type SessionUser } from "@/lib/auth";
 import type { Overview, ProjectView, UserDir } from "@/lib/types";
-import { LANES, PENDING_ON_LABEL, laneOf } from "@/lib/labels";
+import { DIAGNOSIS_LABEL, INTAKE_LINES, LANES, PENDING_ON_LABEL, laneOf } from "@/lib/labels";
+import { inIntakeStage, intakeHref, poolDiagnosis } from "@/lib/intake";
 import { AppShell, PageHead, StateLine } from "@/components/shell/app-shell";
 import { ProjectCard } from "@/components/projects/project-card";
+import { lineMeta } from "@/components/projects/intake-bits";
 import { MembersDialog } from "@/components/projects/members-dialog";
 import { cn } from "@/lib/utils";
 
-type PendingFilter = "" | "cto" | "handler" | "pm" | "admin";
+type PendingFilter = "" | "cto" | "handler" | "pm" | "admin" | "pmo";
 
 export function ProjectBoard() {
   return <AppShell active="projects">{(me) => <ProjectBoardBody me={me} />}</AppShell>;
@@ -90,6 +92,9 @@ function ProjectBoardBody({ me }: { me: SessionUser }) {
     }
   };
 
+  // 全池诊断:全部已收集流程立项时诊断出的三类节点合计
+  const pool = useMemo(() => poolDiagnosis(projects ?? []), [projects]);
+
   // 从项目详情返回(指派完成)后刷新
   const refreshOne = useCallback(async () => {
     if (!assignOf) return;
@@ -104,14 +109,19 @@ function ProjectBoardBody({ me }: { me: SessionUser }) {
 
   if (!projects) return <StateLine>加载中…</StateLine>;
 
-  const waitingAssign = projects.filter((p) => p.status === "active" && !p.hasPm);
+  // 需求承接:等 PMO 初级分析与指派的流程、等 PMO 终审的方案
+  const awaitingTriage = projects.filter((p) => p.status === "active" && !p.hasPm && !!p.intake);
+  const awaitingFinal = projects.filter((p) => p.status === "active" && !!p.intake?.finalPending);
+  // 没有承接阶段的项目(后台把第一阶段换成了别的):仍由管理员在成员管理里指派
+  const waitingAssign = projects.filter((p) => p.status === "active" && !p.hasPm && !p.intake);
   const canAssign = (p: ProjectView) => p.can.assign && !p.hasPm;
+  const intakeTodo = awaitingTriage[0] ?? awaitingFinal[0];
 
   return (
     <>
       <PageHead
         title="流程项目"
-        subtitle="每条已提交的流程都是一个改造项目：从分析立项、需求确认、方案设计、系统改造、试运行，到验收上线与运营优化；阶段可在后台「阶段模板」里调整。"
+        subtitle="每条已提交的流程都是一个改造项目：先经需求承接（PMO 初级分析、指派 PM、PM 按优先级推进、CTO 技术可行性评估、PMO 终审），再从需求确认、方案设计、系统改造、试运行，到验收上线与运营优化；阶段可在后台「阶段模板」里调整。"
       >
         {overview && (
           <>
@@ -124,16 +134,61 @@ function ProjectBoardBody({ me }: { me: SessionUser }) {
         )}
       </PageHead>
 
-      {/* 待指派提示:管理员 / CTO 看得到 */}
+      {/* 全池诊断:三条推进线按解决顺序排列 */}
+      {pool.projects > 0 && (
+        <section className="glass-card mb-4 p-4" aria-label="全池诊断">
+          <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
+            <h2 className="text-[15px] font-semibold text-neutral-900">全池诊断</h2>
+            <span className="font-data text-xs text-[color:var(--ink-3)]">已收集 {pool.projects} 条流程 · 以下数量由收集数据自动统计</span>
+          </div>
+          <div className="mt-3 grid gap-2 sm:grid-cols-3">
+            {INTAKE_LINES.map(({ key, order, dot }) => (
+              <div
+                key={key}
+                className="flex items-center justify-between gap-3 rounded-2xl bg-white/55 py-2.5 pl-3.5 pr-4 shadow-[inset_0_0_0_0.5px_rgba(255,255,255,0.65),inset_0_0_0_0.5px_rgba(0,0,0,0.04)]"
+                style={{ borderLeft: `3px solid ${dot}` }}
+              >
+                <div>
+                  <div className="text-[11px] font-bold" style={{ color: lineMeta(key).deep }}>
+                    {order}
+                  </div>
+                  <div className="text-[14px] font-semibold text-neutral-900">{DIAGNOSIS_LABEL[key]}</div>
+                </div>
+                <div className="text-right">
+                  <span className="font-data text-[24px] font-bold leading-none tabular-nums text-neutral-900">{pool[key]}</span>
+                  <span className="ml-1 text-xs text-[color:var(--ink-2)]">个</span>
+                  <div className="font-data mt-0.5 text-[11px] text-[color:var(--ink-3)]">涉及 {pool.affected[key]} 条流程</div>
+                </div>
+              </div>
+            ))}
+          </div>
+          <p className="mt-2.5 text-xs leading-relaxed text-[color:var(--ink-3)]">解决顺序：① 线下节点转线上 → ② 系统不互通 → ③ 线上节点移动化。数量按每条流程立项时的诊断合计；同一节点可能计入两类。</p>
+        </section>
+      )}
+
+      {/* 需求承接的待办提示:PMO 与管理员看得到,直达对应项目的「承接」标签 */}
+      {intakeTodo && projects.some((p) => p.can.assign) && (
+        <div className="mb-4 flex flex-wrap items-center gap-3 rounded-2xl bg-[color:var(--amber-soft)] px-4 py-3 text-[13px] text-[color:var(--amber-deep)] shadow-[inset_0_0_0_0.5px_rgba(255,149,0,0.25)]">
+          <span className="font-semibold">
+            {[
+              awaitingTriage.length > 0 && `${awaitingTriage.length} 个流程等你初级分析与指派`,
+              awaitingFinal.length > 0 && `${awaitingFinal.length} 个方案技术可行性评估已通过，等你终审`,
+            ]
+              .filter(Boolean)
+              .join("；")}
+          </span>
+          <Link href={intakeHref(intakeTodo)} prefetch={false} className="btn btn-glass ml-auto !h-9 !px-3.5 text-[13px]">
+            <Route className="h-3.5 w-3.5" aria-hidden="true" /> {intakeTodo.intake?.finalPending ? "去终审" : intakeTodo.intake?.triageDone ? "去指派" : "去初析"} {intakeTodo.name}
+          </Link>
+        </div>
+      )}
+
+      {/* 没有承接阶段的项目:指派提示,管理员看得到 */}
       {waitingAssign.length > 0 && projects.some((p) => p.can.assign) && (
         <div className="mb-4 flex flex-wrap items-center gap-3 rounded-2xl bg-[color:var(--amber-soft)] px-4 py-3 text-[13px] text-[color:var(--amber-deep)] shadow-[inset_0_0_0_0.5px_rgba(255,149,0,0.25)]">
           <span className="font-semibold">{waitingAssign.length} 个流程等待立项指派</span>
           <span className="text-[color:var(--ink-2)]">指派 PM 后项目正式启动</span>
-          <button
-            type="button"
-            onClick={() => setAssignOf(waitingAssign[0])}
-            className="btn btn-glass ml-auto !h-9 !px-3.5 text-[13px]"
-          >
+          <button type="button" onClick={() => setAssignOf(waitingAssign[0])} className="btn btn-glass ml-auto !h-9 !px-3.5 text-[13px]">
             <Users className="h-3.5 w-3.5" /> 去指派 {waitingAssign[0].name}
           </button>
         </div>
@@ -162,6 +217,7 @@ function ProjectBoardBody({ me }: { me: SessionUser }) {
           <option value="">全部状态</option>
           {/* 与卡片上的待处理徽章同一份文案 */}
           <option value="admin">{PENDING_ON_LABEL.admin}</option>
+          <option value="pmo">{PENDING_ON_LABEL.pmo}</option>
           <option value="pm">{PENDING_ON_LABEL.pm}</option>
           <option value="cto">{PENDING_ON_LABEL.cto}</option>
           <option value="handler">{PENDING_ON_LABEL.handler}</option>
@@ -239,9 +295,16 @@ function ProjectBoardBody({ me }: { me: SessionUser }) {
                       dense
                       footer={
                         canAssign(p) ? (
-                          <button type="button" onClick={() => setAssignOf(p)} className="btn btn-primary !h-8 w-full !px-3 text-[12px]">
-                            <Users className="h-3.5 w-3.5" /> 指派 PM
-                          </button>
+                          // 需求承接的项目:初级分析与指派都在「承接」标签里;其余项目在成员管理里指派
+                          p.intake ? (
+                            <Link href={intakeHref(p)} prefetch={false} className="btn btn-primary !h-8 w-full !px-3 text-[12px]">
+                              <Route className="h-3.5 w-3.5" aria-hidden="true" /> {p.intake.triageDone ? "指派 PM" : "初级分析与指派"}
+                            </Link>
+                          ) : (
+                            <button type="button" onClick={() => setAssignOf(p)} className="btn btn-primary !h-8 w-full !px-3 text-[12px]">
+                              <Users className="h-3.5 w-3.5" /> 指派 PM
+                            </button>
+                          )
                         ) : undefined
                       }
                     />
@@ -261,15 +324,30 @@ function ProjectBoardBody({ me }: { me: SessionUser }) {
                 <span className="hidden text-xs text-[color:var(--ink-2)] sm:block">
                   阶段 {p.currentStage} · {p.stages[p.currentStage - 1]?.name}
                 </span>
+                {inIntakeStage(p) && p.intake && (
+                  <span className="hidden font-data text-xs text-[color:var(--ink-2)] md:block">
+                    线下 {p.intake.offline} · 不互通 {p.intake.interop} · 无法移动端 {p.intake.mobile}
+                  </span>
+                )}
                 {p.pendingOn && <span className="text-xs text-[color:var(--indigo-deep)]">{PENDING_ON_LABEL[p.pendingOn]}</span>}
                 <span className="font-data ml-auto text-xs tabular-nums text-[color:var(--ink-3)]">
                   {p.stats.done}/{p.stats.total}
                 </span>
-                {canAssign(p) && (
-                  <button type="button" onClick={() => setAssignOf(p)} className="btn btn-primary !h-8 !px-3 text-[12px]">
-                    指派
-                  </button>
+                {p.intake?.finalPending && p.can.final && p.status === "active" && (
+                  <Link href={intakeHref(p)} prefetch={false} className="btn btn-primary !h-8 !px-3 text-[12px]">
+                    终审
+                  </Link>
                 )}
+                {canAssign(p) &&
+                  (p.intake ? (
+                    <Link href={intakeHref(p)} prefetch={false} className="btn btn-primary !h-8 !px-3 text-[12px]">
+                      {p.intake.triageDone ? "指派" : "初析"}
+                    </Link>
+                  ) : (
+                    <button type="button" onClick={() => setAssignOf(p)} className="btn btn-primary !h-8 !px-3 text-[12px]">
+                      指派
+                    </button>
+                  ))}
               </li>
             ))}
           </ul>

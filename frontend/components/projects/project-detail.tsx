@@ -2,6 +2,7 @@
 
 /**
  * 项目工作区:一条流程改造的主页面。
+ *   承接:流程收集之后、改造实施之前——PMO 初级分析、指派 PM、PM 按优先级推进、CTO 技术可行性评估、PMO 终审
  *   概览:阶段进度、当前关卡的必交付物、立项信息、成员、项目状态
  *   计划:工作项看板   评审:提交 / 表决 / 历史 / 阶段调整
  *   流程:As-Is 与当前(To-Be)对比   动态:时间线与评论
@@ -9,31 +10,34 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { Braces, ChevronDown, ClipboardList, Download, Eye, FileSignature, FileText, GitCompareArrows, History, Pencil, UserCog, Users } from "lucide-react";
+import { Braces, ChevronDown, ClipboardList, Download, Eye, FileSignature, FileText, GitCompareArrows, History, Pencil, Route, UserCog, Users } from "lucide-react";
 import { toast } from "sonner";
 import { authFetch, authFetchBlob, saveBlob, type SessionUser } from "@/lib/auth";
 import type { FlowProcess, ProjectComment, ProjectView, UserDir, WorkItem } from "@/lib/types";
-import { acceptStageOf, fmtDateTime, HEALTH_LABEL, healthClass, MODE_LABEL, OVERALL, PRIORITY_LABEL, priorityClass, STAGE_STATUS_LABEL, STATUS_LABEL, statusClass } from "@/lib/labels";
+import { acceptStageOf, fmtDateTime, HEALTH_LABEL, healthClass, MODE_LABEL, OVERALL, PRIORITY_LABEL, priorityClass, STATUS_LABEL, statusClass } from "@/lib/labels";
 import { OVERALL_MODE_LABEL, countersignMode } from "@/lib/step-checks";
 import { AppShell, PageHead, StateLine } from "@/components/shell/app-shell";
-import { StageRail, PendingOnBadge, Avatar } from "@/components/projects/stage-rail";
+import { MemberRow, StageRail, PendingOnBadge } from "@/components/projects/stage-rail";
 import { MembersDialog, canAssignMembers } from "@/components/projects/members-dialog";
 import { PlanTab } from "@/components/projects/plan-tab";
 import { ReviewTab } from "@/components/projects/review-tab";
 import { FlowTab } from "@/components/projects/flow-tab";
 import { ActivityTab } from "@/components/projects/activity-tab";
+import { IntakeTab } from "@/components/projects/intake-tab";
+import { awaitingFinal, inIntakeStage, myIntakeAction, stageStatusText } from "@/lib/intake";
 import { UpdateDialog } from "@/components/projects/update-dialog";
 import { FlowChartModal } from "@/components/flow-chart";
 import { Dialog, DialogActions, DialogHeader, Field } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 
-export type DetailTab = "overview" | "plan" | "review" | "flow" | "activity";
+export type DetailTab = "intake" | "overview" | "plan" | "review" | "flow" | "activity";
 
 /** 流程定义的两个编辑器:流程图(画布 + 检查器)与表单(与收集表同一套) */
 export type FlowEditor = "chart" | "form";
 
 const TABS: { id: DetailTab; label: string; icon: typeof History }[] = [
+  { id: "intake", label: "承接", icon: Route },
   { id: "overview", label: "概览", icon: Eye },
   { id: "plan", label: "计划", icon: ClipboardList },
   { id: "review", label: "评审", icon: FileSignature },
@@ -70,7 +74,10 @@ function ProjectDetailBody({ id, me }: { id: string; me: SessionUser }) {
   const [process, setProcess] = useState<FlowProcess | null>(null);
   const [items, setItems] = useState<WorkItem[]>([]);
   const [comments, setComments] = useState<ProjectComment[]>([]);
-  const [tab, setTab] = useState<DetailTab>("overview");
+  /** 地址栏指定的 / 当前所在的标签。
+   *  "gate" = 当前关卡(评审类通知用):承接阶段的技术可行性评估在「承接」里,其余关卡在「评审」里;
+   *  null = 还没定(等读到项目后按承接是否走完决定默认落点) */
+  const [tab, setTab] = useState<DetailTab | "gate" | null>(null);
   const [focusItem, setFocusItem] = useState<string | null>(null);
   const [membersOpen, setMembersOpen] = useState(false);
   const [updateOpen, setUpdateOpen] = useState(false);
@@ -84,8 +91,8 @@ function ProjectDetailBody({ id, me }: { id: string; me: SessionUser }) {
   // 进入时读取地址栏里的标签与要定位的工作项(可从通知、工作台直达)
   useEffect(() => {
     const q = new URLSearchParams(window.location.search);
-    const t = q.get("tab") as DetailTab | null;
-    if (t && TABS.some((x) => x.id === t)) setTab(t);
+    const t = q.get("tab");
+    if (t && (t === "gate" || TABS.some((x) => x.id === t))) setTab(t as DetailTab | "gate");
     const it = q.get("item");
     if (it) {
       setFocusItem(it);
@@ -97,6 +104,9 @@ function ProjectDetailBody({ id, me }: { id: string; me: SessionUser }) {
     try {
       const p = await authFetch<ProjectView>(`/api/projects/${id}`, { cache: "no-store" });
       setProject(p);
+      // 地址栏没指定标签时的默认落点:承接还没走完的项目先进「承接」,其余进「概览」。
+      // 只在第一次读到项目时定;之后的刷新不把人从当前标签上拽走
+      setTab((cur) => cur ?? (inIntakeStage(p) ? "intake" : "overview"));
       const [proc, its, cs, us] = await Promise.all([
         authFetch<FlowProcess>(`/api/admin/processes/${p.processId}`, { cache: "no-store" }),
         authFetch<WorkItem[]>(`/api/projects/${id}/items`, { cache: "no-store" }),
@@ -173,12 +183,21 @@ function ProjectDetailBody({ id, me }: { id: string; me: SessionUser }) {
   const iCanReviewCurrent =
     project.status === "active" &&
     cur?.status === "in_review" &&
+    !awaitingFinal(project) &&
     (cur.reviewerRole === "cto" ? project.can.reviewCTO : cur.reviewerRole === "handler" ? project.can.reviewHandler : project.can.manage);
   const openItems = items.filter((i) => i.status !== "done" && i.status !== "cancelled").length;
   const acceptStage = acceptStageOf(project);
   // 流程定义改的是 To-Be 工作副本:项目里的 PM / BH / TH、CTO 与管理员都能改,项目结束后锁定
   const ended = project.status === "done" || project.status === "cancelled";
   const canEditFlow = project.can.editFlow && !ended && !!process;
+  // 项目正停在承接阶段:这一段的指派、提交、评估、终审都在「承接」标签里,页头按钮直接带过去
+  const atIntake = inIntakeStage(project);
+  // 「承接」标签只对第一个阶段是承接阶段的项目存在;地址栏写了 tab=intake 而项目没有承接阶段时回落到概览
+  const intakeOpen = !!project.intake && !project.intake.legacy;
+  const activeTab: DetailTab = tab === "gate" ? (atIntake ? "intake" : "review") : tab === "intake" && !intakeOpen ? "overview" : tab ?? "overview";
+  const awaitFinal = project.status === "active" && !!project.intake?.finalPending && project.can.final;
+  const awaitTriage = project.status === "active" && !project.hasPm && project.can.assign && !!project.intake;
+  const intakePrimary = myIntakeAction(project);
 
   const ctx: DetailCtx = {
     project,
@@ -203,17 +222,23 @@ function ProjectDetailBody({ id, me }: { id: string; me: SessionUser }) {
         back={{ href: "/projects", label: "流程项目" }}
         subtitle={process?.description || undefined}
       >
-        {project.can.assign && project.status === "active" && !project.hasPm && (
-          <button type="button" onClick={() => setMembersOpen(true)} className="btn btn-primary !h-10">
-            <Users className="h-4 w-4" /> 指派 PM
+        {intakePrimary ? (
+          <button type="button" onClick={() => goTab("intake")} className="btn btn-primary !h-10">
+            {intakePrimary.includes("指派") ? <Users className="h-4 w-4" /> : <Route className="h-4 w-4" />} {intakePrimary}
           </button>
+        ) : (
+          project.can.assign && project.status === "active" && !project.hasPm && (
+            <button type="button" onClick={() => setMembersOpen(true)} className="btn btn-primary !h-10">
+              <Users className="h-4 w-4" /> 指派 PM
+            </button>
+          )
         )}
-        {project.status === "active" && cur?.status === "in_progress" && project.can.manage && cur.gate && (
+        {!atIntake && project.status === "active" && cur?.status === "in_progress" && project.can.manage && cur.gate && (
           <button type="button" onClick={() => goTab("review")} className="btn btn-primary !h-10">
             <FileSignature className="h-4 w-4" /> 提交 {cur.gate}
           </button>
         )}
-        {iCanReviewCurrent && (
+        {!atIntake && iCanReviewCurrent && (
           <button type="button" onClick={() => goTab("review")} className="btn btn-primary !h-10">
             <FileSignature className="h-4 w-4" /> 去{cur.gate}表决
           </button>
@@ -252,7 +277,7 @@ function ProjectDetailBody({ id, me }: { id: string; me: SessionUser }) {
         <span className={cn(statusClass(project.status), "!h-[24px]")}>{STATUS_LABEL[project.status]}</span>
         {project.status === "active" && cur && (
           <span className="badge badge-blue !h-[24px]">
-            阶段 {cur.seq} · {cur.name} · {STAGE_STATUS_LABEL[cur.status]}
+            阶段 {cur.seq} · {cur.name} · {stageStatusText(project, cur.status)}
           </span>
         )}
         {project.status === "active" && <PendingOnBadge on={project.pendingOn} />}
@@ -264,23 +289,26 @@ function ProjectDetailBody({ id, me }: { id: string; me: SessionUser }) {
 
       {/* 标签栏 */}
       <div className="seg mb-4 max-w-[620px] overflow-x-auto">
-        {TABS.map(({ id: t, label, icon: Icon }) => (
-          <button key={t} type="button" onClick={() => goTab(t)} className={cn("gap-1.5", tab === t && "on")} aria-current={tab === t ? "page" : undefined}>
+        {TABS.filter(({ id: t }) => t !== "intake" || intakeOpen).map(({ id: t, label, icon: Icon }) => (
+          <button key={t} type="button" onClick={() => goTab(t)} className={cn("gap-1.5", activeTab === t && "on")} aria-current={activeTab === t ? "page" : undefined}>
             <Icon className="h-3.5 w-3.5" />
             {label}
             {t === "plan" && openItems > 0 && <span className="font-data text-[11px] font-normal text-[color:var(--ink-3)]">{openItems}</span>}
-            {t === "review" && cur?.status === "in_review" && iCanReviewCurrent && (
+            {/* 停在承接阶段时,待我表决的提示挂在「承接」上;此外 PMO 的初析指派与终审也在这里提示 */}
+            {t === "intake" && (awaitTriage || awaitFinal) && !iCanReviewCurrent && <span className="size-1.5 rounded-full bg-[color:var(--amber)]" aria-label="等我处理" />}
+            {t === (atIntake ? "intake" : "review") && cur?.status === "in_review" && iCanReviewCurrent && (
               <span className="size-1.5 rounded-full bg-[color:var(--red)]" aria-label="待我表决" />
             )}
           </button>
         ))}
       </div>
 
-      {tab === "overview" && <OverviewTab ctx={ctx} onStatus={setStatusAsk} />}
-      {tab === "plan" && <PlanTab ctx={ctx} focusItem={focusItem} clearFocus={() => setFocusItem(null)} />}
-      {tab === "review" && <ReviewTab ctx={ctx} />}
-      {tab === "flow" && <FlowTab ctx={ctx} autoEdit={flowEdit} onAutoEditDone={() => setFlowEdit(null)} />}
-      {tab === "activity" && <ActivityTab ctx={ctx} />}
+      {activeTab === "intake" && <IntakeTab ctx={ctx} />}
+      {activeTab === "overview" && <OverviewTab ctx={ctx} onStatus={setStatusAsk} />}
+      {activeTab === "plan" && <PlanTab ctx={ctx} focusItem={focusItem} clearFocus={() => setFocusItem(null)} />}
+      {activeTab === "review" && <ReviewTab ctx={ctx} />}
+      {activeTab === "flow" && <FlowTab ctx={ctx} autoEdit={flowEdit} onAutoEditDone={() => setFlowEdit(null)} />}
+      {activeTab === "activity" && <ActivityTab ctx={ctx} />}
 
       {membersOpen && (
         <MembersDialog project={project} users={users} onClose={() => setMembersOpen(false)} onSaved={loadAll} />
@@ -377,7 +405,7 @@ function ExportMenu({ id, name }: { id: string; name: string }) {
             <FileText className="mt-0.5 h-4 w-4 shrink-0 text-[color:var(--tint)]" />
             <span>
               <span className="block text-[14px] font-semibold text-neutral-900">Markdown 报告</span>
-              <span className="block text-xs text-[color:var(--ink-2)]">基本信息、阶段与评审、工作项、简报、指标、时间线</span>
+              <span className="block text-xs text-[color:var(--ink-2)]">基本信息、需求承接、阶段与评审、工作项、简报、指标、时间线</span>
             </span>
           </button>
           <button type="button" role="menuitem" onClick={() => void run(true)} className="flex w-full items-start gap-2.5 rounded-[13px] px-3 py-2.5 text-left transition hover:bg-white/70">
@@ -444,6 +472,19 @@ function OverviewTab({ ctx, onStatus }: { ctx: DetailCtx; onStatus: (s: "on_hold
     return null;
   }, [cur, project]);
 
+  // 停在承接阶段时,「当前阶段」卡片解释这一段怎么走,并把人带到「承接」标签
+  const atIntake = inIntakeStage(project);
+  const intakePhase = project.intake?.phase ?? "done";
+  const intakeBody: Record<string, string> = {
+    triage: `流程已收集。自动诊断出线下节点 ${project.intake?.offline ?? 0} 个、系统不互通 ${project.intake?.interop ?? 0} 个、无法移动端 ${project.intake?.mobile ?? 0} 个，等 PMO 完成初级分析并指派 PM。`,
+    assign: "PMO 已完成初级分析，等待指派一名或多名 PM 承接。",
+    advance: "PM 正按优先级推进：① 线下节点转线上 → ② 系统不互通 → ③ 线上节点移动化。原因与解决方案齐备后，提交 CTO 做技术可行性评估。",
+    assess: `CTO 正在评估技术可行性（${cur?.gate ?? ""}，第 ${project.review?.round ?? 1} 轮）。通过后整体流程与方案交 PMO 终审。`,
+    final: "技术可行性评估已通过，等 PMO 终审；终审通过后进入下一阶段。",
+    done: "",
+  };
+  const intakeAction = myIntakeAction(project);
+
   const inlineSelect = "field !h-8 !px-2.5 !text-[13px] w-auto min-w-[64px]";
 
   return (
@@ -454,7 +495,7 @@ function OverviewTab({ ctx, onStatus }: { ctx: DetailCtx; onStatus: (s: "on_hold
           <h2 className="flex items-center gap-2 text-[15px] font-semibold text-neutral-900">阶段进度</h2>
           {/* w-0 + min-w-full:可横滑的宽内容不再把自身宽度报给祖先,窄屏下卡片不会被撑宽 */}
           <div className="w-0 min-w-full overflow-x-auto pb-1 pt-3">
-            <StageRail stages={project.stages} current={project.currentStage} />
+            <StageRail stages={project.stages} current={project.currentStage} finalSeq={awaitingFinal(project) ? project.currentStage : undefined} />
           </div>
 
           {cur && (
@@ -465,17 +506,31 @@ function OverviewTab({ ctx, onStatus }: { ctx: DetailCtx; onStatus: (s: "on_hold
                 </h3>
                 {/* 项目已结束(完成 / 取消 / 搁置)时显示项目状态,而不是阶段自己的"进行中" */}
                 <span className={cn(project.status === "active" ? "badge badge-plain" : statusClass(project.status), "!h-[20px] text-[11px]")}>
-                  {project.status === "active" ? STAGE_STATUS_LABEL[cur.status] : STATUS_LABEL[project.status]}
+                  {project.status === "active" ? stageStatusText(project, cur.status) : STATUS_LABEL[project.status]}
                 </span>
                 {cur.gate && <span className="badge badge-indigo !h-[20px] text-[11px]">{cur.gate}</span>}
                 {cur.enteredAt && <span className="font-data text-[11px] text-[color:var(--ink-3)]">始于 {fmtDateTime(cur.enteredAt)}</span>}
-                <span className="badge badge-blue ml-auto !h-[20px] font-data text-[11px]">
-                  必交付 {doneRequired}/{required.length}
-                </span>
+                {!atIntake && (
+                  <span className="badge badge-blue ml-auto !h-[20px] font-data text-[11px]">
+                    必交付 {doneRequired}/{required.length}
+                  </span>
+                )}
               </div>
-              {stageBody}
+              {atIntake ? (
+                <>
+                  {/* 承接阶段的准入条件是承接方案;模板里的必交付物在提交评估时自动记为完成,不在这里列 */}
+                  <p className="mt-2 text-[13px] leading-relaxed text-[color:var(--ink-2)]">{intakeBody[intakePhase]}</p>
+                  <div className="mt-3">
+                    <button type="button" onClick={() => ctx.goTab("intake")} className={cn("btn !h-10", intakeAction ? "btn-primary" : "btn-glass")}>
+                      <Route className="h-4 w-4" aria-hidden="true" /> {intakeAction || "查看承接"}
+                    </button>
+                  </div>
+                </>
+              ) : (
+                stageBody
+              )}
 
-              {required.length > 0 && (
+              {!atIntake && required.length > 0 && (
                 <ul className="mt-3 grid gap-1.5 sm:grid-cols-2">
                   {required.map((r) => (
                     <li key={r.id} className="flex items-center gap-2 text-[13px]">
@@ -504,7 +559,7 @@ function OverviewTab({ ctx, onStatus }: { ctx: DetailCtx; onStatus: (s: "on_hold
                 </ul>
               )}
 
-              {project.status === "active" && cur.gate && (
+              {!atIntake && project.status === "active" && cur.gate && (
                 <div className="mt-3.5 flex flex-wrap gap-2.5">
                   {cur.status === "in_progress" && project.can.manage && (
                     <button type="button" onClick={() => ctx.goTab("review")} className="btn btn-primary !h-10" disabled={missingRequired.length > 0}>
@@ -523,7 +578,7 @@ function OverviewTab({ ctx, onStatus }: { ctx: DetailCtx; onStatus: (s: "on_hold
                   )}
                 </div>
               )}
-              {cur.status === "in_progress" && !project.can.manage && cur.gate && project.hasPm && (
+              {!atIntake && cur.status === "in_progress" && !project.can.manage && cur.gate && project.hasPm && (
                 <p className="mt-3 text-xs text-[color:var(--ink-3)]">等待 PM 完成必交付物并提交评审。</p>
               )}
             </div>
@@ -717,7 +772,7 @@ function OverviewTab({ ctx, onStatus }: { ctx: DetailCtx; onStatus: (s: "on_hold
             )}
           </h2>
           <ul className="mt-3 space-y-2.5 text-[13px]">
-            <MemberRow label="PM" full="项目经理" people={pms} hint={pms.length ? "" : "未指派"} warn />
+            <MemberRow label="PM" full="项目经理" people={pms} leadId={project.leadPmId} hint={pms.length ? "" : project.intake && !project.intake.triageDone ? "待 PMO 初级分析后指派" : "未指派"} warn />
             <MemberRow label="BH" full="业务经办" people={handlers} hint={handlers.length ? "" : "尚未添加"} />
             {devs.length > 0 && <MemberRow label="TH" full="科技经办" people={devs} />}
             {viewers.length > 0 && <MemberRow label="PMO" full="项目管理办公室" people={viewers} />}
@@ -764,38 +819,5 @@ function OverviewTab({ ctx, onStatus }: { ctx: DetailCtx; onStatus: (s: "on_hold
         </section>
       </aside>
     </div>
-  );
-}
-
-function MemberRow({
-  label,
-  full,
-  people,
-  hint,
-  warn,
-}: {
-  /** 岗位缩写;full 是它的中文全称,做成悬停提示 */
-  label: string;
-  full?: string;
-  people: { userId: string; username: string; displayName: string; role: "pm" | "handler" | "dev" | "viewer" }[];
-  hint?: string;
-  warn?: boolean;
-}) {
-  return (
-    <li className="flex items-start gap-2.5">
-      <span className="w-[62px] shrink-0 pt-0.5 text-[color:var(--ink-2)]" title={full}>{label}</span>
-      {people.length ? (
-        <span className="flex min-w-0 flex-1 flex-wrap gap-1.5">
-          {people.map((m) => (
-            <span key={m.userId} className="tag-chip !h-[26px] !text-[12px]">
-              <Avatar name={m.displayName} size={18} />
-              {m.displayName}
-            </span>
-          ))}
-        </span>
-      ) : (
-        <span className={cn("text-xs", warn ? "font-medium text-[color:var(--amber-deep)]" : "text-[color:var(--ink-3)]")}>{hint}</span>
-      )}
-    </li>
   );
 }

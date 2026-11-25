@@ -47,6 +47,8 @@ func newTestEnv(t *testing.T) *env {
 	}
 	sessions = newSessionStore()
 	clientLogLimiter = newWindowLimiter(clientLogsPerMinute, time.Minute)
+	// 匿名提交的限流是按来源地址计数的,整个测试进程是同一个"来源";不重置的话用例一多就会撞上 20 次 / 分钟
+	submitWindow = newWindowLimiter(20, time.Minute)
 	// 测试期间日志一律丢弃:每个请求都会经访问日志,不丢会把测试输出淹掉。
 	// 个别用例要看日志时,自己临时换成写到缓冲区的日志器。
 	prevLogger := slog.Default()
@@ -286,19 +288,21 @@ func processPayload(name string) map[string]any {
 func TestProjectLifecycle(t *testing.T) {
 	e := newTestEnv(t)
 
-	// ---- 建号:管理员、CTO、项目经理、两位经办、一个无关的观察者 ----
+	// ---- 建号:管理员、CTO、PMO、两位项目经理、两位经办、一个无关的普通成员 ----
 	reg := e.must("", "POST", "/api/auth/register", map[string]any{"username": "rootadmin", "password": "pass1234"})
 	admin := reg["token"].(string)
 	cto, _ := e.createUser(admin, "张技术", RoleCTO)
+	pmo, _ := e.createUser(admin, "周琳", RoleViewer) // 岗位为 PMO:做初级分析、指派 PM、终审
 	pm, pmID := e.createUser(admin, "李经理", RolePM)
+	_, pm2ID := e.createUser(admin, "林悦", RolePM)
 	h1, h1ID := e.createUser(admin, "王经办", RoleHandler)
 	h2, h2ID := e.createUser(admin, "赵经办", RoleHandler)
-	other, _ := e.createUser(admin, "路人甲", RoleViewer)
+	other, _ := e.createUser(admin, "路人甲", RoleHandler) // 无关的普通成员:岗位不是 PMO,也没被加进项目
 
 	// 未登录一律 401
 	e.fail("", "GET", "/api/projects", nil, 401, "未登录")
 
-	// ---- 提交流程即自动立项 ----
+	// ---- 提交流程即自动立项:等待 PMO 初级分析 ----
 	code, _ := e.req("", "POST", "/api/processes", processPayload("采购申请审批流程"))
 	if code != 201 {
 		t.Fatalf("提交流程期望 201,得到 %d", code)
@@ -310,7 +314,11 @@ func TestProjectLifecycle(t *testing.T) {
 	pid := projects[0].(map[string]any)["id"].(string)
 	proj := e.project(admin, pid)
 	got(t, proj, "currentStage", float64(1))
-	got(t, proj, "pendingOn", "admin") // 还没指派项目经理
+	got(t, proj, "pendingOn", PendingPMO) // 还没指派项目经理:等 PMO 初级分析与指派
+	got(t, proj, "intake", "phase", PhaseTriage)
+	got(t, proj, "intake", "offline", float64(1))
+	got(t, proj, "intake", "interop", float64(1))
+	got(t, proj, "intake", "mobile", float64(1))
 	got(t, proj, "stages", "0", "status", "pending")
 	got(t, proj, "stages", "6", "name", "运营优化")
 	got(t, proj, "metrics", "breakpoints", float64(2))
@@ -326,48 +334,108 @@ func TestProjectLifecycle(t *testing.T) {
 	if len(versions) != 1 || dig(versions[0], "kind") != "as_is" {
 		t.Fatalf("应有 1 个 As-Is 版本: %+v", versions)
 	}
-	// 管理员收到"新流程待立项"的通知
+	// 管理员与 PMO 都收到"新流程待初级分析"的通知(系统里没有 PMO 时由管理员兜底)
 	nb := e.must(admin, "GET", "/api/notifications", nil)
 	got(t, nb, "unread", float64(1))
+	if !hasKind(e.must(pmo, "GET", "/api/notifications", nil)["list"], "project_created") {
+		t.Fatalf("PMO 应收到新流程的通知")
+	}
 
 	// ---- 权限边界 ----
 	e.fail(other, "PUT", "/api/projects/"+pid+"/members", map[string]any{"userId": pmID, "role": "pm", "action": "add"}, 403, "权限")
 	e.fail(h1, "PUT", "/api/projects/"+pid+"/members", map[string]any{"userId": pmID, "role": "pm", "action": "add"}, 403, "权限")
 	e.fail(pm, "POST", "/api/projects/"+pid+"/reviews", map[string]any{"summary": "x"}, 403, "权限")
 	e.fail(pm, "PATCH", "/api/projects/"+pid, map[string]any{"value": "高"}, 403, "权限")
+	// 初级分析只有 PMO 与管理员能做
+	for _, who := range []string{other, h1, pm, cto} {
+		e.fail(who, "PUT", "/api/projects/"+pid+"/intake/triage", map[string]any{"value": "高", "done": true}, 403, "权限")
+	}
 
-	// ---- 立项指派:管理员指派项目经理与经办 ----
-	proj = e.must(admin, "PUT", "/api/projects/"+pid+"/members", map[string]any{"userId": pmID, "role": "pm", "action": "add"})
+	// ---- PMO 初级分析:要先完成分析,才能指派 PM ----
+	e.fail(pmo, "PUT", "/api/projects/"+pid+"/members", map[string]any{"userId": pmID, "role": "pm", "action": "add"}, 400, "初级分析")
+	e.fail(pmo, "PUT", "/api/projects/"+pid+"/intake/triage", map[string]any{"done": true}, 400, "完成初级分析前")
+	tri := e.must(pmo, "PUT", "/api/projects/"+pid+"/intake/triage", map[string]any{
+		"value": "高", "complexity": "中", "priority": "high", "conclusion": "三处人工传递，建议整体承接",
+		"completeness": HasGaps, "completenessNote": "缺退回路径", "done": true,
+	})
+	got(t, tri, "phase", PhaseAssign)
+	got(t, tri, "triageByName", "周琳")
+	got(t, tri, "completeness", HasGaps)
+	got(t, tri, "completenessNote", "缺退回路径")
+	proj = e.project(pmo, pid)
+	got(t, proj, "value", "高")
+	got(t, proj, "complexity", "中")
+	got(t, proj, "priority", "high")
+	got(t, proj, "intake", "phase", PhaseAssign)
+	got(t, proj, "intake", "triageDone", true)
+
+	// ---- PMO 指派项目经理(可以有多名,其中一名主负责);管理员指派经办 ----
+	proj = e.must(pmo, "PUT", "/api/projects/"+pid+"/members", map[string]any{"userId": pmID, "role": "pm", "action": "add"})
 	got(t, proj, "hasPm", true)
+	got(t, proj, "leadPmId", pmID) // 第一位到岗的 PM 自动成为主负责
+	got(t, proj, "leadPmName", "李经理")
 	got(t, proj, "stages", "0", "status", "in_progress") // 项目经理到岗,阶段 1 启动
 	got(t, proj, "pendingOn", "pm")
+	got(t, proj, "intake", "phase", PhaseAdvance)
+	// 已指派 PM:初级分析锁定,不能再改
+	e.fail(pmo, "PUT", "/api/projects/"+pid+"/intake/triage", map[string]any{"value": "低"}, 400, "不能再修改")
+	proj = e.must(pmo, "PUT", "/api/projects/"+pid+"/members", map[string]any{"userId": pm2ID, "role": "pm", "action": "add"})
+	got(t, proj, "leadPmId", pmID) // 再指派一名 PM:主负责不变
+	proj = e.must(pmo, "PUT", "/api/projects/"+pid+"/members", map[string]any{"userId": pm2ID, "role": "pm", "action": "add", "lead": true})
+	got(t, proj, "leadPmId", pm2ID) // 可以把主负责换成另一位
+	if len(proj["members"].([]any)) != 2 {
+		t.Fatalf("重复指派同一个人不应产生重复成员: %+v", proj["members"])
+	}
+	proj = e.must(pmo, "PUT", "/api/projects/"+pid+"/members", map[string]any{"userId": pmID, "role": "pm", "action": "add", "lead": true})
+	got(t, proj, "leadPmId", pmID)
 	e.must(admin, "PUT", "/api/projects/"+pid+"/members", map[string]any{"userId": h1ID, "role": "handler", "action": "add"})
 	proj = e.must(admin, "PUT", "/api/projects/"+pid+"/members", map[string]any{"userId": h2ID, "role": "handler", "action": "add"})
-	if len(proj["members"].([]any)) != 3 {
-		t.Fatalf("应有 3 名成员: %+v", proj["members"])
+	if len(proj["members"].([]any)) != 4 {
+		t.Fatalf("应有 4 名成员: %+v", proj["members"])
 	}
 	// 项目经理不能增删项目经理(分配规则见 TestAssignmentRules)
 	e.fail(pm, "PUT", "/api/projects/"+pid+"/members", map[string]any{"userId": pmID, "role": "pm", "action": "remove"}, 403, "权限")
 	e.fail(pm, "PUT", "/api/projects/"+pid+"/members", map[string]any{"userId": h1ID, "role": "pm", "action": "add"}, 403, "权限")
 
-	// ---- G1 立项评审(CTO 或签) ----
-	e.fail(pm, "POST", "/api/projects/"+pid+"/reviews", map[string]any{"summary": ""}, 400, "分析报告") // 必交付物未完成
-	if n := e.completeRequired(pm, pid, 1); n != 1 {
-		t.Fatalf("阶段 1 应有 1 个必交付物待完成,得到 %d", n)
-	}
-	e.fail(pm, "POST", "/api/projects/"+pid+"/reviews", map[string]any{"summary": ""}, 400, "改造价值") // 价值/复杂度未填
+	// ---- 需求承接:PM 写好承接方案后提交技术可行性评估(CTO 或签) ----
+	e.fail(pm, "POST", "/api/projects/"+pid+"/reviews", map[string]any{"summary": ""}, 400, "承接方案还不完整")
+	e.fillIntake(pm, pid)
 	e.fail(h1, "PATCH", "/api/projects/"+pid, map[string]any{"value": "高"}, 403, "权限")
 	proj = e.must(pm, "PATCH", "/api/projects/"+pid, map[string]any{"value": "高", "complexity": "中", "priority": "high", "dueDate": "2026-12-31"})
 	got(t, proj, "priority", "high")
 	e.fail(pm, "PATCH", "/api/projects/"+pid, map[string]any{"priority": "urgent"}, 400, "优先级")
+	// 模板里第一阶段的必交付物「分析报告」由承接方案满足:提交时自动记为完成
+	_, stage1Items := e.list(pm, "/api/projects/"+pid+"/items")
+	sawReport := false
+	for _, raw := range stage1Items {
+		if it := raw.(map[string]any); it["required"] == true && it["title"] == "分析报告" {
+			sawReport = true
+			if it["status"] != "todo" {
+				t.Fatalf("提交评估之前,「分析报告」仍是待办: %+v", it)
+			}
+		}
+	}
+	if !sawReport {
+		t.Fatalf("第一阶段应有必交付物「分析报告」: %+v", stage1Items)
+	}
 	// 重复提交同一阶段:在评审中不能再提交
 	r1, rv := e.submit(pm, pid, "请立项")
 	got(t, rv, "mode", "any")
 	if len(rv["reviewers"].([]any)) != 1 || dig(rv, "reviewers", "0", "userId") == "" {
 		t.Fatalf("G1 评审人应为全部 CTO: %+v", rv["reviewers"])
 	}
+	_, stage1Items = e.list(pm, "/api/projects/"+pid+"/items")
+	for _, raw := range stage1Items {
+		if it := raw.(map[string]any); it["required"] == true && it["title"] == "分析报告" && it["status"] != "done" {
+			t.Fatalf("提交评估后「分析报告」应记为完成: %+v", it)
+		}
+	}
 	e.fail(pm, "POST", "/api/projects/"+pid+"/reviews", map[string]any{"summary": "x"}, 409, "进行中")
 	got(t, e.project(pm, pid), "pendingOn", "cto")
+	got(t, e.project(pm, pid), "intake", "phase", PhaseAssess)
+	// 评估进行中不能改方案与技术点
+	e.fail(pm, "PUT", "/api/projects/"+pid+"/intake/solution", map[string]any{"summary": "改"}, 409, "只能在 PM 推进时修改")
+	e.fail(pm, "POST", "/api/projects/"+pid+"/intake/points", map[string]any{"title": "新技术点"}, 409, "评估进行中")
 
 	_, pending := e.list(cto, "/api/reviews/pending")
 	if len(pending) != 1 || dig(pending[0], "projectName") != "采购申请审批流程" {
@@ -378,6 +446,8 @@ func TestProjectLifecycle(t *testing.T) {
 	}
 	e.fail(pm, "POST", "/api/reviews/"+r1+"/decide", map[string]any{"decision": "approve"}, 403, "权限")
 	e.fail(h1, "POST", "/api/reviews/"+r1+"/decide", map[string]any{"decision": "approve"}, 403, "权限")
+	// 没给技术点下结论就不能通过;驳回必须填写意见
+	e.fail(cto, "POST", "/api/reviews/"+r1+"/decide", map[string]any{"decision": "approve"}, 400, "还不能通过")
 	e.fail(cto, "POST", "/api/reviews/"+r1+"/decide", map[string]any{"decision": "reject"}, 400, "驳回必须填写意见")
 	// 或签:首位表决人决定。驳回即驳回,阶段退回进行中,由项目经理补齐后重新提交
 	got(t, e.must(cto, "POST", "/api/reviews/"+r1+"/decide", map[string]any{"decision": "reject", "comment": "请补充基线数据"}), "status", "rejected")
@@ -387,18 +457,33 @@ func TestProjectLifecycle(t *testing.T) {
 	e.fail(pm, "POST", "/api/reviews/"+r1+"/withdraw", nil, 409, "待决")
 	r1b, rv := e.submit(pm, pid, "已补充基线数据")
 	got(t, rv, "round", float64(2))
-	decided := e.must(cto, "POST", "/api/reviews/"+r1b+"/decide", map[string]any{"decision": "approve", "comment": "同意立项"})
+	decided := e.approveIntake(cto, pid, r1b)
 	got(t, decided, "status", "approved")
 	e.fail(cto, "POST", "/api/reviews/"+r1b+"/decide", map[string]any{"decision": "approve"}, 409, "已经结束")
+	// 评估通过后不直接进入下一阶段:等 PMO 终审
+	proj = e.project(pm, pid)
+	got(t, proj, "currentStage", float64(1))
+	got(t, proj, "pendingOn", PendingPMO)
+	got(t, proj, "intake", "phase", PhaseFinal)
+	got(t, proj, "intake", "finalPending", true)
+	if !hasKind(e.must(pmo, "GET", "/api/notifications", nil)["list"], "intake_final_pending") {
+		t.Fatalf("PMO 应收到终审待办")
+	}
+	// 终审只有 PMO 与管理员能做
+	e.fail(cto, "POST", "/api/projects/"+pid+"/intake/final", map[string]any{"decision": FinalPassed}, 403, "权限")
+	e.fail(pm, "POST", "/api/projects/"+pid+"/intake/final", map[string]any{"decision": FinalPassed}, 403, "权限")
+	got(t, e.finalIntake(pmo, pid, FinalPassed, ""), "phase", PhaseDone)
 	proj = e.project(pm, pid)
 	got(t, proj, "currentStage", float64(2))
 	got(t, proj, "stages", "0", "status", "approved")
 	got(t, proj, "stages", "1", "status", "in_progress")
 	got(t, proj, "pendingOn", "pm")
-	// 项目经理收到"已通过,进入需求确认"
+	got(t, proj, "intake", "phase", PhaseDone)
+	got(t, proj, "intake", "finalPending", false)
+	// 项目经理收到"终审通过,进入需求确认"
 	pn := e.must(pm, "GET", "/api/notifications", nil)
-	if dig(pn, "list", "0", "title") == nil || !strings.Contains(dig(pn, "list", "0", "title").(string), "已通过") {
-		t.Fatalf("项目经理应收到评审通过通知: %+v", pn["list"])
+	if !hasKind(pn["list"], "intake_final_passed") {
+		t.Fatalf("项目经理应收到终审通过通知: %+v", pn["list"])
 	}
 
 	// ---- G2 需求基线(经办会签):先驳回一次,再通过 ----
@@ -624,16 +709,19 @@ func TestProjectLifecycle(t *testing.T) {
 			pid2 = p["id"].(string)
 		}
 	}
-	got(t, e.project(admin, pid2), "pendingOn", "admin")
+	got(t, e.project(admin, pid2), "pendingOn", PendingPMO)
 	e.must(admin, "PUT", "/api/projects/"+pid2+"/members", map[string]any{"userId": pmID, "role": "pm", "action": "add"})
+	// 管理员没走初级分析直接指派(兜底):承接直接进入 PM 推进
+	got(t, e.project(admin, pid2), "intake", "phase", PhaseAdvance)
+	got(t, e.project(admin, pid2), "intake", "triageDone", false)
 	got(t, e.must(pm, "POST", "/api/projects/"+pid2+"/status", map[string]any{"status": "on_hold", "note": "业务暂停"}), "status", "on_hold")
 	got(t, e.must(pm, "GET", "/api/projects/"+pid2), "pendingOn", "")
 	e.fail(pm, "POST", "/api/projects/"+pid2+"/status", map[string]any{"status": "cancelled"}, 403, "权限") // 取消需要 CTO / 管理员
 	got(t, e.must(pm, "POST", "/api/projects/"+pid2+"/status", map[string]any{"status": "active"}), "status", "active")
 	// 一条早已逾期的任务,和一个等待超过 3 天的待决评审
 	e.must(pm, "POST", "/api/projects/"+pid2+"/items", map[string]any{"title": "补齐票据", "assigneeId": h1ID, "dueDate": "2020-01-01"})
-	e.completeRequired(pm, pid2, 1)
 	e.must(pm, "PATCH", "/api/projects/"+pid2, map[string]any{"value": "中", "complexity": "低"})
+	e.fillIntake(pm, pid2)
 	raging, _ := e.submit(pm, pid2, "请立项")
 	if _, err := e.st.db.Exec(`UPDATE gate_reviews SET submitted_at = now() - interval '4 days' WHERE id = $1`, raging); err != nil {
 		t.Fatal(err)
@@ -722,4 +810,18 @@ func TestProjectLifecycle(t *testing.T) {
 	if kinds["item_updated"] != 1 || kinds["item_status"] < 3 {
 		t.Fatalf("item_updated 应恰好 1 条、item_status 至少 3 条,得到 %d / %d", kinds["item_updated"], kinds["item_status"])
 	}
+}
+
+// hasText 某类通知里,是否有标题包含 substr 的一条
+func hasText(list any, kind, substr string) bool {
+	items, _ := list.([]any)
+	for _, raw := range items {
+		if n, ok := raw.(map[string]any); ok {
+			title, _ := dig(n, "title").(string)
+			if n["kind"] == kind && strings.Contains(title, substr) {
+				return true
+			}
+		}
+	}
+	return false
 }

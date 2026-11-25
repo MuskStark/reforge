@@ -1,6 +1,6 @@
 # 端到端流程管理 — 架构设计（v1）
 
-> 状态：**P0–P3 已实现（2026-11-24）**；P4（运行期实例引擎）未实施。实现与本文的出入见第 19 节"实现对照"。
+> 状态：**P0–P3 已实现（2026-11-24）**；**需求承接已实现（2026-11-26，第 21 节）**；P4（运行期实例引擎）未实施。实现与本文的出入见第 19 节"实现对照"。
 > 范围：流程收集完成之后，为**每一个流程**建立一条从分析立项、需求确认、方案设计、系统改造、试运行，
 > 到验收上线、运营优化的端到端管理主线，由**PM、CTO、BH（业务经办）**等角色协作推进。
 > 岗位与项目角色在界面上一律用英文缩写：PMO 项目管理办公室、CTO、PM 项目经理、BH 业务经办、TH 科技经办（2026-11-25 起，见 4.1）。
@@ -126,6 +126,9 @@
 `export.go`、`template.go` 的 `jobRoleLabel`，两处要一起改。PMO 沿用原"观察者"的权限：全局岗位本身不带写权限，
 所有人本来就能查看全部项目，所以 PMO 能看全部、不能改；被管理员加进某个项目后仍是只读成员。
 
+**2026-11-26 起 PMO 多了三项岗位职责**（需求承接，见第 21 节）：给新流程做初级分析、指派 PM、对方案做终审。
+这三件事是岗位自带的，不需要被加进项目；项目里其余的内容对 PMO 仍然只读。
+
 有效权限 = f(系统角色, 岗位角色, 该用户在本项目的项目角色集合)
 ```
 
@@ -140,10 +143,10 @@ CTO 评审的是全公司的技术方案，本来就跨越所有项目。PM、BH
 | **CTO（技术负责人）** | 全局岗位，技术决策与关卡审批 | 立项 / 方案 / 上线准备 / 验收评审；技术风险裁决；必要时代管项目 | 查看全部项目、关卡表决、驳回、分配 TH、取消项目、跳过阶段、修改流程 |
 | **BH（业务经办）** | 业务侧执行与确认 | 确认现状与需求、提供材料、执行试运行、反馈问题 | 需求基线 / 试运行结论关卡表决、完成被指派任务、评论、修改流程 |
 | **TH（科技经办，可选）** | 承接系统改造任务 | 开发、配置、联调、测试 | 完成被指派任务、评论、修改流程 |
-| **PMO（项目管理办公室，可选）** | 只读 | 查看全部项目与数据大屏 | 读 |
+| **PMO（项目管理办公室）** | 需求承接的把关人（21 节） | 新流程的初级分析、指派 PM、终审；查看全部项目与数据大屏 | 初级分析、指派 / 更换 PM 与主负责、终审；其余只读 |
 | 系统管理员 | 系统配置与兜底 | 用户与岗位、阶段模板、系统库；评审人缺位时代行；强制流转 | 全部 |
 
-**成员分配按类划分**（`caps.canAssign`）：管理员分配全部——PM、BH、TH、PMO；CTO 分配 TH；PM 分配 BH。
+**成员分配按类划分**（`caps.canAssign`）：管理员分配全部——PM、BH、TH、PMO；**PMO 指派 PM**（含指定主负责）；CTO 分配 TH；PM 分配 BH。
 
 **"修改流程"放开到节点上的人**（`caps.editFlow`）：流程定义是项目的 To-Be 工作副本，节点上的经办人最清楚流程实际
 怎么走，所以项目里的 PM、BH、TH 都能改（表单与流程图两个编辑器），管理员与 CTO 照旧；PMO 成员与项目外的人不能改。
@@ -172,6 +175,16 @@ CTO 评审的是全公司的技术方案，本来就跨越所有项目。PM、BH
 | G6 验收与发布 | R（提交） | **A** | I | I |
 | 运营监控与周期复盘 | R | I | C（反馈） | — |
 
+**阶段 1「分析立项」内部是一条需求承接的小闭环**（21 节），其中三件事的问责人是 PMO：
+
+| 活动 | PMO | PM | CTO | 管理员 |
+|---|---|---|---|---|
+| 初级分析（价值 / 复杂度 / 优先级 / 流程是否完整） | **A/R** | — | — | 兜底 |
+| 指派 PM（一名或多名，其中一名主负责） | **A/R** | — | — | 兜底 |
+| 三条推进线的原因与解决方案 | I | **A/R**（可把一条线交给 BH / TH 负责） | 应邀协助 | — |
+| 技术可行性评估（逐个技术点） | I | R（提交） | **A** | 裁决 |
+| 终审 | **A/R** | R（按意见整改） | I | 兜底 |
+
 ---
 
 ## 5. 端到端生命周期
@@ -186,6 +199,9 @@ CTO 评审的是全公司的技术方案，本来就跨越所有项目。PM、BH
 
 ②–⑥ 就是现有的五个改造阶段（需求确认 / 方案设计 / 系统改造 / 试运行 / 验收），前后各加一段：
 前面补"分析立项"（把现有"需求分析 + 指派"并入并升级为 CTO 决策的门），后面补"运营优化"（上线不是终点）。
+
+阶段 1 内部另有一条需求承接的小闭环（21 节）：PMO 初级分析 → 指派 PM → PM 按优先级推进 → CTO 逐个技术点评估技术可行性
+→ PMO 终审。终审通过时 G1 才算通过、进入阶段 2；终审退回则回到 PM 推进，重提后另起一轮评估。
 
 ### 5.2 默认阶段模板
 
@@ -204,7 +220,7 @@ CTO 评审的是全公司的技术方案，本来就跨越所有项目。PM、BH
 - **或签**：首位表决人决定——通过即过、驳回即驳回，其余待决票作废。**会签**：全部通过才过，任一驳回即驳回。
 - **驳回**：阶段退回"进行中"，PM 修改后可再次提交（评审轮次 +1），历史轮次全部保留。
 - **阶段模板可在后台配置**（`stage_templates` 表；内置的七阶段模板在首次启动时写入）。模板只在**立项时**生效：建项目时把当时的模板快照进 `projects.template`，此后阶段名、评审规则、版本快照时机、完成前置条件一律读项目自己的快照——所以改模板只影响此后新建的项目，已立项的项目不受影响。
-- **阶段标识（`key`）不可改，且两个标识带语义**：`design` 的关卡通过时留存 To-Be 基线；`accept` 的关卡通过时留存已发布版本，且通过后才可标记项目完成（没有 `accept` 时取最后一个带关卡的阶段）。
+- **阶段标识（`key`）不可改，且三个标识带语义**：`design` 的关卡通过时留存 To-Be 基线；`accept` 的关卡通过时留存已发布版本，且通过后才可标记项目完成（没有 `accept` 时取最后一个带关卡的阶段）；`intake` **排在第一位时**这个阶段按需求承接走（21 节），排在别处或不出现时不生效，项目仍按普通关卡走。
 
 ### 5.3 状态模型
 
@@ -222,6 +238,8 @@ CTO 评审的是全公司的技术方案，本来就跨越所有项目。PM、BH
 |---|---|
 | 阶段 1 且未指派 PM | `admin`（待指派） |
 | 阶段 `in_progress` | `pm` |
+| 承接阶段、还没有 PM（模板第一阶段是承接阶段） | `pmo`（待初级分析或指派） |
+| 技术可行性评估已通过、等 PMO 终审 | `pmo`（待终审） |
 | 阶段 `in_review` | 该关卡的评审角色（`cto` / `handler`） |
 | 项目 `on_hold` / `cancelled` / `done` | 空 |
 
@@ -472,6 +490,68 @@ CREATE TABLE notify_deliveries (                   -- 每个渠道对一条逻�
   last_error      TEXT NOT NULL DEFAULT '',
   PRIMARY KEY (channel_id, kind, project_id, title, day)
 );
+
+-- 需求承接(见第 21 节)。projects 加五列:
+--   lead_pm_id 主负责 PM | triage_done_at / triage_by 初级分析 | final_status / final_review_id 等终审 | cto_support CTO 协助现状(JSON)
+--   intake_passed_at 终审通过、承接完成的时间(为空 = 没走完过承接,见 21.8)
+CREATE TABLE intake_reviews (                    -- 流程是否完整、综合方案总述(每个项目一行)
+  project_id        TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
+  completeness      TEXT NOT NULL DEFAULT '',   -- complete | gaps
+  completeness_note TEXT NOT NULL DEFAULT '',
+  summary           TEXT NOT NULL DEFAULT '',
+  updated_by        TEXT NOT NULL DEFAULT '',
+  updated_at        TIMESTAMPTZ NOT NULL
+);
+CREATE TABLE intake_lines (                      -- 三条推进线:原因、解决方案、负责人
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  line_key   TEXT NOT NULL,                      -- offline | interop | mobile
+  reason     TEXT NOT NULL DEFAULT '',
+  solution   TEXT NOT NULL DEFAULT '',
+  owner_id   TEXT NOT NULL DEFAULT '',           -- 负责人(项目成员)
+  updated_by TEXT NOT NULL DEFAULT '',
+  updated_at TIMESTAMPTZ NOT NULL,
+  PRIMARY KEY (project_id, line_key)
+);
+CREATE TABLE intake_node_plans (                 -- 每个节点的处理状态与说明
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  line_key   TEXT NOT NULL,
+  node_key   TEXT NOT NULL,                      -- 自动诊断给出的节点标识
+  status     TEXT NOT NULL DEFAULT 'pending',    -- pending | planned | na
+  note       TEXT NOT NULL DEFAULT '',
+  updated_by TEXT NOT NULL DEFAULT '',
+  updated_at TIMESTAMPTZ NOT NULL,
+  PRIMARY KEY (project_id, line_key, node_key)
+);
+CREATE TABLE intake_points (                     -- 送 CTO 评估的技术点
+  id         TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  line_key   TEXT NOT NULL DEFAULT '',
+  title      TEXT NOT NULL,
+  note       TEXT NOT NULL DEFAULT '',
+  sort_key   BIGINT NOT NULL DEFAULT 0,
+  created_by TEXT NOT NULL DEFAULT '',
+  created_at TIMESTAMPTZ NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL
+);
+CREATE TABLE intake_assessments (                -- 每一轮评审、每位评审人对每个技术点的结论;历史全部保留
+  review_id  TEXT NOT NULL REFERENCES gate_reviews(id) ON DELETE CASCADE,
+  point_id   TEXT NOT NULL REFERENCES intake_points(id) ON DELETE CASCADE,
+  user_id    TEXT NOT NULL,
+  verdict    TEXT NOT NULL,                      -- feasible | conditional | infeasible
+  note       TEXT NOT NULL DEFAULT '',           -- 附条件的条件,或不可行时的替代方案
+  decided_at TIMESTAMPTZ NOT NULL,
+  PRIMARY KEY (review_id, point_id, user_id)
+);
+CREATE TABLE intake_finals (                     -- PMO 历次终审结论
+  id         TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  review_id  TEXT NOT NULL DEFAULT '',           -- 终审对象:哪一轮技术可行性评估
+  round      SMALLINT NOT NULL DEFAULT 0,
+  decision   TEXT NOT NULL,                      -- passed | passed_with_notes | returned
+  note       TEXT NOT NULL DEFAULT '',
+  decided_by TEXT NOT NULL DEFAULT '',
+  decided_at TIMESTAMPTZ NOT NULL
+);
 ```
 
 **明确不建的东西**：自定义字段引擎、可配置工作流状态机、组织架构表、附件表（P3 再评估）。
@@ -494,7 +574,7 @@ CREATE TABLE notify_deliveries (                   -- 每个渠道对一条逻�
 |---|---|---|---|---|---|---|
 | 查看项目、阶段、工作项、时间线 | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | 查看项目（非成员，已登录） | ✓（默认透明，见待决策 4） | | | | | ✓ |
-| 指派 / 更换 PM、增删 PMO | — | — | — | — | — | ✓ |
+| 指派 / 更换 PM、指定主负责、增删 PMO | — | — | — | — | ✓（PM） | ✓ |
 | 分配 BH | ✓ | — | — | — | — | ✓ |
 | 分配 TH | — | ✓ | — | — | — | ✓ |
 | 修改优先级、截止日、健康度、简报 | ✓ | ✓ | — | — | — | ✓ |
@@ -506,6 +586,12 @@ CREATE TABLE notify_deliveries (                   -- 每个渠道对一条逻�
 | 完成被指派的工作项 | ✓ | ✓ | ✓ | ✓ | — | ✓ |
 | 评论、@提及 | ✓ | ✓ | ✓ | ✓ | — | ✓ |
 | 修改流程定义（To-Be 工作副本：表单与流程图） | ✓ | ✓ | ✓ | ✓ | — | ✓ |
+| 需求承接（21 节）：初级分析 | — | — | — | — | ✓（指派第一位 PM 前） | ✓ |
+| 需求承接：三条推进线的原因 / 方案 / 节点状态 | ✓ | ✓ | 仅自己负责的那条 | 仅自己负责的那条 | — | ✓ |
+| 需求承接：更换推进线负责人、申请 CTO 协助 | ✓ | ✓ | — | — | — | ✓ |
+| 需求承接：响应 CTO 协助（加入） | — | ✓ | — | — | — | ✓ |
+| 需求承接：技术点逐项评估并表决 | 提交 | ✓ | — | — | — | 裁决 |
+| 需求承接：终审（通过 / 有保留通过 / 退回整改） | — | — | — | — | ✓ | ✓ |
 
 口径与现状一致：**登录即可读**；写权限按上表；每个处理函数开头统一调用 `requireProject(sd, action, projectID)`，拒绝返回 403。
 
@@ -527,6 +613,9 @@ CREATE TABLE notify_deliveries (                   -- 每个渠道对一条逻�
 8. 版本快照随关卡自动发生：建项目时存 As-Is；G3 通过时存 To-Be 基线；G6 通过时存已发布版。
 9. 回退：PM / CTO / 管理员可把项目退回到任一已通过的阶段重做（须填原因），其后的阶段重置为待开始，已通过的评审记录保留。
    跳过：CTO / 管理员可把某阶段标记为跳过并继续（须填原因），用于流程很轻、不需要完整评审的小改造。
+10. **承接阶段的评审是技术可行性评估**（21 节），复用同一张评审单，差别有三：提交的准入条件换成"承接方案齐备"（模板里的必交付物在提交时一并记为完成）；
+    表决时对每个技术点给结论，全部有了结论才能通过；通过后阶段**不立即前进**——`final_status = 'pending'` 等 PMO 终审，
+    这期间阶段状态在数据上仍是 `in_review`（方案继续锁定），终审通过才走第 5 条的自动进入下一阶段。
 
 ### 9.2 并发
 
@@ -599,19 +688,26 @@ PM 提交与 CTO 表决同时到达：按锁先后决定先后，结果确定且
 
 | 方法 | 路径 | 权限 | 说明 |
 |---|---|---|---|
-| GET | `/api/projects` | 登录 | `view=mine` 只看自己参与；`pending=cto\|handler\|pm\|admin` 按"待谁处理"筛选；`status`、`q` 按状态与名称筛选 |
+| GET | `/api/projects` | 登录 | `view=mine` 只看自己参与；`pending=cto\|handler\|pm\|pmo\|admin` 按"待谁处理"筛选；`status`、`q` 按状态与名称筛选 |
 | GET | `/api/projects/{id}` | 登录 | 项目 + 阶段 + 成员 + 当前评审 + 工作项统计 + 改善指标 + 经办候选 + 我的能力 |
 | PATCH | `/api/projects/{id}` | PM / CTO / 管理员 | 优先级、改造价值、复杂度、目标完成日、分析报告 |
 | POST | `/api/projects/{id}/status` | 见下 | `{status, note}`：搁置 / 恢复 / 完成（PM / CTO / 管理员）、取消（CTO / 管理员，须填原因，待决评审一并作废） |
-| PUT | `/api/projects/{id}/members` | 见第 8 节 | `{userId, role, action}`；管理员分配全部，CTO 分配 TH（`dev`），PM 分配 BH（`handler`）；第一位 PM 到岗时阶段 1 启动 |
+| PUT | `/api/projects/{id}/members` | 见第 8 节 | `{userId, role, action, lead?}`；管理员分配全部，PMO 指派 PM（`lead: true` 指定主负责），CTO 分配 TH（`dev`），PM 分配 BH（`handler`）；第一位 PM 到岗时阶段 1 启动 |
 | PATCH | `/api/auth/profile` | 登录 | `{displayName?, department?}` 改自己的显示名与部门；岗位与系统角色仍由管理员维护 |
 | POST | `/api/auth/password` | 登录 | `{oldPassword, newPassword}` 改自己的密码，改完吊销该账号的其他会话。管理员建号的账号首次登录必须先走这里，此前除身份、改资料、改密码、注销外的接口一律 403 `PASSWORD_CHANGE_REQUIRED` |
 | POST | `/api/projects/{id}/stages/{seq}/enter` | PM / CTO / 管理员 | 回退到某阶段（须填原因），其后阶段重置 |
 | POST | `/api/projects/{id}/stages/{seq}/skip` | CTO / 管理员 | 跳过当前阶段（须填原因） |
 | GET | `/api/projects/{id}/reviews` | 登录 | 历次评审轮次（新到旧，含每人一票） |
 | POST | `/api/projects/{id}/reviews` | PM / CTO / 管理员 | `{summary}` 提交当前阶段评审 |
-| POST | `/api/reviews/{id}/decide` | 本轮评审人（或补票、管理员裁决） | `{decision: approve\|reject, comment}`，驳回必须填意见 |
+| POST | `/api/reviews/{id}/decide` | 本轮评审人（或补票、管理员裁决） | `{decision: approve\|reject, comment, points?}`，驳回必须填意见；`points` 是承接阶段对技术点的结论 `[{pointId, verdict, note}]`，通过前每个技术点都要有结论 |
 | POST | `/api/reviews/{id}/withdraw` | PM / CTO / 管理员 | 撤回待决评审 |
+| GET | `/api/projects/{id}/intake` | 登录 | 需求承接的完整视图（21 节）：环节、诊断、三条推进线、技术点与各轮结论、终审记录、缺项、我的能力 |
+| PUT | `/api/projects/{id}/intake/triage` | PMO / 管理员 | `{value, complexity, priority, dueDate, conclusion, completeness, completenessNote, done}` 初级分析；`done` 要求必填项齐备 |
+| PUT | `/api/projects/{id}/intake/solution` | PM / CTO / 管理员；某条线的负责人只能改自己那条 | `{completeness?, completenessNote?, summary?, lines:[{key, reason?, solution?, ownerId?}], nodes:[{line, key, status, note?}]}` 只传要改的部分；只能在 PM 推进时改 |
+| POST | `/api/projects/{id}/intake/points`、PATCH / DELETE `/api/intake/points/{id}` | 同上 | 技术点的增、改（`{title?, line?, note?}`）、删；评估进行中不能改 |
+| PUT | `/api/reviews/{id}/assessment` | 本轮评审人 | `{points:[{pointId, verdict, note}]}` 存结论草稿（可以先存一部分） |
+| POST | `/api/projects/{id}/intake/cto-support` | 见请求体 | `{action: request\|withdraw\|join\|release, note?}`：申请（PM 等，须写事项）/ 撤回 / 加入（CTO）/ 结束 |
+| POST | `/api/projects/{id}/intake/final` | PMO / 管理员 | `{decision: passed\|passed_with_notes\|returned, note}` 终审；后两种必须写意见 |
 | GET | `/api/reviews/pending` | 登录 | 我还能表决的待决评审 |
 | GET / POST | `/api/projects/{id}/items` | 见第 8 节 | 工作项（父子结构 + 关系）/ 创建 |
 | PATCH / DELETE | `/api/items/{id}` | 见第 8 节 | 改字段与状态（带 `version` 做乐观并发）/ 删除（必交付物不可删） |
@@ -633,7 +729,7 @@ PM 提交与 CTO 表决同时到达：按锁先后决定先后，结果确定且
 | POST | `/api/admin/notify-channels/{id}/test` | 管理员 | 发一条测试消息，同步返回结果 |
 | GET / POST | `/api/projects/export.csv` | 登录 | 项目清单 CSV（带 BOM，Excel 直接打开）；GET 导出全部或 `?status=`，POST `{ids}` 导出所选且顺序一致 |
 | GET | `/api/projects/{id}/export` | 登录 | 单个项目的完整报告：Markdown（默认）或 `?format=json` |
-| GET | `/api/overview`、`/api/admin/overview` | 登录 | 组合聚合（后者沿用旧大屏路径）；`full=1` 时附加趋势、PM 负载、申报部门、系统涉及度、最新动态 |
+| GET | `/api/overview`、`/api/admin/overview` | 登录 | 组合聚合（后者沿用旧大屏路径）；`full=1` 时附加趋势、PM 负载、申报部门、系统涉及度、最新动态、需求承接（全池诊断与承接积压） |
 
 约定：权限不足 403、状态不允许 400、冲突 409；权限校验先于状态校验（无权的人拿不到项目状态信息）。
 删除流程（`DELETE /api/processes/{id}`、`/api/admin/processes/{id}`，仅管理员，两条路由共用一个处理函数）会连同它的流程项目及全部关联记录一并删除，界面必须二次确认。删掉的东西在库里不留痕，所以成败各在后端日志里写一行（谁删了哪条，或失败原因）；失败时不再把内部错误原文返回给浏览器。
@@ -657,6 +753,8 @@ backend/
   metrics.go            流程改善指标 ComputeMetrics()、经办候选 HandlerHints()
   store_project.go      建表、建项目、存量迁移 EnsureProjects()、事件与通知写入、批量读取与视图组装
   reviews.go · reviews_http.go   关卡引擎（提交 / 表决 / 撤回 / 通过联动）与接口
+  intake.go · intake_store.go · intake_http.go · intake_review.go · intake_export.go
+                          需求承接(21 节):自动诊断与规则 / 表与视图 / 承接方案的接口 / 逐点评估与终审 / 报告里的承接一节
   projects.go           路由注册、项目列表与详情、基本信息、状态、成员、回退、跳过、时间线
   overview.go           组合聚合(基础部分 + full=1 的趋势 / 负载 / 来源 / 系统 / 最新动态)
   export.go             项目清单 CSV、单个项目的 Markdown / JSON 报告
@@ -680,10 +778,12 @@ backend/
 /                      收集表单（现状保留）；顶栏入口：未登录「登录」、已登录「工作台」
 /login                 唯一的登录页：任何页面未登录都来这里，登录成功一律进 /work
 /work                  工作台（登录后首页）：一张按动作分组的清单，有内容才成卡
-                         待我评审（评审人）| 待我指派（管理员）| 等我推进（PM）| 我的任务（所有人）
+                         待我评审（评审人）| 待我初析与指派（PMO、管理员）| 待我终审（PMO、管理员）
+                         等我推进（PM）| 我的任务（所有人）
                          右栏：在途 / 参与的项目；需要关注（管理员、CTO、PM）
-/projects              流程项目组合：看板（按阶段分组）/ 列表 / 时间线
+/projects              流程项目组合：顶部「全池诊断」；看板（按阶段分组）/ 列表；「待 PMO 处理」筛选
 /projects/[id]         项目工作区（页内标签）
+                         承接（需求承接：进度轨 + 自动诊断 + 当前环节的面板；只在项目有承接阶段时存在，停在承接阶段时默认落在这里）
                          概览（阶段进度 + 关卡状态 + 成员 + 健康度 + 最新简报）
                          计划（工作项看板 / 列表；按阶段、负责人、状态筛选）
                          评审（当前关卡：提交或表决；历史轮次与意见）
@@ -699,7 +799,7 @@ backend/
 /admin/channels        后台 · 通知渠道
 /me                    「我的」：手机底部 Tab 栏的第四页；宽屏访问会回 /work
 /monitor               数据大屏（全维度：六个核心数、近 6 个月趋势、阶段分布、在途健康度、
-                        项目经理负载、申报部门 TOP5、线上系统涉及度、最新动态；可全屏）
+                        项目经理负载、申报部门 TOP5、线上系统涉及度、需求承接（全池诊断）、最新动态；可全屏）
 ```
 
 - **应用外壳**：所有登录后的页面共用一个外壳（`components/shell/app-shell.tsx`），后台只是其中的第二组导航。桌面上是左侧悬浮侧栏，平板（768–1180）收成图标条，手机换成底部 Tab 栏（工作台 / 项目 / 通知 / 我的）。导航分两组：「工作空间」= 工作台 / 流程项目 / 通知 / 数据大屏；「系统管理」= 后台五个分区，只有管理员看得到。数据大屏是全屏页，不套外壳。导航定义在 `lib/shell-nav.ts`。
@@ -825,7 +925,8 @@ P0+P1 是"能用"的最小闭环：没有任务拆解，但 PM / CTO / 经办已
 | 日志与排障：每个请求一行的访问日志、请求编号、操作审计、panic 恢复、浏览器与 Next 服务端的日志上报、页面错误边界（20 节） | `backend/logging.go`；`frontend/lib/client-logger.ts`、`instrumentation.ts`、`app/error.tsx`、`app/global-error.tsx` |
 | 前端：项目看板、项目工作区（概览 / 计划 / 评审 / 流程 / 动态）、通知中心 | `frontend/components/projects/`、`inbox/` |
 | 前端：统一应用外壳（侧栏 / 图标条 / 底部 Tab 栏）、唯一登录页、清单式工作台、后台五个分区各自的地址与统一页头（14 节） | `frontend/components/shell/`、`auth/`、`admin/`、`ui/data-table.tsx`；`lib/shell-nav.ts`、`lib/workbench.ts` |
-| 测试：规则单元测试；连真实数据库、走真实路由的多角色全生命周期、模板配置、渠道投递、导出与级联删除、存量迁移测试 | `backend/*_test.go` |
+| 需求承接（21 节）：自动诊断、PMO 初级分析与指派、PM 三条推进线、CTO 逐点技术可行性评估、PMO 终审；全池诊断、大屏面板、导出 | `backend/intake*.go`；`frontend/components/projects/intake-*.tsx`、`lib/intake.ts` |
+| 测试：规则单元测试；连真实数据库、走真实路由的多角色全生命周期、模板配置、渠道投递、导出与级联删除、存量迁移、需求承接全流程测试 | `backend/*_test.go` |
 
 **实现时定下来的几处（已同步回前文）**
 
@@ -834,11 +935,12 @@ P0+P1 是"能用"的最小闭环：没有任务拆解，但 PM / CTO / 经办已
 - 回退与跳过是两个接口（12 节）；没有做单独的"手工基线化 / 发布"接口，快照完全由关卡触发。
 - 评审人缺位回退系统管理员；环境变量引导的管理员（没有用户行）可以直接裁决但不能作为评审人留票（9.1）。
 - 取消项目时，仍在等待的评审一并作废。
-- "待谁处理"（`pendingOn`）是派生字段：未指派 PM → `admin`；阶段进行中 → `pm`；评审中 → 该关卡的评审角色。
+- "待谁处理"（`pendingOn`）是派生字段：未指派 PM → `admin`（承接阶段的项目是 `pmo`）；阶段进行中 → `pm`；评审中 → 该关卡的评审角色；承接阶段等终审 → `pmo`。
 - **模板改动只影响新建项目**的实现方式：`projects.template` 保存立项时的模板快照，引擎里所有"第几个阶段叫什么、由谁评审、怎么表决"的判断都走项目快照；旧项目没有快照，按内置模板处理（它们本来就是按内置模板建的）。存量流程迁移一律按内置模板建项目，与后台当前模板无关。
 - 大屏的阶段分布按**阶段标识**归并：后台改过模板后，新旧项目的同一个阶段落在同一格，名称与顺序取当前模板。
 - 通知渠道默认只转发节点性事件；"任务指派"等要显式勾选。实现中发现钉钉加签被二次 URL 编码（真实接口会拒绝），由单元测试抓出并修正。
 - 实现中发现 P0–P2 的回归：每条流程提交后都会自动立项，`projects.process_id` 的外键让"删除流程"直接失败；P3 改为级联删除并补了确认与连库用例。
+- **需求承接（2026-11-26）**：挂在第一个阶段上而不是另起一套，G1 的评审单就是技术可行性评估；"优先程度"只约束三条推进线的顺序，不做硬性前置；"流程是否完整"保留为人工核对；不可行的技术点不阻断通过但必须给替代方案。系统里没有 PMO 岗位时由管理员兜底。哪些是用户定的、哪些是我的判断，逐条记在 21 节。
 - **应用外壳（2026-11-25）**：登录成功一律进 `/work`，不留"回到原页面"的例外——目前站内没有带着目标地址跳到登录页的链接。手机端加了「我的」页收数据大屏、提交流程、管理后台、个人信息与退出。外壳的内容区不设 `z-index`、背景层退到最底：内容区一旦自成层级，页面里弹出的对话框会被压在侧栏下面。
 - **泳道列数按内容区宽度判断**：Tailwind 编译后不带原生的 `@layer`，工具类排在整张样式表的最末尾，同一个元素上单个类名的选择器总被工具类盖住；容器查询规则要带上 `.board-lanes >` 才能接管列数。
 - 部署脚本的公网自检改为核对 `/admin/processes`：`/admin` 现在只是重定向，取不到构建指纹。
@@ -912,6 +1014,109 @@ P0+P1 是"能用"的最小闭环：没有任务拆解，但 PM / CTO / 经办已
 - 上报来的浏览器日志谁都能发，只能当线索，不能当事实依据。
 - 轮询接口的成功请求在默认级别下不记；想知道「某个读接口有没有被调用」要临时开 DEBUG。
 - 这一套要部署之后才在生产生效。此前的线上版本各层都不记请求，那时出的问题查不出来就是查不出来了。
+
+---
+
+## 21. 需求承接（2026-11-26）
+
+**起因**：用户要求在"业务流程收集完成之后、改造实施之前"加一段固定的承接流程——PMO 先做初级分析，完成后指派一名或多名 PM；
+PM 负责整体推进（流程是否完整；线下节点转线上、系统不互通、线上节点移动化各自的原因与解决方案），可以指派多名 BH、申请 CTO 协助，
+最后给出全部线上化与移动化的综合方案；CTO 评估技术可行性；整体流程与方案交回 PMO 终审。
+
+### 21.1 挂在哪里
+
+不另起一套，挂在阶段模板的**第一个阶段**上（内置模板的「分析立项」，标识 `intake`）。只有标识为 `intake` 的阶段排在第一位时才生效——
+初级分析与指派发生在 PM 到岗之前，只有第一阶段能等。排在别处或不出现时项目仍按普通关卡走：旧模板立项的存量项目、以及后台把模板改成
+没有承接阶段之后新建的项目，都是管理员指派 PM 的老路。
+
+### 21.2 环节
+
+环节是派生字段 `phase`（不落库），由阶段状态、有没有 PM、是否完成初级分析、等不等终审判出来（`intakePhase`）：
+
+```
+收集完成 ─▶ triage          ─▶ assign      ─▶ advance     ─▶ assess            ─▶ final        ─▶ done
+            待 PMO 初级分析    待指派 PM      PM 按优先级推进  技术可行性评估        待 PMO 终审       承接完成
+                 │ 没做初级分析、没有 PM     │ 已初析、没有 PM  │ 第一位 PM 到岗      │ 提交评估        │ 评估通过       │ 终审通过
+                 └── 管理员可以不做初级分析直接指派 ──────────────┘
+                                                   ▲────────── 终审退回整改：回到 advance，重提后另起一轮 ──────────┘
+```
+
+### 21.3 自动诊断
+
+流程一提交就按收集数据算出三类节点各有多少（`Diagnose`，纯函数）。口径与「流程改善指标」里的断点、流程图里的虚线完全一致：
+
+| 类别 | 口径 | 解决顺序 |
+|---|---|---|
+| 线下节点 | 办理方式为「线下办理」的步骤；会签按内部子步骤计 | ① 第一优先 |
+| 系统不互通节点 | 与上一步系统不同、且标注了「数据不互通」。上一步是会签时取各方最后一个子步骤逐一比较，任一不同即算；上一步是线下时不涉及 | ② 第二优先 |
+| 无法实现移动端节点 | 线上办理且「不支持移动端」 | ③ 第三优先 |
+
+同一节点可能同时计入两类。诊断的基准是**立项时**的流程（As-Is 快照）；承接页同时给出当前工作副本里还剩多少。
+节点标识带长度前缀（`m:<长度>:<id>`、`c:<步骤>:<长度>:<id>`，没有 ID 的按位置 `m:#n`），不会碰撞。
+
+**三个优先级怎么用**：用户给的是"优先程度为：优先解决线下节点转线上，系统不互通，线上节点移动化"。落地为三条推进线按这个顺序
+排列与编号，界面写明顺序的依据（先定下哪些节点转为线上，才能确定最终的跨系统衔接、以及需要移动化的线上节点范围）。
+它约束的是方案推进与呈现的顺序，不要求 PM 做完前一条才能填后一条。
+
+### 21.4 各环节的规则
+
+1. **初级分析**（PMO；管理员兜底）：改造价值、复杂度、优先级、目标完成日、流程是否完整（结构完整 / 有缺口 + 缺口说明）、分析结论。
+   可以随时保存；「完成初级分析」要求价值、复杂度、完整性、分析结论齐备。PMO 必须完成初级分析才能指派第一位 PM。
+   初级分析在指派第一位 PM 时锁定，之后价值与复杂度由 PM 维护。
+2. **指派 PM**（PMO；管理员兜底）：一名或多名，其中一名主负责——第一位到岗的是主负责，可以改；主负责离开后取最早到岗的。
+   指派后阶段 1 进入进行中。之后 PMO 仍可增补 PM、更换主负责；最后一名 PM 被移除时阶段回到待开始，重新等指派。
+3. **PM 推进**：PM / CTO / 管理员能改全部；PM 可以把某条推进线交给项目里的一位 BH / TH 负责，负责人只能改自己那条的原因、方案与节点状态，
+   不能换负责人、不能提交评估。每条线 = 现状（自动诊断出的节点）→ 原因 → 解决方案；逐个节点标处理状态（待定 / 方案已定 / 无需处理）与说明。
+   提交评估的准入条件（`intakeMissing`）：流程是否完整已确认；每条有节点的线都写了原因与解决方案；只要有节点，就要有综合方案总述
+   与至少一个技术点；改造价值与复杂度已评估。
+4. **申请 CTO 协助**：PM 在推进中写明事项发起，通知全部 CTO；CTO 响应加入后记入团队与动态。还没人响应的申请可以撤回；
+   PM 或协助中的 CTO 可以结束。承接通过时仍在进行的协助自动结束。
+5. **技术可行性评估**（CTO）：就是 G1 这一轮评审单（9.1 第 10 条）。对每个技术点给结论——可行 / 有条件可行（必须写条件）/
+   不可行（必须给替代方案）。结论可以先存草稿；复评（第 2 轮起）可以一键沿用上一轮的结论，只重评变过的。
+   总体结论：全部可行 = 通过，否则 = 有条件通过，条件与替代方案随方案带给 PMO。
+6. **终审**（PMO；管理员兜底）：通过归档 / 有保留通过（必须写保留意见）/ 退回整改（必须写原因与整改要求）。通过 → G1 通过、进入阶段 2；
+   退回 → 回到 PM 推进，PM 修改后重新提交，另起一轮评估。终审记录全部保留。评估通过后超过 3 天没人终审，每天提醒一次 PMO 与管理员。
+
+### 21.5 待谁处理、通知与数据
+
+- 承接阶段还没有 PM、或评估已通过在等终审时，`pendingOn = pmo`（5.3）。
+- 通知：新流程提交（PMO 与管理员）、加入 CTO 协助、评估通过待终审、终审通过 / 退回、推进线指定了负责人；都落到项目的「承接」标签。
+- 数据是第 7 节里的六张 `intake_*` 表与 `projects` 上的六列，全部随项目级联删除。
+- **存量项目**（升级后才有的功能）：还停在阶段 1 的项目自然进入对应的环节（没有 PM 的等 PMO 初级分析；已有 PM 的直接从 PM 推进接上）；
+  已经通过阶段 1 的项目记为「无承接记录」，不显示「承接」标签，导出里如实说明。判断只看 `projects.intake_passed_at`
+  （PMO 终审通过时写入）——这个阶段被直接跳过的项目同样没有承接记录。
+
+### 21.6 界面与导出
+
+- **项目工作区**多一个「承接」标签，排在最前；项目停在承接阶段时默认落在它上面。顶部是六步进度轨与自动诊断，主体按环节换成
+  当前角色的面板，右栏是承接团队、CTO 协助与承接动态（同一个人的连续细碎改动并成一条）。
+- **工作台**：「待我初析与指派」「待我终审」两组（PMO 与管理员）；评审直达「承接」。
+- **流程项目**：顶部「全池诊断」通栏、待初析提示条、卡片上的三类节点数与构成条、「待 PMO 处理」筛选。
+- **数据大屏**：「需求承接 · 全池诊断」面板（三类节点合计、各涉及多少条流程、待初析与待终审的个数）；最新动态里上墙的是
+  完成初级分析、提交 / 通过技术可行性评估、终审通过 / 退回。
+- **导出**：清单 CSV 末尾四列（承接环节、三类节点数）；Markdown 报告的「需求承接」一节（初级分析、诊断、三条推进线、技术点与逐轮评估、
+  终审记录）；JSON 的 `intake` 与 `intakeAssessments`。
+
+### 21.7 实现时定下来的
+
+用户明确给的：这段承接流程的六个步骤与各自的人；CTO 评估的是技术可行性；三类节点的自动诊断；三个优先级的先后。
+下面这些是实现时的设计判断，**用户没有逐条确认过**：
+
+- 挂在第一个阶段上而不是另建模块：复用关卡引擎、事件、通知、导出，G1 的评审单就是技术可行性评估。
+- "优先程度"只约束顺序，不做硬性前置。
+- "流程是否完整"保留为人工核对项（结构完整 / 有缺口），系统不自动判断流程结构是否完整。
+- 不可行的技术点不阻断通过，但必须给替代方案，总体结论为有条件通过。
+- 节点的处理状态是进度标注，不要求全部"方案已定"才能提交。
+- 系统里还没有 PMO 岗位时，由管理员兜底做初级分析、指派与终审。
+- PMO 可以指派任何项目的 PM，与项目有没有承接阶段无关。
+- 等终审期间阶段在数据上仍是"评审中"，界面与导出里说成「待终审」。
+
+### 21.8 已知限制
+
+- 诊断按立项时的流程算；之后修改流程定义不会改写已经写好的原因与方案，已被消除的节点不能再标注（界面提示刷新）。
+- 承接阶段被跳过、项目被取消或搁置时承接暂停，恢复后从原环节继续；跳过会清掉等终审的状态。
+- 被指定为推进线负责人的 BH 只收到通知，工作台不单列"我负责的推进线"。
+- 外部通知渠道默认不转发承接的个人向通知（推进线指定负责人等），要转发需在渠道里勾选。
 
 ---
 

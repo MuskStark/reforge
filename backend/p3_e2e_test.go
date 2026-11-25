@@ -119,11 +119,13 @@ func TestStageTemplateConfig(t *testing.T) {
 	if len(a["stages"].([]any)) != 7 || dig(a, "stages", "1", "name") != "需求确认" || dig(a, "stages", "0", "mode") != ModeAny {
 		t.Fatalf("已立项项目不应随模板变化: %+v", a["stages"])
 	}
-	e.completeRequired(pm, pidA, 1)
+	// 承接阶段(第一阶段)的准入条件是承接方案齐备,通过后还要 PMO 终审才进入下一阶段
+	e.fillIntake(pm, pidA)
 	e.must(pm, "PATCH", "/api/projects/"+pidA, map[string]any{"value": "高", "complexity": "中"})
 	_, rvA := e.submit(pm, pidA, "旧项目立项")
 	got(t, rvA, "mode", ModeAny) // A 的 G1 仍是或签
-	got(t, e.must(cto1, "POST", "/api/reviews/"+rvA["id"].(string)+"/decide", map[string]any{"decision": "approve"}), "status", ReviewApproved)
+	got(t, e.approveIntake(cto1, pidA, rvA["id"].(string)), "status", ReviewApproved)
+	e.finalIntake(admin, pidA, FinalPassed, "")
 	got(t, e.project(pm, pidA), "currentStage", float64(2))
 	// A 的 G2 仍是经办会签
 	e.completeRequired(pm, pidA, 2)
@@ -171,14 +173,16 @@ func TestStageTemplateConfig(t *testing.T) {
 	if !sawRequired || !sawTask {
 		t.Fatalf("新阶段的必交付物与默认任务应生成工作项: %+v", items)
 	}
-	// B 的 G1 是会签:两位 CTO 都要通过
-	e.completeRequired(pm, pidB, 1)
+	// B 的 G1 是会签:两位 CTO 都要通过,之后同样要 PMO 终审
+	e.fillIntake(pm, pidB)
 	e.must(pm, "PATCH", "/api/projects/"+pidB, map[string]any{"value": "中", "complexity": "低"})
 	_, rvB := e.submit(pm, pidB, "新项目立项")
 	got(t, rvB, "mode", ModeAll)
 	rid := rvB["id"].(string)
-	got(t, e.must(cto1, "POST", "/api/reviews/"+rid+"/decide", map[string]any{"decision": "approve"}), "status", ReviewPending)
-	got(t, e.must(cto2, "POST", "/api/reviews/"+rid+"/decide", map[string]any{"decision": "approve"}), "status", ReviewApproved)
+	got(t, e.approveIntake(cto1, pidB, rid), "status", ReviewPending)
+	got(t, e.approveIntake(cto2, pidB, rid), "status", ReviewApproved)
+	e.finalIntake(admin, pidB, FinalPassed, "")
+	got(t, e.project(pm, pidB), "currentStage", float64(2))
 	// B 的阶段 2 现在是 CTO 或签:经办已不能表决,一位 CTO 即可
 	e.completeRequired(pm, pidB, 2)
 	_, rvB2 := e.submit(pm, pidB, "需求评审")
@@ -377,24 +381,26 @@ func TestNotifyChannelsDelivery(t *testing.T) {
 	}
 
 	// 同一件事通知了两个人,群里只出现一行
-	e.completeRequired(pm, pid, 1)
+	e.fillIntake(pm, pid)
 	e.must(pm, "PATCH", "/api/projects/"+pid, map[string]any{"value": "中", "complexity": "低"})
 	e.submit(pm, pid, "请立项")
 	deliver()
 	got := inbox()
-	if len(got) != 4 || strings.Count(got[3], "提交了 G1 立项评审") != 1 || !strings.Contains(got[3], "报销流程") {
+	if len(got) != 4 || strings.Count(got[3], "提交了技术可行性评估") != 1 || !strings.Contains(got[3], "报销流程") {
 		t.Fatalf("发给两位 CTO 的同一通知在群里应只有一行: %v", got)
 	}
-	// 停用渠道后不再转发
+	// 停用渠道后不再转发(评估通过、等终审、终审通过这几条都不该发出去)
 	e.must(admin, "PATCH", path+"/"+cid, map[string]any{"enabled": false})
-	e.must(cto1, "POST", "/api/reviews/"+lastReviewID(e, pm, pid)+"/decide", map[string]any{"decision": "approve"})
+	e.approveIntake(cto1, pid, lastReviewID(e, pm, pid))
+	e.finalIntake(admin, pid, FinalPassed, "")
 	deliver()
 	if len(inbox()) != 4 {
 		t.Fatalf("停用的渠道不应发送: %v", inbox())
 	}
-	// 发送失败:记下错误并安排重试;没到重试时间不再发
+	// 重新启用后只转发此后的新通知:上一轮积压的不回放
 	e.must(admin, "PATCH", path+"/"+cid, map[string]any{"enabled": true})
 	time.Sleep(5 * time.Millisecond)
+	// 发送失败:记下错误并安排重试;没到重试时间不再发
 	e.completeRequired(pm, pid, 2)
 	e.submit(pm, pid, "需求已核对")
 	mu.Lock()
@@ -527,8 +533,10 @@ func TestExportAndDeleteProcess(t *testing.T) {
 	e.must(pm, "POST", "/api/projects/"+pid+"/comments", map[string]any{"body": "先对齐口径"})
 	e.must(pm, "POST", "/api/projects/"+pid+"/updates", map[string]any{"progress": "立项材料已备齐", "next": "提交评审", "health": "at_risk", "risks": "合同系统排期紧"})
 	e.completeRequired(pm, pid, 1)
+	e.fillIntake(pm, pid)
 	e.submit(pm, pid, "请立项，基线见附件")
-	e.must(cto, "POST", "/api/reviews/"+lastReviewID(e, pm, pid)+"/decide", map[string]any{"decision": "approve", "comment": "同意立项"})
+	e.approveIntakeWith(cto, pid, lastReviewID(e, pm, pid), "同意立项")
+	e.finalIntake(admin, pid, FinalPassedNotes, "电子签章服务的预算落实后复核")
 
 	// CSV:一行数据,字段与界面口径一致
 	code, hdr, body = e.raw(pm, "/api/projects/export.csv")
@@ -536,13 +544,19 @@ func TestExportAndDeleteProcess(t *testing.T) {
 	if code != 200 || len(rows) != 2 || !strings.Contains(hdr.Get("Content-Disposition"), "attachment") {
 		t.Fatalf("清单不符: %d %q", code, body)
 	}
-	for _, want := range []string{"采购流程", "孙申报", "进行中", "2. 需求确认", "待 PM 处理", "高", "高", "中", "有风险", "李经理", "2026-12-31"} {
+	for _, want := range []string{"采购流程", "孙申报", "进行中", "2. 需求确认", "待 PM 处理", "高", "高", "中", "有风险", "李经理", "2026-12-31",
+		// 需求承接的三列追加在末尾:承接已完成;立项时诊断出线下 1、系统不互通 1、无法移动端 1
+		"承接完成", ",1,1,1"} {
 		if !strings.Contains(rows[1], want) {
 			t.Errorf("清单应包含 %q: %s", want, rows[1])
 		}
 	}
-	// 未完成的必交付物逐项列出;流程改善指标同口径
-	if !strings.Contains(rows[1], "现状核对记录、需求清单、KPI 基线") || !strings.Contains(rows[1], "17%") {
+	if !strings.Contains(rows[0], "承接环节,线下节点,系统不互通节点,无法实现移动端节点") {
+		t.Errorf("清单表头应有需求承接的四列: %s", rows[0])
+	}
+	// 未完成的必交付物逐项列出;流程改善指标同口径。
+	// 承接阶段(第一阶段)的「分析报告」已由承接方案满足,不再出现在未完成清单里
+	if !strings.Contains(rows[1], "现状核对记录、需求清单、KPI 基线") || strings.Contains(rows[1], "分析报告") || !strings.Contains(rows[1], "17%") {
 		t.Errorf("清单的必交付物 / 指标不符: %s", rows[1])
 	}
 	// 状态过滤
@@ -564,6 +578,30 @@ func TestExportAndDeleteProcess(t *testing.T) {
 		if !strings.Contains(md, want) {
 			t.Errorf("报告应包含 %q", want)
 		}
+	}
+	// 需求承接一节:环节与初析、自动诊断、三条推进线及其诊断出的节点、技术点与评估结论、终审。
+	// 测试流程的三类节点:线下 = 第 4 步;不互通 = 第 3 步(与会签交接出来的两个系统都不互通);无法移动端 = 会签里的「合同会签」
+	section := md
+	if i := strings.Index(md, "## 需求承接"); i >= 0 {
+		if j := strings.Index(md[i:], "## 评审记录"); j > 0 {
+			section = md[i : i+j]
+		}
+	}
+	for _, want := range []string{
+		"## 需求承接", "承接完成", "结构完整：退回路径已补全", "全部节点线上办理、系统互通并支持移动端",
+		"线下节点 1、系统不互通节点 1、无法实现移动端节点 1；当前工作副本：1、1、1",
+		"第一优先 | 线下节点转线上 | 第4步 纸质归档 |",
+		"第二优先 | 系统不互通 | 第3步 归档 · OA · 与「财务共享平台、合同系统」不互通 |",
+		"第三优先 | 线上节点移动化 | 第2步 合同会签（法务部） · 合同系统 |",
+		"发票影像识别准确率", "| 张技术 | 可行 |", "有保留通过", "电子签章服务的预算落实后复核",
+	} {
+		if !strings.Contains(section, want) {
+			t.Errorf("报告的「需求承接」应包含 %q:\n%s", want, section)
+		}
+	}
+	// 承接阶段模板里的必交付物「分析报告」在提交评估时记为完成,工作项表里如实体现
+	if !strings.Contains(md, "分析报告 ★必交付 | 分析立项 | 交付物 | 完成 |") {
+		t.Errorf("承接阶段的「分析报告」应在提交评估时记为完成")
 	}
 	// 或签由首位表决人定论:另一位 CTO 没投票,报告里如实写"未表决"而不是"待表决"
 	if !strings.Contains(md, "| 未表决 |") || strings.Contains(md, "| 待表决 |") {
@@ -588,7 +626,7 @@ func TestExportAndDeleteProcess(t *testing.T) {
 	}
 	// 事件说明:提交评审带关卡、轮次与说明;时间线新到旧
 	i1, i2 := strings.Index(md, "同意立项"), strings.Index(md, "## 时间线")
-	if i1 < 0 || i2 < 0 || !strings.Contains(md[i2:], "提交评审 | 关卡「G1 立项评审」，第 1 轮；说明：请立项，基线见附件") ||
+	if i1 < 0 || i2 < 0 || !strings.Contains(md[i2:], "提交评审 | 技术可行性评估（G1 立项评审），第 1 轮；说明：请立项，基线见附件") ||
 		!strings.Contains(md[i2:], "提交简报 | 健康度：正常 → 有风险") || !strings.Contains(md[i2:], "新建工作项 | 梳理接口清单") ||
 		!strings.Contains(md[i2:], "修改项目信息 | 修改了 优先级、改造价值、复杂度、目标完成日") {
 		t.Errorf("时间线说明不符:\n%s", md[i2:])
@@ -597,12 +635,18 @@ func TestExportAndDeleteProcess(t *testing.T) {
 		t.Errorf("时间线应新到旧:\n%s", md[i2:])
 	}
 
-	// JSON 导出:同一份数据的结构化形式
+	// JSON 导出:同一份数据的结构化形式。需求承接带完整视图与历次评估结论
 	j := e.must(pm, "GET", "/api/projects/"+pid+"/export?format=json", nil)
 	if dig(j, "project", "name") != "采购流程" || len(dig(j, "project", "can").(map[string]any)) != 0 ||
 		len(dig(j, "reviews").([]any)) != 1 || len(dig(j, "items").([]any)) < 5 || len(dig(j, "comments").([]any)) != 2 ||
 		len(dig(j, "events").([]any)) == 0 || len(dig(j, "versions").([]any)) != 1 {
 		t.Fatalf("JSON 导出不符: %+v", j)
+	}
+	if dig(j, "intake", "phase") != PhaseDone || len(dig(j, "intake", "lines").([]any)) != 3 ||
+		len(dig(j, "intake", "points").([]any)) != 1 || dig(j, "intake", "points", "0", "assessments", "0", "verdict") != VerdictFeasible ||
+		len(dig(j, "intake", "finals").([]any)) != 1 || dig(j, "intake", "finals", "0", "decision") != FinalPassedNotes ||
+		len(dig(j, "intakeAssessments").([]any)) != 1 || dig(j, "intakeAssessments", "0", "round") != float64(1) {
+		t.Fatalf("JSON 导出的需求承接不符: %+v", dig(j, "intake"))
 	}
 	e.fail(pm, "GET", "/api/projects/nope/export", nil, 404, "不存在")
 
@@ -613,6 +657,9 @@ func TestExportAndDeleteProcess(t *testing.T) {
 		{"projects", "id = $1"}, {"project_stages", "project_id = $1"}, {"project_members", "project_id = $1"},
 		{"gate_reviews", "project_id = $1"}, {"work_items", "project_id = $1"}, {"comments", "project_id = $1"},
 		{"events", "project_id = $1"}, {"notifications", "project_id = $1"},
+		// 需求承接的各张表随项目级联删除
+		{"intake_reviews", "project_id = $1"}, {"intake_lines", "project_id = $1"}, {"intake_node_plans", "project_id = $1"},
+		{"intake_points", "project_id = $1"}, {"intake_finals", "project_id = $1"},
 	}
 	count := func(q, arg string) int {
 		e.t.Helper()
@@ -621,6 +668,14 @@ func TestExportAndDeleteProcess(t *testing.T) {
 			e.t.Fatal(err)
 		}
 		return n
+	}
+	// 技术点的评估结论挂在评审上:评审随项目删除后无法再按项目找,所以先记下评审 ID
+	var reviewID string
+	if err := e.st.db.QueryRow(`SELECT id FROM gate_reviews WHERE project_id = $1`, pid).Scan(&reviewID); err != nil || reviewID == "" {
+		t.Fatalf("删除前应有 1 轮评审: %q %v", reviewID, err)
+	}
+	if n := count("intake_assessments WHERE review_id = $1", reviewID); n != 1 {
+		t.Fatalf("删除前应有 1 条技术点评估结论,得到 %d", n)
 	}
 	// 一票已投、一票未投:删除时两类表决记录都要清掉
 	if n := count(`gate_reviewers gr JOIN gate_reviews r ON r.id = gr.review_id WHERE r.project_id = $1`, pid); n != 2 {
@@ -648,7 +703,12 @@ func TestExportAndDeleteProcess(t *testing.T) {
 			t.Errorf("关联记录未清干净(%s): %d 行", q, n)
 		}
 	}
+	// 技术点的评估结论随评审级联删除
+	if n := count("intake_assessments WHERE review_id = $1", reviewID); n != 0 {
+		t.Errorf("intake_assessments 里应没有该项目的残留,还有 %d 行", n)
+	}
 	e.fail(pm, "GET", "/api/projects/"+pid, nil, 404, "不存在")
+	e.fail(pm, "GET", "/api/projects/"+pid+"/intake", nil, 404, "不存在")
 	e.fail(pm, "GET", "/api/processes/"+procID, nil, 404, "不存在")
 	// 再删一次:流程已不存在
 	e.fail(admin, "DELETE", "/api/admin/processes/"+procID, nil, 404, "不存在")

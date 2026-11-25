@@ -9,8 +9,8 @@ import { useEffect, useMemo, useState } from "react";
 import { AtSign, Megaphone, MessageSquare } from "lucide-react";
 import { toast } from "sonner";
 import { authFetch } from "@/lib/auth";
-import type { ProjectComment, ProjectEvent } from "@/lib/types";
-import { HEALTH_LABEL, ITEM_STATUS_LABEL, ITEM_TYPE_LABEL, PROJECT_ROLE_LABEL, STATUS_LABEL, fmtDateTime } from "@/lib/labels";
+import type { FinalDecision, ProjectComment, ProjectEvent } from "@/lib/types";
+import { FINAL_LABEL, HEALTH_LABEL, ITEM_STATUS_LABEL, ITEM_TYPE_LABEL, PROJECT_ROLE_LABEL, STATUS_LABEL, fmtDateTime } from "@/lib/labels";
 import { Avatar } from "@/components/projects/stage-rail";
 import type { DetailCtx } from "@/components/projects/project-detail";
 import { cn } from "@/lib/utils";
@@ -29,6 +29,9 @@ const n = (v: unknown): number => (typeof v === "number" ? v : Number(v) || 0);
 /** 把一条事件翻译成一句话 */
 export function eventLine(e: ProjectEvent): { title: string; body?: string; tone?: "ok" | "warn" | "info" | "amber" } {
   const d = e.detail ?? {};
+  // 需求承接阶段的评审是技术可行性评估:按这个说法,不提关卡名
+  const intake = d.intake === true;
+  const review = intake ? "技术可行性评估" : s(d.gate);
   switch (e.kind) {
     case "project_created":
       return { title: d.migrated === true ? "由存量跟进数据迁入，建立流程项目" : "流程提交，自动立项", tone: "info" };
@@ -37,25 +40,58 @@ export function eventLine(e: ProjectEvent): { title: string; body?: string; tone
     case "project_status":
       return { title: `项目状态：${STATUS_LABEL[s(d.from) as keyof typeof STATUS_LABEL] ?? s(d.from)} → ${STATUS_LABEL[s(d.to) as keyof typeof STATUS_LABEL] ?? s(d.to)}`, body: s(d.note), tone: d.to === "done" ? "ok" : d.to === "cancelled" ? "warn" : undefined };
     case "member_added":
-      return { title: `${s(d.user)} 加入项目，担任${s(d.role)}`, tone: "ok" };
+      return { title: `${s(d.user)} 加入项目，担任${s(d.role)}${d.lead === true ? "（主负责）" : ""}`, tone: "ok" };
     case "member_removed":
-      return { title: `${s(d.user)} 不再担任${s(d.role)}`, tone: "warn" };
+      return { title: `${s(d.user)} 不再担任${s(d.role)}${d.last === true ? "；项目回到待指派" : ""}`, tone: "warn" };
     case "review_submitted":
       return {
-        title: `提交 ${s(d.gate)}（第 ${n(d.round)} 轮）`,
+        title: `${intake ? "提交" : "提交 "}${review}（第 ${n(d.round)} 轮）`,
         body: [s(d.summary), Array.isArray(d.reviewers) && d.reviewers.length ? `评审人：${d.reviewers.map(String).join("、")}` : ""].filter(Boolean).join("\n"),
         tone: "info",
       };
     case "review_voted":
-      return { title: `${d.decision === "approve" ? "表决通过" : "表决驳回"} ${s(d.gate)}`, body: s(d.comment), tone: d.decision === "approve" ? "ok" : "warn" };
+      return { title: `${d.decision === "approve" ? "表决通过" : "表决驳回"}${intake ? "" : " "}${review}`, body: s(d.comment), tone: d.decision === "approve" ? "ok" : "warn" };
     case "review_approved":
-      return { title: `${s(d.gate)} 通过`, body: s(d.stageName) ? `「${s(d.stageName)}」完成` : undefined, tone: "ok" };
+      return {
+        title: d.awaitingFinal === true || intake ? "技术可行性评估通过" : `${s(d.gate)} 通过`,
+        body: d.awaitingFinal === true || intake ? "等待 PMO 终审；终审通过后才进入下一阶段" : s(d.stageName) ? `「${s(d.stageName)}」完成` : undefined,
+        tone: "ok",
+      };
     case "review_rejected":
-      return { title: `${s(d.gate)} 被驳回，退回修改`, tone: "warn" };
+      return { title: intake ? "技术可行性评估被退回，PM 修改后重新提交" : `${s(d.gate)} 被驳回，退回修改`, tone: "warn" };
     case "review_withdrawn":
-      return { title: `撤回 ${s(d.gate)} 第 ${n(d.round)} 轮评审` };
+      return { title: intake ? `撤回技术可行性评估（第 ${n(d.round)} 轮）` : `撤回 ${s(d.gate)} 第 ${n(d.round)} 轮评审` };
     case "review_admin_decided":
       return { title: `管理员裁决：${d.decision === "approve" ? "通过" : "驳回"}`, body: s(d.comment), tone: "amber" };
+    // 需求承接
+    case "intake_triaged": {
+      const fields = Array.isArray(d.fields) ? d.fields.map(String).join("、") : "";
+      return { title: d.done === true ? "完成初级分析" : "填写初级分析", body: fields ? `填写了 ${fields}` : undefined, tone: d.done === true ? "ok" : undefined };
+    }
+    case "intake_solution_updated":
+      return { title: "更新承接方案", body: Array.isArray(d.sections) ? d.sections.map(String).join("、") : undefined };
+    case "intake_point_added":
+      return { title: `新增技术点「${s(d.title)}」` };
+    case "intake_point_updated":
+      return { title: `修改技术点「${s(d.title)}」` };
+    case "intake_point_deleted":
+      return { title: `删除技术点「${s(d.title)}」`, tone: "warn" };
+    case "intake_assessed":
+      return { title: `给出 ${n(d.count)} 个技术点的结论（第 ${n(d.round)} 轮）`, tone: "info" };
+    case "intake_final_passed":
+      return { title: `PMO 终审：${FINAL_LABEL[s(d.decision) as FinalDecision] ?? s(d.decision)}`, body: s(d.note), tone: d.decision === "passed" ? "ok" : "amber" };
+    case "intake_final_returned":
+      return { title: "PMO 终审：退回整改", body: s(d.note), tone: "warn" };
+    case "intake_line_assigned":
+      return { title: `把「${s(d.lineTitle)}」交给 ${s(d.user)} 负责`, tone: "info" };
+    case "cto_support_requested":
+      return { title: "申请 CTO 协助", body: s(d.note), tone: "info" };
+    case "cto_support_withdrawn":
+      return { title: "撤回 CTO 协助申请" };
+    case "cto_support_joined":
+      return { title: `${s(d.user)} 加入协助`, tone: "ok" };
+    case "cto_support_released":
+      return { title: s(d.user) ? `${s(d.user)} 结束协助` : "CTO 协助已结束", body: s(d.note) };
     case "stage_rewound":
       return { title: `退回到「${s(d.to)}」（原在「${s(d.from)}」）`, body: s(d.reason), tone: "warn" };
     case "stage_skipped":
@@ -97,7 +133,8 @@ export function eventLine(e: ProjectEvent): { title: string; body?: string; tone
   }
 }
 
-const TONE_DOT = {
+/** 事件色调对应的时间线圆点;承接标签页右栏的动态也用它 */
+export const TONE_DOT = {
   ok: "bg-[color:var(--green)]",
   warn: "bg-[color:var(--red)]",
   info: "bg-[color:var(--indigo)]",

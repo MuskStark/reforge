@@ -104,6 +104,7 @@ func TestComputeMetrics_IgnoresStaleAndUnnamed(t *testing.T) {
 func TestCapsMatrix(t *testing.T) {
 	member := actor{SysRole: "member"}
 	cto := actor{SysRole: "member", JobRole: RoleCTO}
+	pmo := actor{SysRole: "member", JobRole: RoleViewer}
 	admin := actor{SysRole: "admin"}
 	cases := []struct {
 		name  string
@@ -117,24 +118,43 @@ func TestCapsMatrix(t *testing.T) {
 		{"项目经理不能表决", member, []string{RolePM}, func(c caps) bool { return c.canReview(RoleCTO) || c.canReview(RoleHandler) }, false},
 		{"项目经理可推进", member, []string{RolePM}, func(c caps) bool { return c.manage() }, true},
 		{"项目经理不能指派 PM", member, []string{RolePM}, func(c caps) bool { return c.assign() }, false},
+		{"项目经理不能初析、不能终审", member, []string{RolePM}, func(c caps) bool { return c.triage() || c.finalReview() }, false},
 		{"CTO 全局可评 CTO 关卡", cto, nil, func(c caps) bool { return c.canReview(RoleCTO) }, true},
 		{"CTO 不能评经办关卡", cto, nil, func(c caps) bool { return c.canReview(RoleHandler) }, false},
 		{"CTO 可跳过阶段、不能指派 PM", cto, nil, func(c caps) bool { return c.skip() && !c.assign() }, true},
-		{"管理员全权", admin, nil, func(c caps) bool { return c.assign() && c.skip() && c.manage() && c.canReview(RoleHandler) }, true},
+		{"CTO 不能初析、不能终审", cto, nil, func(c caps) bool { return c.triage() || c.finalReview() }, false},
+		{"管理员全权", admin, nil, func(c caps) bool {
+			return c.assign() && c.skip() && c.manage() && c.canReview(RoleHandler) && c.triage() && c.finalReview()
+		}, true},
+		// PMO 是全局岗位:初级分析、指派 PM、终审都不需要逐项目授予;除此以外仍然只读
+		{"PMO 可初析、指派 PM、终审", pmo, nil, func(c caps) bool { return c.triage() && c.assign() && c.finalReview() }, true},
+		{"PMO 不能推进、表决、跳过", pmo, nil, func(c caps) bool {
+			return c.manage() || c.canReview(RoleCTO) || c.canReview(RoleHandler) || c.skip() || c.editFlow()
+		}, false},
+		{"PMO 不能分配 BH / TH / PMO 成员", pmo, nil, func(c caps) bool { return c.canAssign(RoleHandler) || c.canAssign(RoleDev) || c.canAssign(RoleViewer) }, false},
+		{"PMO 被加进项目后仍然只读(不参与评论与工作项)", pmo, []string{RoleViewer}, func(c caps) bool { return c.member() || c.manage() }, false},
 		{"观察者只读", member, []string{RoleViewer}, func(c caps) bool { return c.member() }, false},
-		{"非成员没有任何写权", member, nil, func(c caps) bool { return c.member() || c.manage() }, false},
+		{"只有 PMO 成员角色、岗位不是 PMO:没有初析与终审权", member, []string{RoleViewer}, func(c caps) bool { return c.triage() || c.assign() || c.finalReview() }, false},
+		{"非成员没有任何写权", member, nil, func(c caps) bool { return c.member() || c.manage() || c.assign() }, false},
 	}
 	for _, tc := range cases {
-		if got := tc.check(capsFor(tc.a, tc.roles)); tc.want != got {
+		c := capsFor(tc.a, tc.roles)
+		if got := tc.check(c); tc.want != got {
 			t.Errorf("%s: got %v want %v", tc.name, got, tc.want)
+		}
+		// 交给前端的能力表必须和实际判定一致
+		f := c.flags()
+		if f["triage"] != c.triage() || f["final"] != c.finalReview() || f["isPMO"] != c.PMO || f["assign"] != c.assign() {
+			t.Errorf("%s: 能力表与实际判定不一致: %v", tc.name, f)
 		}
 	}
 }
 
-// 流程的权限分配按类划分:管理员全部;CTO 科技侧经办(开发实施);项目经理业务侧经办(经办)
+// 流程的权限分配按类划分:管理员全部;PMO 指派 PM;CTO 分配科技侧经办(开发实施);项目经理分配业务侧经办(经办)
 func TestAssignMatrix(t *testing.T) {
 	member := actor{SysRole: "member"}
 	all := []string{RolePM, RoleHandler, RoleDev, RoleViewer}
+	none := map[string]bool{RolePM: false, RoleHandler: false, RoleDev: false, RoleViewer: false}
 	cases := []struct {
 		name  string
 		a     actor
@@ -143,12 +163,14 @@ func TestAssignMatrix(t *testing.T) {
 	}{
 		{"管理员分配全部", actor{SysRole: "admin"}, nil, map[string]bool{RolePM: true, RoleHandler: true, RoleDev: true, RoleViewer: true}},
 		{"CTO 只分配科技侧经办", actor{SysRole: "member", JobRole: RoleCTO}, nil, map[string]bool{RolePM: false, RoleHandler: false, RoleDev: true, RoleViewer: false}},
+		{"PMO 只指派项目经理", actor{SysRole: "member", JobRole: RoleViewer}, nil, map[string]bool{RolePM: true, RoleHandler: false, RoleDev: false, RoleViewer: false}},
 		{"项目经理只分配业务侧经办", member, []string{RolePM}, map[string]bool{RolePM: false, RoleHandler: true, RoleDev: false, RoleViewer: false}},
-		{"经办不能分配任何人", member, []string{RoleHandler}, map[string]bool{RolePM: false, RoleHandler: false, RoleDev: false, RoleViewer: false}},
-		{"开发实施不能分配任何人", member, []string{RoleDev}, map[string]bool{RolePM: false, RoleHandler: false, RoleDev: false, RoleViewer: false}},
-		{"观察者不能分配任何人", member, []string{RoleViewer}, map[string]bool{RolePM: false, RoleHandler: false, RoleDev: false, RoleViewer: false}},
-		{"非成员不能分配任何人", member, nil, map[string]bool{RolePM: false, RoleHandler: false, RoleDev: false, RoleViewer: false}},
-		{"CTO 兼项目经理:两侧经办都能分配", actor{SysRole: "member", JobRole: RoleCTO}, []string{RolePM}, map[string]bool{RolePM: false, RoleHandler: true, RoleDev: true, RoleViewer: false}},
+		{"经办不能分配任何人", member, []string{RoleHandler}, none},
+		{"开发实施不能分配任何人", member, []string{RoleDev}, none},
+		{"只有 PMO 成员角色、岗位不是 PMO:不能分配任何人", member, []string{RoleViewer}, none},
+		{"非成员不能分配任何人", member, nil, none},
+		{"CTO 兼项目经理:两侧经办都能分配,仍不能指派 PM", actor{SysRole: "member", JobRole: RoleCTO}, []string{RolePM}, map[string]bool{RolePM: false, RoleHandler: true, RoleDev: true, RoleViewer: false}},
+		{"PMO 兼项目经理:能指派 PM,也能分配 BH,不能分配 TH 与 PMO 成员", actor{SysRole: "member", JobRole: RoleViewer}, []string{RolePM}, map[string]bool{RolePM: true, RoleHandler: true, RoleDev: false, RoleViewer: false}},
 	}
 	for _, tc := range cases {
 		c := capsFor(tc.a, tc.roles)
@@ -204,11 +226,26 @@ func TestLegacyFromProcess(t *testing.T) {
 func TestPendingOn(t *testing.T) {
 	tpl := defaultStageTemplates()
 	active := &Project{Status: ProjActive, CurrentStage: 1}
-	if got := pendingOnOf(tpl, active, ProjectStage{Seq: 1, Status: StagePending}, false); got != "admin" {
-		t.Fatalf("未指派项目经理时应为 admin,得到 %q", got)
+	// 承接阶段(内置模板的第一阶段):还没指派 PM 时等 PMO 初级分析与指派
+	if got := pendingOnOf(tpl, active, ProjectStage{Seq: 1, Status: StagePending}, false); got != PendingPMO {
+		t.Fatalf("承接阶段未指派 PM 时应为 pmo,得到 %q", got)
+	}
+	// 没有承接阶段的模板(后台把第一阶段换成了别的):仍是管理员指派
+	plain := append([]StageTemplate{tpl[1]}, tpl[2:]...)
+	if got := pendingOnOf(plain, active, ProjectStage{Seq: 1, Status: StagePending}, false); got != "admin" {
+		t.Fatalf("没有承接阶段时应为 admin,得到 %q", got)
 	}
 	if got := pendingOnOf(tpl, active, ProjectStage{Seq: 1, Status: StageInProgress}, true); got != "pm" {
 		t.Fatalf("阶段进行中应为 pm,得到 %q", got)
+	}
+	// 技术可行性评估已通过、等 PMO 终审
+	awaiting := &Project{Status: ProjActive, CurrentStage: 1, FinalStatus: FinalPending}
+	if got := pendingOnOf(tpl, awaiting, ProjectStage{Seq: 1, Status: StageInReview}, true); got != PendingPMO {
+		t.Fatalf("等 PMO 终审时应为 pmo,得到 %q", got)
+	}
+	awaiting.Status = ProjOnHold
+	if got := pendingOnOf(tpl, awaiting, ProjectStage{Seq: 1, Status: StageInReview}, true); got != "" {
+		t.Fatalf("已搁置的项目不应有待办人,得到 %q", got)
 	}
 	review := &Project{Status: ProjActive, CurrentStage: 3}
 	if got := pendingOnOf(tpl, review, ProjectStage{Seq: 3, Status: StageInReview}, true); got != RoleCTO {

@@ -84,17 +84,23 @@ func stepNotInterop(steps []Step, i int) bool {
 	return prev.Mode == "online" && strings.TrimSpace(prev.Online.SystemName) != cur
 }
 
-// laneBroken 会签分支内相邻两个已命名子步骤的衔接是否为断点
-func laneBroken(prev, cur SubStep) bool {
-	if subOnline(prev) != subOnline(cur) {
-		return true
-	}
-	if !subOnline(prev) {
+// laneNotInterop 会签分支内相邻两个子步骤(均为线上)的系统是否不互通:
+// 系统不同,且后一步标注了「数据不互通」。自动诊断(intake.go)与断点计数共用这一口径
+func laneNotInterop(prev, cur SubStep) bool {
+	if !subOnline(prev) || !subOnline(cur) {
 		return false
 	}
 	p := strings.TrimSpace(prev.Online.SystemName)
 	return p != "" && p != strings.TrimSpace(cur.Online.SystemName) &&
 		cur.Online.DataInteroperable != nil && !*cur.Online.DataInteroperable
+}
+
+// laneBroken 会签分支内相邻两个已命名子步骤的衔接是否为断点
+func laneBroken(prev, cur SubStep) bool {
+	if subOnline(prev) != subOnline(cur) {
+		return true
+	}
+	return laneNotInterop(prev, cur)
 }
 
 func ratio(a, b int) float64 {

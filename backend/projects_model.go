@@ -91,6 +91,15 @@ type Project struct {
 	CreatedAt    time.Time       `json:"createdAt"`
 	UpdatedAt    time.Time       `json:"updatedAt"`
 
+	// ---- 需求承接(intake.go)----
+	LeadPmID       string          `json:"leadPmId"`     // 主负责 PM;为空或已不是 PM 时取最早到岗的 PM
+	TriageDoneAt   *time.Time      `json:"triageDoneAt"` // PMO 完成初级分析的时间
+	TriageBy       string          `json:"-"`            // 完成初级分析的人(users.id)
+	FinalStatus    string          `json:"finalStatus"`  // "" | pending:技术可行性评估已通过,正在等 PMO 终审
+	FinalReviewID  string          `json:"-"`            // 等终审的那一轮评审
+	CtoSupport     json.RawMessage `json:"ctoSupport"`   // 申请 CTO 协助的现状(CtoSupport)
+	IntakePassedAt *time.Time      `json:"-"`            // PMO 终审通过、承接完成的时间;为空 = 这个项目没走完过承接(见 intakeLegacy)
+
 	tpl []StageTemplate // 立项时的阶段模板快照(scanProject 解析;对外经 Stages 输出)
 }
 
@@ -276,15 +285,18 @@ type HandlerHint struct {
 // ProjectView 项目完整视图(列表与详情共用)
 type ProjectView struct {
 	Project
-	PendingOn    string          `json:"pendingOn"`
-	Applicant    string          `json:"applicant"`
-	CountersignN int             `json:"countersignN"`
-	HasPM        bool            `json:"hasPm"`
-	Stages       []StageView     `json:"stages"`
-	Members      []MemberView    `json:"members"`
-	Review       *GateReview     `json:"review"`
-	Stats        ItemStats       `json:"stats"`
-	HandlerHints []HandlerHint   `json:"handlerHints"`
-	Metrics      FlowMetrics     `json:"metrics"`
-	Can          map[string]bool `json:"can"`
+	PendingOn    string        `json:"pendingOn"`
+	Applicant    string        `json:"applicant"`
+	CountersignN int           `json:"countersignN"`
+	HasPM        bool          `json:"hasPm"`
+	LeadPmName   string        `json:"leadPmName"`
+	Stages       []StageView   `json:"stages"`
+	Members      []MemberView  `json:"members"`
+	Review       *GateReview   `json:"review"`
+	Stats        ItemStats     `json:"stats"`
+	HandlerHints []HandlerHint `json:"handlerHints"`
+	Metrics      FlowMetrics   `json:"metrics"`
+	// 需求承接的摘要(所处环节与三类节点数);项目的第一个阶段不是承接阶段时为 nil
+	Intake *IntakeSummary  `json:"intake"`
+	Can    map[string]bool `json:"can"`
 }

@@ -15,8 +15,10 @@ import { cn } from "@/lib/utils";
 
 const API = "/api/admin/stage-templates";
 
-/** 两个带语义的阶段标识:标识不可改,所以这条规则跟着阶段走 */
+/** 带语义的阶段标识:标识不可改,所以这条规则跟着阶段走。
+ *  intake(需求承接)只有排在第一位时生效——初析与指派发生在 PM 到岗之前,后面的阶段等不了 */
 function meaningOf(key: string): string | null {
+  if (key === "intake") return "需求承接：PMO 初级分析 → PM 按优先级推进 → CTO 技术可行性评估 → PMO 终审";
   if (key === "design") return "通过时留存 To-Be 基线";
   if (key === "accept") return "通过时留存已发布版本，且通过后才能标记项目完成";
   return null;
@@ -191,7 +193,11 @@ export function StageTemplates() {
                         <span className="text-[16px] font-semibold text-[color:var(--red-deep)]">未命名阶段</span>
                       )}
                       {t.key && <span className="font-data text-xs text-[color:var(--ink-3)]">{t.key}</span>}
-                      {meaning && <span className={cn("badge !h-[20px] text-[11px]", t.key === "design" ? "badge-indigo" : "badge-green")}>{meaning}</span>}
+                      {meaning && (
+                        <span className={cn("badge !h-[20px] text-[11px]", t.key === "design" ? "badge-indigo" : t.key === "intake" ? "badge-amber" : "badge-green")} title={t.key === "intake" ? "只有排在第一位时生效：这一段发生在 PM 到岗之前" : undefined}>
+                          {meaning}
+                        </span>
+                      )}
                       {i === 0 && <span className="badge badge-plain !h-[20px] text-[11px]">项目起点</span>}
                       <span className="ml-auto flex shrink-0 items-center gap-0.5 text-[color:var(--ink-3)]">
                         <span className="mr-1 hidden text-xs sm:inline">{open ? "收起" : "编辑"}</span>

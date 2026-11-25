@@ -74,6 +74,13 @@ var notifyKindCatalog = []struct {
 	{"review_rejected", "评审驳回"},
 	{"review_withdrawn", "评审撤回"},
 	{"review_aging", "评审积压"},
+	{"intake_final_pending", "技术可行性评估通过、待 PMO 终审"},
+	{"intake_final_aging", "终审积压"},
+	{"intake_final_passed", "PMO 终审通过"},
+	{"intake_final_returned", "PMO 终审退回"},
+	{"cto_support_requested", "申请 CTO 协助"},
+	{"cto_support_joined", "CTO 加入协助"},
+	{"intake_line_assigned", "推进线指定负责人"},
 	{"overdue", "逾期提醒"},
 	{"update_due", "简报到期"},
 	{"health", "健康度变化"},
@@ -86,14 +93,15 @@ var notifyKindCatalog = []struct {
 	{"commented", "任务有新评论"},
 }
 
-// defaultChannelKinds 新渠道默认转发的事件:节点性的、管理层关心的;指派 / 评论这类个人向的不进群
+// defaultChannelKinds 新渠道默认转发的事件:节点性的、管理层关心的;指派 / 评论这类个人向的不进群。
+// 需求承接里「PMO 终审通过 / 退回」是立项的节点性事件,默认转发;待终审与协助申请默认只发站内通知。
 var defaultChannelKinds = []string{
 	"project_created", "review_submitted", "review_approved", "review_rejected", "review_aging",
-	"overdue", "stage_rewound", "stage_skipped", "project_status",
+	"overdue", "stage_rewound", "stage_skipped", "project_status", "intake_final_passed", "intake_final_returned",
 }
 
 // recurringNotifyKinds 按天重复提醒的类型:站内通知的幂等键带日期,外部渠道同样每天只提醒一次
-var recurringNotifyKinds = []string{"overdue", "review_aging", "update_due"}
+var recurringNotifyKinds = []string{"overdue", "review_aging", "update_due", "intake_final_aging"}
 
 const (
 	maxChannelAttempts = 6

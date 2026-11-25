@@ -5,7 +5,7 @@
  * 暗色玻璃。口径:
  *  - 顶部六个数:累计收集 / 在途项目 / 待评审 / 逾期预警 / 改造完成 / 按期完成率与平均周期
  *  - 第二行:近 6 个月趋势、在途项目的阶段分布、在途健康度构成
- *  - 第三行:PM 负载、申报部门 TOP5、线上系统涉及度
+ *  - 第三行:PM 负载、申报部门 TOP5、线上系统涉及度、需求承接(全池诊断与承接积压)
  *  - 底部:最新动态
  * 数据来自 /api/admin/overview?full=1,每 30 秒刷新。需登录;未登录或会话失效去 /login。
  */
@@ -112,6 +112,18 @@ export default function MonitorPage() {
       })),
     [d],
   );
+  // 需求承接:全池诊断按解决顺序排列,与需求池、承接页同一种配色(绿 = 线下、靛蓝 = 不互通、琥珀 = 无法移动端)
+  const intakeRows = useMemo<BarRow[]>(
+    () => [
+      { label: "线下节点", value: d?.intake?.offline ?? 0, color: C.green, note: `涉及 ${d?.intake?.offlineAffected ?? 0} 条` },
+      { label: "系统不互通", value: d?.intake?.interop ?? 0, color: C.indigo, note: `涉及 ${d?.intake?.interopAffected ?? 0} 条` },
+      { label: "无法移动端", value: d?.intake?.mobile ?? 0, color: C.amber, note: `涉及 ${d?.intake?.mobileAffected ?? 0} 条` },
+    ],
+    [d],
+  )
+  const intakeAside = d?.intake
+    ? [d.intake.triage > 0 ? `待初析 ${d.intake.triage}` : "", d.intake.final > 0 ? `待终审 ${d.intake.final}` : ""].filter(Boolean).join(" · ") || "承接无积压"
+    : undefined;
   const pmRows = useMemo(
     () => (d?.pmLoad ?? []).map((x) => ({ label: x.name, value: x.active, note: loadNote(x.overdue, x.blocked) })),
     [d],
@@ -253,8 +265,8 @@ export default function MonitorPage() {
           </Panel>
         </div>
 
-        {/* 第三行:负责人负载 / 申报部门 / 线上系统 */}
-        <div className="grid gap-3.5 py-3.5 md:grid-cols-3">
+        {/* 第三行:负责人负载 / 申报部门 / 线上系统 / 需求承接 */}
+        <div className="grid gap-3.5 py-3.5 md:grid-cols-2 xl:grid-cols-4">
           <Panel title="PM 负载（在办）" accent={C.amber} aside={d?.pmLoad?.length ? `人均在办 ${avg(d.pmLoad.map((x) => x.active))} 个` : undefined}>
             {pmRows.length ? <Bars rows={pmRows} unit=" 个" color={C.cyan} /> : <Empty text="还没有 PM 在推进项目" />}
           </Panel>
@@ -267,6 +279,9 @@ export default function MonitorPage() {
             ) : (
               <Empty />
             )}
+          </Panel>
+          <Panel title="需求承接 · 全池诊断" accent={C.green} aside={intakeAside}>
+            {d?.intake?.projects ? <Bars rows={intakeRows} unit=" 个" wide /> : <Empty text="还没有进入需求承接的流程" />}
           </Panel>
         </div>
 
@@ -580,6 +595,9 @@ const EVENT_LABEL: Record<string, string> = {
   stage_skipped: "跳过阶段",
   project_status: "变更项目状态",
   project_updated: "修改项目信息",
+  intake_triaged: "完成初级分析",
+  intake_final_passed: "PMO 终审通过",
+  intake_final_returned: "PMO 退回整改",
 };
 const EVENT_DOT: Record<string, string> = {
   project_created: C.green,
@@ -589,7 +607,27 @@ const EVENT_DOT: Record<string, string> = {
   review_withdrawn: C.amber,
   stage_rewound: C.red,
   stage_skipped: C.amber,
+  intake_triaged: C.indigo,
+  intake_final_passed: C.green,
+  intake_final_returned: C.red,
 };
+
+/** 上墙的一句话。需求承接阶段的评审是技术可行性评估:事件里带着 intake 标记的,不叫「评审」 */
+function eventLabel(e: OverviewEvent): string {
+  const intake = e.detail?.intake === true || e.detail?.awaitingFinal === true;
+  switch (e.kind) {
+    case "review_submitted":
+      return intake ? "提交技术可行性评估" : EVENT_LABEL.review_submitted;
+    case "review_approved":
+      return intake ? "技术可行性评估通过" : EVENT_LABEL.review_approved;
+    case "review_rejected":
+      return intake ? "技术可行性评估退回" : EVENT_LABEL.review_rejected;
+    case "review_withdrawn":
+      return intake ? "撤回技术可行性评估" : EVENT_LABEL.review_withdrawn;
+    default:
+      return EVENT_LABEL[e.kind] ?? e.kind;
+  }
+}
 
 function ago(iso: string, now: Date) {
   const s = Math.max(0, (now.getTime() - new Date(iso).getTime()) / 1000);
@@ -606,7 +644,7 @@ function EventItem({ e, now }: { e: OverviewEvent; now: Date }) {
       <span className="font-data" style={{ color: INK3 }}>
         {e.actor || "系统"}
       </span>
-      <span>{EVENT_LABEL[e.kind] ?? e.kind}</span>
+      <span>{eventLabel(e)}</span>
       <span className="max-w-[12em] truncate" style={{ color: INK }}>
         {e.projectName}
       </span>

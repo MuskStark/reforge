@@ -7,6 +7,8 @@ import { cn } from "@/lib/utils";
 /**
  * 玻璃对话框:表单类弹层用它,而不是 AnimatedModal——后者带 3D 透视入场动画,
  * 表单控件放在 preserve-3d 容器里会发虚。Esc 或点击遮罩关闭。
+ * 弹层原地渲染(不走 portal),所以要挂在带背景模糊的卡片之外:glass-card 这类祖先是 fixed 定位的包含块,
+ * 把它放在卡片里,遮罩和弹层都会被困在卡片范围内。
  */
 export function Dialog({
   onClose,

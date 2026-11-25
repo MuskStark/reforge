@@ -21,7 +21,7 @@ var (
 	priorityLabel     = map[string]string{"high": "高", "medium": "中", "low": "低"}
 	healthLabel       = map[string]string{"on_track": "正常", "at_risk": "有风险", "off_track": "已偏离"}
 	stageStatusLabel  = map[string]string{StagePending: "待开始", StageInProgress: "进行中", StageInReview: "评审中", StageApproved: "已通过", StageSkipped: "已跳过"}
-	pendingOnLabel    = map[string]string{"admin": "待指派 PM", "pm": "待 PM 处理", "cto": "待 CTO 评审", "handler": "待 BH 确认"}
+	pendingOnLabel    = map[string]string{"admin": "待指派 PM", "pmo": "待 PMO 处理", "pm": "待 PM 处理", "cto": "待 CTO 评审", "handler": "待 BH 确认"}
 	reviewStatusLabel = map[string]string{ReviewPending: "待决", ReviewApproved: "已通过", ReviewRejected: "已驳回", ReviewWithdrawn: "已撤回"}
 	decisionLabel     = map[string]string{DecisionPending: "待表决", DecisionApprove: "通过", DecisionReject: "驳回"}
 	modeLabel         = map[string]string{ModeAll: "会签", ModeAny: "或签"}
@@ -39,6 +39,11 @@ var (
 		"stage_rewound": "回退阶段", "stage_skipped": "跳过阶段",
 		"item_created": "新建工作项", "item_updated": "修改工作项", "item_status": "变更工作项状态", "item_split": "拆分工作项",
 		"item_deleted": "删除工作项", "comment_added": "发表评论",
+		"intake_triaged": "初级分析", "intake_solution_updated": "更新承接方案", "intake_line_assigned": "指定推进线负责人",
+		"intake_point_added": "新增技术点", "intake_point_updated": "修改技术点", "intake_point_deleted": "删除技术点",
+		"intake_assessed": "评估技术点", "intake_final_passed": "PMO 终审通过", "intake_final_returned": "PMO 终审退回",
+		"cto_support_requested": "申请 CTO 协助", "cto_support_withdrawn": "撤回 CTO 协助申请",
+		"cto_support_joined": "CTO 加入协助", "cto_support_released": "CTO 协助结束",
 		"legacy_analyzed": "完成分析（旧跟进）", "legacy_assigned": "指派跟进人（旧跟进）", "legacy_status": "变更跟进状态（旧跟进）",
 		"legacy_stage": "推进阶段（旧跟进）", "legacy_edited_form": "编辑表单（旧跟进）", "legacy_edited_chart": "编辑流程图（旧跟进）",
 	}
@@ -110,6 +115,8 @@ func (s *postgresStore) handleExportProjectsCSV(w http.ResponseWriter, r *http.R
 		"项目名称", "申报人", "状态", "当前阶段", "待处理", "优先级", "改造价值", "复杂度", "健康度", "PM", "目标完成日",
 		"工作项", "已完成", "逾期", "阻塞", "未完成必交付物",
 		"步骤数", "线下步骤占比", "断点数", "涉及系统数", "移动端支持率", "会签数", "创建时间", "完成时间",
+		// 需求承接:所在环节,以及立项时自动诊断出的三类节点数(追加在末尾,不影响此前各列的位置)
+		"承接环节", "线下节点", "系统不互通节点", "无法实现移动端节点",
 	})
 	for _, pr := range projects {
 		v := bundle.view(pr, nil, caps{})
@@ -127,6 +134,14 @@ func (s *postgresStore) handleExportProjectsCSV(w http.ResponseWriter, r *http.R
 		if pr.CompletedAt != nil {
 			completed = pr.CompletedAt.Local().Format("2006-01-02 15:04")
 		}
+		// 没有承接阶段的项目(后台把第一阶段换成了别的)这三列留空
+		phase, offline, interop, mobile := "", "", "", ""
+		if in := v.Intake; in != nil {
+			phase, offline, interop, mobile = phaseLabel(in.Phase), itoa(in.Offline), itoa(in.Interop), itoa(in.Mobile)
+			if in.Legacy {
+				phase = "无承接记录"
+			}
+		}
 		_ = cw.Write([]string{
 			csvCell(pr.Name), csvCell(v.Applicant), label(projStatusLabel, pr.Status), csvCell(stage), label(pendingOnLabel, v.PendingOn),
 			label(priorityLabel, pr.Priority), pr.Value, pr.Complexity, label(healthLabel, pr.Health), csvCell(strings.Join(pms, "、")), pr.DueDate,
@@ -134,6 +149,7 @@ func (s *postgresStore) handleExportProjectsCSV(w http.ResponseWriter, r *http.R
 			itoa(v.Metrics.Steps), percent(v.Metrics.OfflineShare), itoa(v.Metrics.Breakpoints), itoa(v.Metrics.Systems),
 			percent(v.Metrics.MobileShare), itoa(v.Metrics.Countersigns),
 			pr.CreatedAt.Local().Format("2006-01-02 15:04"), completed,
+			phase, offline, interop, mobile,
 		})
 	}
 	cw.Flush()
@@ -165,6 +181,9 @@ type projectExport struct {
 	Comments    []*Comment        `json:"comments"`
 	Versions    []*ProcessVersion `json:"versions"`
 	Events      []Event           `json:"events"`
+	// 需求承接:完整视图,以及历次评审里各位评审人对技术点的结论;没有承接阶段的项目两者皆为 null
+	Intake            *IntakeView              `json:"intake"`
+	IntakeAssessments []intakeAssessmentExport `json:"intakeAssessments"`
 }
 
 func (s *postgresStore) handleExportProject(w http.ResponseWriter, r *http.Request) {
@@ -279,7 +298,19 @@ func (s *postgresStore) collectExport(r *http.Request, id string, pr *Project) (
 		ex.Events = append(ex.Events, e)
 	}
 	erows.Close()
-	return ex, erows.Err()
+	if err := erows.Err(); err != nil {
+		return nil, err
+	}
+	// 需求承接:项目没有承接阶段时为空(不导出这一段)
+	if ex.Intake, err = s.intakeViewOf(ctx, nil, id); err != nil {
+		return nil, err
+	}
+	if ex.Intake != nil {
+		if ex.IntakeAssessments, err = intakeAssessmentsOf(ctx, s.db, id); err != nil {
+			return nil, err
+		}
+	}
+	return ex, nil
 }
 
 // ---- Markdown 渲染 ----
@@ -400,11 +431,20 @@ func renderProjectMarkdown(ex *projectExport) string {
 		if st.Rounds > 0 {
 			end = orDash(end) + fmt.Sprintf("（第 %d 轮通过）", st.Rounds)
 		}
-		stageRows = append(stageRows, []string{itoa(st.Seq), mdCell(st.Name), gate, rule, label(stageStatusLabel, st.Status),
+		status := label(stageStatusLabel, st.Status)
+		if st.Status == StageInReview && awaitingFinal(&p.Project, st.Seq) {
+			status = "待终审"
+		}
+		stageRows = append(stageRows, []string{itoa(st.Seq), mdCell(st.Name), gate, rule, status,
 			localTime(st.EnteredAt), end, orDash(st.DueDate)})
 	}
 	b.WriteString(mdTable([]string{"序号", "阶段", "出口关卡", "评审规则", "状态", "进入时间", "通过时间", "截止日"}, stageRows))
 	b.WriteString("\n")
+
+	// 需求承接(第一个阶段是承接阶段的项目才有)
+	if intake := intakeSectionMarkdown(ex); intake != "" {
+		b.WriteString(intake)
+	}
 
 	// 评审记录
 	if len(ex.Reviews) > 0 {
@@ -650,8 +690,43 @@ func describeEvent(ex *projectExport, e Event) string {
 	}
 	round := "第 " + itoa(num("round")) + " 轮"
 	switch e.Kind {
+	case "intake_triaged":
+		s := "填写了 " + list("fields")
+		if done, _ := d["done"].(bool); done {
+			s += "；初级分析完成"
+		}
+		return s
+	case "intake_solution_updated":
+		return "更新了 " + list("sections")
+	case "intake_point_added", "intake_point_updated", "intake_point_deleted":
+		return str("title")
+	case "intake_assessed":
+		return round + "，给出 " + itoa(num("count")) + " 个技术点的结论"
+	case "intake_final_passed", "intake_final_returned":
+		s := finalLabel(str("decision")) + " · " + round + "评估"
+		if x := str("note"); x != "" {
+			s += "：" + x
+		}
+		return s
+	case "intake_line_assigned":
+		return "推进线「" + str("lineTitle") + "」交给 " + str("user") + " 负责"
+	case "cto_support_requested":
+		return str("note")
+	case "cto_support_joined":
+		return str("user") + " 加入协助"
+	case "cto_support_released":
+		if str("user") == "" {
+			return str("note")
+		}
+		return str("user") + " 结束协助"
+	case "cto_support_withdrawn":
+		return ""
 	case "review_submitted":
 		s := "关卡「" + str("gate") + "」，" + round
+		if intake, _ := d["intake"].(bool); intake {
+			// 需求承接阶段的评审是技术可行性评估:两个名字都写,关卡名留着对模板
+			s = "技术可行性评估（" + str("gate") + "），" + round
+		}
 		if x := str("summary"); x != "" {
 			s += "；说明：" + x
 		}
@@ -659,11 +734,20 @@ func describeEvent(ex *projectExport, e Event) string {
 	case "review_voted":
 		return label(decisionLabel, str("decision")) + " " + str("comment")
 	case "review_approved", "review_rejected":
-		return "阶段「" + stage("stage") + "」" + round
+		s := "阶段「" + stage("stage") + "」" + round
+		if awaiting, _ := d["awaitingFinal"].(bool); awaiting {
+			s += "；技术可行性评估通过，等待 PMO 终审"
+		} else if intake, _ := d["intake"].(bool); intake {
+			s += "；技术可行性评估被退回，PM 修改后重新提交"
+		}
+		return s
 	case "review_withdrawn", "review_admin_decided":
 		s := round
 		if x := str("decision"); x != "" {
 			s += " " + label(decisionLabel, x)
+		}
+		if intake, _ := d["intake"].(bool); intake {
+			s = "技术可行性评估 " + s
 		}
 		return s + " " + str("comment")
 	case "stage_rewound":
@@ -671,7 +755,14 @@ func describeEvent(ex *projectExport, e Event) string {
 	case "stage_skipped":
 		return "跳过「" + stage("stage") + "」：" + str("reason")
 	case "member_added", "member_removed":
-		return str("user") + " · " + label(projectRoleLabel, str("role"))
+		s := str("user") + " · " + label(projectRoleLabel, str("role"))
+		if lead, _ := d["lead"].(bool); lead {
+			s += "（主负责）"
+		}
+		if last, _ := d["last"].(bool); last {
+			s += "；项目回到待指派"
+		}
+		return s
 	case "item_created":
 		return str("title") + "（" + label(itemTypeLabel, str("type")) + "）"
 	case "item_status":

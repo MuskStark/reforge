@@ -10,7 +10,8 @@ import { CornerUpLeft, FastForward, Undo2 } from "lucide-react";
 import { toast } from "sonner";
 import { authFetch } from "@/lib/auth";
 import type { GateReview, ProjectView } from "@/lib/types";
-import { MODE_LABEL, REVIEW_STATUS_LABEL, STAGE_STATUS_LABEL, fmtDateTime } from "@/lib/labels";
+import { MODE_LABEL, REVIEW_STATUS_LABEL, fmtDateTime } from "@/lib/labels";
+import { inIntakeStage, stageStatusText } from "@/lib/intake";
 import { Avatar } from "@/components/projects/stage-rail";
 import type { DetailCtx } from "@/components/projects/project-detail";
 import { Dialog, DialogActions, DialogHeader, Field } from "@/components/ui/dialog";
@@ -57,6 +58,8 @@ export function ReviewTab({ ctx }: { ctx: DetailCtx }) {
   }, [project.id, project.version, project.stages.map((s) => `${s.seq}:${s.rounds}`).join()]);
 
   const live = project.status === "active";
+  // 项目正停在承接阶段:当前关卡是技术可行性评估,在「承接」标签里做
+  const atIntake = inIntakeStage(project);
   // 当前阶段正在进行的这一轮评审
   const pendingHere = live && cur?.status === "in_review" && review?.status === "pending" && review.stageSeq === cur.seq;
   const iCanVote =
@@ -178,14 +181,24 @@ export function ReviewTab({ ctx }: { ctx: DetailCtx }) {
           <h2 className="flex flex-wrap items-center gap-2 text-[15px] font-semibold text-neutral-900">
             当前关卡
             {cur && <span className="badge badge-plain !h-[20px] text-[11px]">阶段 {cur.seq} · {cur.name}</span>}
-            {cur && <span className="badge badge-blue !h-[20px] text-[11px]">{STAGE_STATUS_LABEL[cur.status]}</span>}
+            {cur && <span className="badge badge-blue !h-[20px] text-[11px]">{stageStatusText(project, cur.status)}</span>}
           </h2>
 
           {!live && <p className="mt-3 text-[13px] text-[color:var(--ink-2)]">项目已{project.status === "done" ? "完成" : project.status === "cancelled" ? "取消" : "搁置"}，不再进行评审。</p>}
           {live && !cur?.gate && <p className="mt-3 text-[13px] text-[color:var(--ink-2)]">「{cur?.name}」没有评审关卡。持续记录运营指标，积累的优化项可以再次立项。</p>}
 
+          {/* 停在承接阶段:这一关是技术可行性评估,提交、逐项评估与表决都在「承接」标签里;这里只留记录与阶段调整 */}
+          {live && atIntake && (
+            <div className="mt-3 flex flex-wrap items-center gap-2.5 rounded-2xl bg-[linear-gradient(180deg,rgba(240,240,255,0.5),rgba(255,255,255,0.45))] px-4 py-3 text-[13px] leading-relaxed text-[color:var(--indigo-deep)] shadow-[inset_0_0_0_0.5px_rgba(88,86,214,0.25)]">
+              <span>当前这一关是{cur?.gate || "技术可行性评估"}，提交、逐项评估与表决都在「承接」标签里进行。</span>
+              <button type="button" onClick={() => ctx.goTab("intake")} className="btn btn-glass ml-auto !h-8 !px-3 text-[12.5px]">
+                去承接
+              </button>
+            </div>
+          )}
+
           {/* 评审中 */}
-          {live && cur?.status === "in_review" && review && (
+          {live && !atIntake && cur?.status === "in_review" && review && (
             <div className="mt-4 rounded-2xl bg-[linear-gradient(180deg,rgba(240,240,255,0.5),rgba(255,255,255,0.45))] p-4 shadow-[inset_0_0_0_0.5px_rgba(88,86,214,0.25)]">
               <div className="flex flex-wrap items-center gap-2">
                 <h3 className="text-[16px] font-bold text-[color:var(--indigo-deep)]">{cur.gate}</h3>
@@ -270,7 +283,7 @@ export function ReviewTab({ ctx }: { ctx: DetailCtx }) {
           )}
 
           {/* 进行中:提交 */}
-          {live && cur?.status === "in_progress" && cur.gate && (
+          {live && !atIntake && cur?.status === "in_progress" && cur.gate && (
             <div className="mt-4 rounded-2xl bg-white/55 p-4 shadow-[inset_0_0_0_0.5px_rgba(255,255,255,0.65),inset_0_0_0_0.5px_rgba(0,0,0,0.04)]">
               <h3 className="text-[15px] font-semibold text-neutral-900">
                 提交「{cur.gate}」
@@ -329,7 +342,7 @@ export function ReviewTab({ ctx }: { ctx: DetailCtx }) {
             </div>
           )}
 
-          {live && cur && (cur.status === "approved" || cur.status === "skipped") && (
+          {live && !atIntake && cur && (cur.status === "approved" || cur.status === "skipped") && (
             <p className="mt-3 text-[13px] text-[color:var(--ink-2)]">本阶段已{cur.status === "skipped" ? "跳过" : "通过"}。</p>
           )}
         </section>
@@ -346,11 +359,13 @@ export function ReviewTab({ ctx }: { ctx: DetailCtx }) {
             <ul className="mt-3 grid gap-2.5">
               {history.map((r) => {
                 const st = project.stages[r.stageSeq - 1];
+                // 承接阶段的那一关是技术可行性评估:两个名字都写,关卡名留着对模板
+                const intake = !!project.intake && project.intake.seq === r.stageSeq;
                 return (
                   <li key={r.id} className="rounded-2xl bg-white/55 p-3.5 shadow-[inset_0_0_0_0.5px_rgba(255,255,255,0.65),inset_0_0_0_0.5px_rgba(0,0,0,0.04)]">
                     <div className="flex flex-wrap items-center gap-2 text-[13px]">
                       <span className="font-semibold text-neutral-900">
-                        {st?.gate ?? st?.name} · 第 {r.round} 轮
+                        {intake ? `技术可行性评估（${st?.gate ?? st?.name}）` : (st?.gate ?? st?.name)} · 第 {r.round} 轮
                       </span>
                       <span className={reviewBadge(r.status)}>{REVIEW_STATUS_LABEL[r.status] ?? r.status}</span>
                       <span className="font-data ml-auto text-[11px] text-[color:var(--ink-3)]">
@@ -426,7 +441,7 @@ export function ReviewTab({ ctx }: { ctx: DetailCtx }) {
                   </span>
                 </span>
                 <span className={cn("shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold", s.status === "approved" ? "bg-[color:var(--green-soft)] text-[color:var(--green-deep)]" : s.status === "skipped" ? "bg-[rgba(120,120,128,0.12)] text-[color:var(--ink-2)]" : s.status === "in_review" ? "bg-[color:var(--indigo-soft)] text-[color:var(--indigo-deep)]" : s.status === "in_progress" ? "bg-[color:var(--tint-soft)] text-[color:var(--tint-deep)]" : "bg-[rgba(120,120,128,0.08)] text-[color:var(--ink-3)]")}>
-                  {STAGE_STATUS_LABEL[s.status]}
+                  {stageStatusText(project, s.status)}
                   {s.rounds > 1 ? ` · ${s.rounds} 轮` : ""}
                 </span>
               </li>

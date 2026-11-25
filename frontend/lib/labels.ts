@@ -1,13 +1,19 @@
 import type {
+  FinalDecision,
   Health,
+  IntakeLineKey,
+  IntakePhase,
   ItemStatus,
   ItemType,
   JobRole,
+  PlanStatus,
   Priority,
   ProjectRole,
   ProjectStatus,
   ProjectView,
   StageStatus,
+  StageView,
+  Verdict,
 } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -37,9 +43,9 @@ export const JOB_ROLE_FULL: Record<JobRole, string> = {
 
 /** 缩写是名称,中文全称放在说明的开头 */
 export const JOB_ROLE_OPTIONS: { value: JobRole; label: string; hint: string }[] = [
-  { value: "viewer", label: "PMO", hint: "项目管理办公室：查看全部项目与数据大屏" },
-  { value: "cto", label: "CTO", hint: "评审立项 / 方案 / 上线 / 验收，全局生效；分配项目里的 TH" },
-  { value: "pm", label: "PM", hint: "项目经理：负责一个流程从立项到上线的推进；分配项目里的 BH" },
+  { value: "viewer", label: "PMO", hint: "项目管理办公室：对每条新流程做初级分析、指派 PM、终审；查看全部项目与数据大屏" },
+  { value: "cto", label: "CTO", hint: "评估技术可行性，评审方案 / 上线 / 验收，全局生效；分配项目里的 TH" },
+  { value: "pm", label: "PM", hint: "项目经理：承接需求、负责一个流程从立项到上线的推进；分配项目里的 BH" },
   { value: "handler", label: "BH", hint: "业务经办：确认需求、执行试运行、办理业务" },
   { value: "dev", label: "TH", hint: "科技经办：承接系统改造任务" },
 ];
@@ -52,9 +58,9 @@ export const PROJECT_ROLE_LABEL: Record<ProjectRole, string> = {
   viewer: "PMO",
 };
 
-/** 每类成员由谁分配(与服务端一致:管理员分配全部,CTO 分配 TH,PM 分配 BH) */
+/** 每类成员由谁分配(与服务端一致:管理员分配全部,PMO 指派 PM,CTO 分配 TH,PM 分配 BH) */
 export const PROJECT_ROLE_OWNER: Record<ProjectRole, string> = {
-  pm: "由管理员指派",
+  pm: "由 PMO 指派",
   handler: "由 PM 分配",
   dev: "由 CTO 分配",
   viewer: "由管理员添加",
@@ -107,6 +113,7 @@ export const ITEM_STATUSES: ItemStatus[] = ["todo", "in_progress", "blocked", "i
 
 export const PENDING_ON_LABEL: Record<string, string> = {
   admin: "待指派 PM",
+  pmo: "待 PMO 处理",
   pm: "待 PM 处理",
   cto: "待 CTO 评审",
   handler: "待 BH 确认",
@@ -260,4 +267,95 @@ export function itemTypeClass(type: ItemType): string {
     type === "change" && "bg-[rgba(120,120,128,0.12)] text-[color:var(--ink-2)]",
     type === "task" && "bg-[color:var(--tint-soft)] text-[color:var(--tint-deep)]",
   );
+}
+
+/* ---- 需求承接 ---- */
+
+/** 三条推进线,数组顺序即解决顺序:先线下转线上,再系统互通,最后移动化。
+ *  配色沿用图例:绿 = 线下、靛蓝 = 系统间的衔接、琥珀 = 提醒(会签色在这组界面里不出现,不冲突)。
+ *  reasonHint / solutionHint 是原因与解决方案输入框里的示例,每条线各写各的。 */
+export const INTAKE_LINES: { key: IntakeLineKey; title: string; mark: string; order: string; soft: string; deep: string; dot: string; reasonHint: string; solutionHint: string }[] = [
+  {
+    key: "offline",
+    title: "线下节点转线上",
+    mark: "①",
+    order: "第一优先",
+    soft: "var(--green-soft)",
+    deep: "var(--green-deep)",
+    dot: "var(--green)",
+    reasonHint: "如：财务要求核对发票原件并手写签字",
+    solutionHint: "如：发票影像上传 + 电子签名，替代粘贴签字",
+  },
+  {
+    key: "interop",
+    title: "系统不互通",
+    mark: "②",
+    order: "第二优先",
+    soft: "var(--indigo-soft)",
+    deep: "var(--indigo-deep)",
+    dot: "var(--indigo)",
+    reasonHint: "如：两套系统分期建设、厂商不同，数据靠人工二次录入",
+    solutionHint: "如：单点登录 + 接口对接，结果自动回写",
+  },
+  {
+    key: "mobile",
+    title: "线上节点移动化",
+    mark: "③",
+    order: "第三优先",
+    soft: "var(--amber-soft)",
+    deep: "var(--amber-deep)",
+    dot: "var(--amber)",
+    reasonHint: "如：系统只有网页版，审批人出差时无法处理",
+    solutionHint: "如：高频审批接入移动待办，复杂操作保留网页版",
+  },
+];
+
+/** 诊断结果里三类节点的中文名 */
+export const DIAGNOSIS_LABEL: Record<IntakeLineKey, string> = {
+  offline: "线下节点",
+  interop: "系统不互通节点",
+  mobile: "无法实现移动端节点", // 紧凑处(工作台、列表行)用简称「无法移动端」
+};
+
+/** 承接环节的名字;短名用在生命周期轨上 */
+export const INTAKE_PHASE: Record<IntakePhase, { label: string; short: string }> = {
+  triage: { label: "待 PMO 初级分析", short: "PMO 初级分析" },
+  assign: { label: "待指派 PM", short: "指派 PM 承接" },
+  advance: { label: "PM 推进中", short: "PM 按优先级推进" },
+  assess: { label: "技术可行性评估中", short: "技术可行性评估" },
+  final: { label: "待 PMO 终审", short: "PMO 终审" },
+  done: { label: "承接完成", short: "PMO 终审" },
+};
+
+export const PLAN_STATUS_LABEL: Record<PlanStatus, string> = {
+  pending: "待定",
+  planned: "方案已定",
+  na: "无需处理",
+};
+
+export const VERDICT_LABEL: Record<Verdict, string> = {
+  feasible: "可行",
+  conditional: "有条件可行",
+  infeasible: "不可行",
+};
+
+/** 结论所要求的说明:附条件要写明条件,不可行必须给出替代方案 */
+export const VERDICT_NOTE_HINT: Record<Verdict, string> = {
+  feasible: "说明（选填）",
+  conditional: "条件（必填）",
+  infeasible: "替代方案（必填）",
+};
+
+export const FINAL_LABEL: Record<FinalDecision, string> = {
+  passed: "通过归档",
+  passed_with_notes: "有保留通过",
+  returned: "退回整改",
+};
+
+export function verdictClass(verdict: Verdict | ""): string {
+  return cn("badge !h-[20px] text-[11px]", verdict === "feasible" && "badge-ok", verdict === "conditional" && "badge-amber", verdict === "infeasible" && "badge-warn");
+}
+
+export function finalClass(decision: FinalDecision): string {
+  return cn("badge !h-[20px] text-[11px]", decision === "passed" && "badge-ok", decision === "passed_with_notes" && "badge-amber", decision === "returned" && "badge-warn");
 }

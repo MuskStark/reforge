@@ -349,9 +349,12 @@ func (s *postgresStore) handleProjectStatus(w http.ResponseWriter, r *http.Reque
 			return err
 		}
 		if body.Status == ProjCancelled {
-			// 取消项目时,仍在等待的评审一并作废
+			// 取消项目时,仍在等待的评审一并作废;等 PMO 终审的标记也一并清掉
 			if _, err := tx.ExecContext(r.Context(), `UPDATE gate_reviews SET status = 'withdrawn', decided_at = now()
 				WHERE project_id = $1 AND status = 'pending'`, pr.ID); err != nil {
+				return err
+			}
+			if _, err := tx.ExecContext(r.Context(), `UPDATE projects SET final_status = '', final_review_id = '' WHERE id = $1`, pr.ID); err != nil {
 				return err
 			}
 		}
@@ -376,7 +379,8 @@ func (s *postgresStore) handleProjectStatus(w http.ResponseWriter, r *http.Reque
 }
 
 // handleMembers 增删项目成员(流程的权限分配,规则见 caps.canAssign):
-// 管理员分配全部;CTO 分配 TH(科技经办);PM 分配 BH(业务经办)。
+// PMO 指派 PM(需求承接里在初级分析之后),CTO 分配 TH(科技经办),PM 分配 BH(业务经办),管理员不受限。
+// PM 可以有多名,其中一名是主负责(lead=true 指定;没指定时取最早到岗的)。
 func (s *postgresStore) handleMembers(w http.ResponseWriter, r *http.Request) {
 	a, ok := currentActor(w, r, s)
 	if !ok {
@@ -386,6 +390,7 @@ func (s *postgresStore) handleMembers(w http.ResponseWriter, r *http.Request) {
 		UserID string `json:"userId"`
 		Role   string `json:"role"`
 		Action string `json:"action"` // add | remove
+		Lead   *bool  `json:"lead"`   // 仅指派 PM 时有意义:设为主负责
 	}
 	if err := decodeJSON(w, r, &body); err != nil {
 		writeError(w, http.StatusBadRequest, "请求数据格式不正确")
@@ -405,7 +410,8 @@ func (s *postgresStore) handleMembers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	err = s.withProjectLock(r.Context(), pathID(r), func(tx *sql.Tx, pr *Project, stages []ProjectStage) error {
-		c, err := loadCaps(r.Context(), tx, pr.ID, a)
+		ctx := r.Context()
+		c, err := loadCaps(ctx, tx, pr.ID, a)
 		if err != nil {
 			return err
 		}
@@ -415,36 +421,77 @@ func (s *postgresStore) handleMembers(w http.ResponseWriter, r *http.Request) {
 		if pr.Status == ProjDone || pr.Status == ProjCancelled {
 			return badRequest("项目已结束，不能再调整成员")
 		}
+		intake, hasIntake := pr.intakeStage()
+		atIntakeGate := hasIntake && pr.CurrentStage == intake.Seq && stages[intake.Seq-1].Status == StagePending
 		roleLabel := map[string]string{RolePM: "PM", RoleHandler: "BH", RoleDev: "TH", RoleViewer: "PMO"}[body.Role]
 		if body.Action == "remove" {
-			if _, err := tx.ExecContext(r.Context(), `DELETE FROM project_members WHERE project_id = $1 AND user_id = $2 AND role = $3`,
+			if _, err := tx.ExecContext(ctx, `DELETE FROM project_members WHERE project_id = $1 AND user_id = $2 AND role = $3`,
 				pr.ID, u.ID, body.Role); err != nil {
 				return err
 			}
-			return addEventTx(r.Context(), tx, pr.ID, "member", u.ID, a, "member_removed", map[string]any{
-				"user": displayName(u), "role": roleLabel,
+			last := false
+			if body.Role == RolePM {
+				lead, err := syncLeadTx(ctx, tx, pr.ID)
+				if err != nil {
+					return err
+				}
+				// 承接阶段:最后一名 PM 被移除后回到待指派,由 PMO 重新指派;新 PM 到岗时阶段重新启动
+				if hasIntake && lead == "" && pr.CurrentStage == intake.Seq && stages[intake.Seq-1].Status == StageInProgress {
+					if err := setStageStatusTx(ctx, tx, pr.ID, intake.Seq, StagePending); err != nil {
+						return err
+					}
+					if _, err := tx.ExecContext(ctx, `UPDATE projects SET started_at = NULL WHERE id = $1`, pr.ID); err != nil {
+						return err
+					}
+					last = true
+				}
+			}
+			return addEventTx(ctx, tx, pr.ID, "member", u.ID, a, "member_removed", map[string]any{
+				"user": displayName(u), "role": roleLabel, "last": last,
 			})
 		}
-		if _, err := tx.ExecContext(r.Context(), `INSERT INTO project_members (project_id, user_id, role, added_by, created_at)
+		// 需求承接:PMO 要先完成初级分析,才能指派第一位 PM(管理员不受此限,可以兜底)
+		if body.Role == RolePM && c.PMO && !c.Admin && pr.TriageDoneAt == nil && atIntakeGate {
+			return badRequest("请先完成初级分析，再指派 PM")
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO project_members (project_id, user_id, role, added_by, created_at)
 			VALUES ($1, $2, $3, $4, now()) ON CONFLICT DO NOTHING`, pr.ID, u.ID, body.Role, a.ID); err != nil {
 			return err
 		}
+		isLead := false
+		if body.Role == RolePM {
+			// 主负责 PM:显式指定的优先;否则保持现任,现任不在了就取最早到岗的
+			if body.Lead != nil && *body.Lead {
+				if err := setLeadTx(ctx, tx, pr.ID, u.ID); err != nil {
+					return err
+				}
+				isLead = true
+			} else if lead, err := syncLeadTx(ctx, tx, pr.ID); err != nil {
+				return err
+			} else {
+				isLead = lead == u.ID
+			}
+		}
 		// 第一位项目经理到岗:项目正式启动,阶段 1 进入进行中
 		if body.Role == RolePM && pr.CurrentStage == 1 && stages[0].Status == StagePending {
-			if err := setStageStatusTx(r.Context(), tx, pr.ID, 1, StageInProgress); err != nil {
+			if err := setStageStatusTx(ctx, tx, pr.ID, 1, StageInProgress); err != nil {
 				return err
 			}
-			if _, err := tx.ExecContext(r.Context(), `UPDATE projects SET started_at = COALESCE(started_at, now()) WHERE id = $1`, pr.ID); err != nil {
+			if _, err := tx.ExecContext(ctx, `UPDATE projects SET started_at = COALESCE(started_at, now()) WHERE id = $1`, pr.ID); err != nil {
 				return err
 			}
 		}
-		if err := addEventTx(r.Context(), tx, pr.ID, "member", u.ID, a, "member_added", map[string]any{
-			"user": displayName(u), "role": roleLabel,
+		if err := addEventTx(ctx, tx, pr.ID, "member", u.ID, a, "member_added", map[string]any{
+			"user": displayName(u), "role": roleLabel, "lead": isLead,
 		}); err != nil {
 			return err
 		}
-		return notifyTx(r.Context(), tx, u.ID, "member_added", pr.ID, "", "",
-			"你被加入「"+pr.Name+"」，担任"+roleLabel, "member:"+pr.ID+":"+u.ID+":"+body.Role+":"+time.Now().Format("20060102150405"))
+		text := "你被加入「" + pr.Name + "」，担任" + roleLabel
+		if isLead {
+			text += "（主负责）"
+		}
+		return notifyTx(ctx, tx, u.ID, "member_added", pr.ID, "", "",
+			text, "member:"+pr.ID+":"+u.ID+":"+body.Role+":"+time.Now().Format("20060102150405"))
 	})
 	if err != nil {
 		writeErr(w, r, err)
@@ -567,6 +614,10 @@ func (s *postgresStore) handleStageSkip(w http.ResponseWriter, r *http.Request) 
 			return err
 		}
 		if err := advanceAfterApprovalTx(r.Context(), tx, pr, stages, seq, true); err != nil {
+			return err
+		}
+		// 跳过承接阶段时不再等 PMO 终审
+		if _, err := tx.ExecContext(r.Context(), `UPDATE projects SET final_status = '', final_review_id = '' WHERE id = $1`, pr.ID); err != nil {
 			return err
 		}
 		if err := addEventTx(r.Context(), tx, pr.ID, "stage", "", a, "stage_skipped", map[string]any{

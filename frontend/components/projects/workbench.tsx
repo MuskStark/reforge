@@ -2,19 +2,20 @@
 
 /**
  * 工作台(登录后的首页):只回答"我现在要做什么"。
- * 主列是一张按动作分组的清单——待我评审 / 待我指派 / 等我推进 / 我的任务,不同的人看到不同的组;
- * 右栏是我的项目与需要关注的。有内容才成卡,空的收成一行,四类全空显示「都处理完了」。
+ * 主列是一张按动作分组的清单——待我评审 / 待我初析与指派 / 待我终审 / 等我推进 / 我的任务,不同的人看到不同的组;
+ * 右栏是我的项目与需要关注的。有内容才成卡,空的收成一行,各组全空显示「都处理完了」。
  * 分组的口径与侧栏上的待办数字共用 lib/workbench.ts。
  */
 
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import type { LucideIcon } from "lucide-react";
-import { Check, ChevronDown, ChevronRight, ClipboardCheck, FileSignature, Hourglass, Plus, Presentation, TriangleAlert, UserPlus, Waypoints, Workflow, Users } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, ClipboardCheck, FileSignature, Hourglass, Plus, Presentation, Route, Stamp, TriangleAlert, UserPlus, Waypoints, Workflow, Users } from "lucide-react";
 import { AppShell, PageHead, StateLine, announceTodo } from "@/components/shell/app-shell";
 import { MembersDialog } from "@/components/projects/members-dialog";
 import { PendingOnBadge } from "@/components/projects/stage-rail";
 import { computeWorkbench, riskWhy } from "@/lib/workbench";
+import { inIntakeStage, intakeHref, isIntakeReview } from "@/lib/intake";
 import { authFetch, type SessionUser } from "@/lib/auth";
 import type { PendingReview, ProjectView, UserDir, WorkItem } from "@/lib/types";
 import { HEALTH_LABEL, ITEM_STATUS_LABEL, MODE_LABEL, PENDING_ON_LABEL, PRIORITY_LABEL, STATUS_LABEL, dueInfo, fmtDate, pct, priorityClass, statusClass } from "@/lib/labels";
@@ -24,7 +25,13 @@ import { cn } from "@/lib/utils";
 const FOLD = 3;
 
 const DAY = 86_400_000;
-const daysAgo = (iso: string) => Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / DAY));
+/** 隔了几个自然日:昨晚提交的流程过零点就是「1 天前提交」(按满 24 小时算会一整天都显示「今天提交」) */
+const daysAgo = (iso: string) => {
+  const at = new Date(iso);
+  const midnight = new Date();
+  midnight.setHours(0, 0, 0, 0);
+  return Math.max(0, Math.round((midnight.getTime() - new Date(at.getFullYear(), at.getMonth(), at.getDate()).getTime()) / DAY));
+};
 
 /** 「今天提交 / N 天前提交」;等了 3 天以上标红成「已等 N 天」 */
 function Wait({ days }: { days: number }) {
@@ -69,15 +76,18 @@ function WorkbenchBody({ me }: { me: SessionUser }) {
 
   const isAdmin = me.role === "admin";
   const isPM = me.jobRole === "pm";
+  const isPMO = me.jobRole === "viewer";
+
+  const canAssign = isAdmin || isPMO;
 
   const load = useCallback(async () => {
     try {
-      // 用户名单只有管理员指派 PM 时用得上
+      // 用户名单只有能指派 PM 的人(管理员、PMO)打开成员管理时用得上
       const [ps, rv, mine, us] = await Promise.all([
         authFetch<ProjectView[]>("/api/projects", { cache: "no-store" }),
         authFetch<PendingReview[]>("/api/reviews/pending", { cache: "no-store" }),
         authFetch<WorkItem[]>("/api/me/items", { cache: "no-store" }),
-        isAdmin ? authFetch<UserDir[]>("/api/users", { cache: "no-store" }) : Promise.resolve([] as UserDir[]),
+        canAssign ? authFetch<UserDir[]>("/api/users", { cache: "no-store" }) : Promise.resolve([] as UserDir[]),
       ]);
       setProjects(ps);
       setReviews(rv ?? []);
@@ -86,7 +96,7 @@ function WorkbenchBody({ me }: { me: SessionUser }) {
     } catch {
       /* 会话失效由外壳处理 */
     }
-  }, [isAdmin]);
+  }, [canAssign]);
 
   useEffect(() => {
     void load();
@@ -130,15 +140,18 @@ function WorkbenchBody({ me }: { me: SessionUser }) {
       keyOf: (r) => r.id,
       applies: true,
       render: (r) => {
+        // 技术可行性评估(承接阶段的关卡)在「承接」标签里做,其余关卡在「评审」标签里
+        const intake = isIntakeReview(r, projectOf(r.projectId));
         const stage = projectOf(r.projectId)?.stages[r.stageSeq - 1];
-        const href = `/projects/${r.projectId}?tab=review`;
+        const href = `/projects/${r.projectId}?tab=${intake ? "intake" : "review"}`;
         return (
           <div className="act-row">
             <Link href={href} prefetch={false} className="act-main">
               <span className="act-title">{r.projectName}</span>
               <span className="act-meta">
-                阶段 {r.stageSeq} · {stage?.name ?? ""}
-                {stage?.gate && ` · ${stage.gate}`}（{MODE_LABEL[r.mode]} · 第 {r.round} 轮）
+                {intake
+                  ? `技术可行性评估（${MODE_LABEL[r.mode]} · 第 ${r.round} 轮）`
+                  : `阶段 ${r.stageSeq} · ${stage?.name ?? ""}${stage?.gate && ` · ${stage.gate}`}（${MODE_LABEL[r.mode]} · 第 ${r.round} 轮）`}
                 {r.summary ? ` · ${r.summary}` : ""}
               </span>
             </Link>
@@ -147,7 +160,7 @@ function WorkbenchBody({ me }: { me: SessionUser }) {
               <Wait days={r.waitingDays} />
             </span>
             <Link href={href} prefetch={false} className="btn-tint">
-              去评审
+              {intake ? "去评估" : "去评审"}
             </Link>
           </div>
         );
@@ -157,28 +170,61 @@ function WorkbenchBody({ me }: { me: SessionUser }) {
       key: "assign",
       icon: UserPlus,
       tone: "amber",
-      title: "待我指派",
-      empty: "没有等你指派的流程",
+      title: "待我初析与指派",
+      empty: "没有等你初析指派的流程",
       items: model.assign,
       keyOf: (p) => p.id,
-      applies: isAdmin,
+      // PMO 岗位与管理员:新流程还没有 PM
+      applies: isAdmin || isPMO,
       render: (p) => (
         <div className="act-row">
-          <Link href={`/projects/${p.id}`} prefetch={false} className="act-main">
+          <Link href={p.intake ? intakeHref(p) : `/projects/${p.id}`} prefetch={false} className="act-main">
             <span className="act-title">{p.name}</span>
             <span className="act-meta">
               {p.applicant ? `${p.applicant} 提交 · ` : ""}
-              {fmtDate(p.createdAt)} · {p.metrics.steps} 个步骤
-              {p.metrics.countersigns > 0 && ` · 会签 ${p.metrics.countersigns} 处`}
+              {fmtDate(p.createdAt)}
+              {p.intake && ` · 线下节点 ${p.intake.offline} · 系统不互通 ${p.intake.interop} · 无法移动端 ${p.intake.mobile}`}
             </span>
           </Link>
           <span className="act-tags">
             <Wait days={daysAgo(p.createdAt)} />
           </span>
-          <button type="button" className="btn-tint" onClick={() => setAssignOf(p)}>
-            <UserPlus aria-hidden="true" />
-            指派 PM
-          </button>
+          {p.intake ? (
+            // 需求承接的项目:初级分析与指派都在「承接」标签里
+            <Link href={intakeHref(p)} prefetch={false} className="btn-tint">
+              <Route className="h-3.5 w-3.5" aria-hidden="true" /> {p.intake.triageDone ? "去指派" : "去初析"}
+            </Link>
+          ) : (
+            <button type="button" className="btn-tint" onClick={() => setAssignOf(p)}>
+              <UserPlus aria-hidden="true" />
+              指派 PM
+            </button>
+          )}
+        </div>
+      ),
+    }),
+    group<ProjectView>({
+      key: "final",
+      icon: Stamp,
+      tone: "indigo",
+      title: "待我终审",
+      empty: "没有等你终审的方案",
+      items: model.final,
+      keyOf: (p) => p.id,
+      // PMO 岗位与管理员:技术可行性评估已通过、等终审
+      applies: isAdmin || isPMO,
+      render: (p) => (
+        <div className="act-row">
+          <Link href={intakeHref(p)} prefetch={false} className="act-main">
+            <span className="act-title">{p.name}</span>
+            <span className="act-meta">技术可行性评估已通过，整体流程与方案等你终审{p.intake && ` · 待改造节点 ${p.intake.offline + p.intake.interop + p.intake.mobile} 个`}</span>
+          </Link>
+          <span className="act-tags">
+            <span className="badge badge-indigo !h-[20px] !px-2 text-[11px]">PMO 终审</span>
+          </span>
+          <Link href={intakeHref(p)} prefetch={false} className="btn-tint">
+            去终审
+          </Link>
         </div>
       ),
     }),
@@ -196,9 +242,11 @@ function WorkbenchBody({ me }: { me: SessionUser }) {
         const due = dueInfo(stage?.dueDate ?? p.dueDate);
         const why = riskWhy(p);
         const pendingMe = p.pendingOn === "pm";
+        // 还停在承接阶段的项目,推进在「承接」标签里
+        const href = inIntakeStage(p) ? intakeHref(p) : `/projects/${p.id}`;
         return (
           <div className="act-row">
-            <Link href={`/projects/${p.id}`} prefetch={false} className="act-main">
+            <Link href={href} prefetch={false} className="act-main">
               <span className="act-title">{p.name}</span>
               <span className="act-meta">
                 阶段 {p.currentStage} · {stage?.name ?? ""}
@@ -212,7 +260,7 @@ function WorkbenchBody({ me }: { me: SessionUser }) {
               {pendingMe && why && <span className="act-when warn">{why}</span>}
               {due && <span className={cn("act-when", due.overdue && "warn")}>{due.label}</span>}
             </span>
-            <Link href={`/projects/${p.id}`} prefetch={false} className="btn-tint">
+            <Link href={href} prefetch={false} className="btn-tint">
               去推进
             </Link>
           </div>
@@ -328,7 +376,7 @@ function WorkbenchBody({ me }: { me: SessionUser }) {
                 <Check />
               </span>
               <h2 className="text-[22px] font-bold tracking-[-0.02em] text-neutral-900">都处理完了</h2>
-              <p className="mx-auto mt-2 max-w-[30em] text-[15px] leading-relaxed text-[color:var(--ink-2)]">现在没有等你评审、指派或办理的事情。新的待办一出现就会列在这里。</p>
+              <p className="mx-auto mt-2 max-w-[30em] text-[15px] leading-relaxed text-[color:var(--ink-2)]">现在没有等你评审、初析指派、终审或办理的事情。新的待办一出现就会列在这里。</p>
               <div className="mt-5 flex flex-wrap justify-center gap-2.5 border-t border-[color:var(--sep)] pt-5">
                 {quick.map(({ icon: Icon, label, href }) => (
                   <Link

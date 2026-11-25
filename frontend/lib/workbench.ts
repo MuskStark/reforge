@@ -1,19 +1,22 @@
 import type { PendingReview, ProjectView, WorkItem } from "@/lib/types";
 import { dueInfo } from "@/lib/labels";
+import { needsMyFinal, needsMyTriage } from "@/lib/intake";
 
 /**
- * 工作台的内容:把"我要做的事"归成四类,外加右栏的项目与风险。
+ * 工作台的内容:把"我要做的事"归成五类,外加右栏的项目与风险。
  * 工作台页面和外壳(侧栏「工作台」后的数字)都从这里算,保证两处的口径一致。
  *
- *   待我评审  我是当前关卡的评审人,且有等我决定的评审
- *   待我指派  仅管理员:新流程在等 PM
- *   等我推进  仅 PM:我负责的项目轮到我了,或者已经逾期、阻塞
- *   我的任务  所有人:分配给我的未完成任务
+ *   待我评审      我是当前关卡的评审人,且有等我决定的评审(含 CTO 的技术可行性评估)
+ *   待我初析指派  PMO 与管理员:新流程还没有 PM,等初级分析与指派
+ *   待我终审      PMO 与管理员:技术可行性评估已通过,等终审
+ *   等我推进      仅 PM:我负责的项目轮到我了,或者已经逾期、阻塞
+ *   我的任务      所有人:分配给我的未完成任务
  */
 
 export interface WorkbenchModel {
   review: PendingReview[];
   assign: ProjectView[];
+  final: ProjectView[];
   advance: ProjectView[];
   tasks: WorkItem[];
   /** 需要关注:有风险 / 逾期 / 阻塞的在途项目 */
@@ -45,13 +48,17 @@ export function riskWhy(p: ProjectView): string {
 }
 
 export function computeWorkbench(me: { id: string; role: string; jobRole: string }, projects: ProjectView[], reviews: PendingReview[], tasks: WorkItem[]): WorkbenchModel {
-  const oversee = me.role === "admin" || me.jobRole === "cto";
+  // PMO 与管理员、CTO 一样看全局:岗位就是全局的
+  const oversee = me.role === "admin" || me.jobRole === "cto" || me.jobRole === "viewer";
   const myId = me.id;
   const ofMine = (p: ProjectView) => iAmPM(myId, p) || p.members.some((m) => m.userId === myId);
 
   const active = projects.filter((p) => p.status === "active");
 
-  const assign = me.role === "admin" ? active.filter((p) => p.can.assign && !p.hasPm) : [];
+  // 初析、指派与终审都是 PMO 的职责,管理员兜底
+  const isPMO = me.role === "admin" || me.jobRole === "viewer";
+  const assign = isPMO ? active.filter((p) => p.can.assign && needsMyTriage(p, me)) : [];
+  const final = isPMO ? active.filter((p) => needsMyFinal(p, me)) : [];
 
   const advance =
     me.jobRole === "pm"
@@ -70,9 +77,10 @@ export function computeWorkbench(me: { id: string; role: string; jobRole: string
   const openTasks = tasks
     .filter((t) => t.status !== "done" && t.status !== "cancelled")
     .sort((a, b) => taskRank(a) - taskRank(b) || (a.dueDate || "9999").localeCompare(b.dueDate || "9999"));
-  // 评审:等得久的在前;待指派:提交得早的在前;等我推进:逾期、阻塞多的在前
+  // 评审:等得久的在前;待初析:提交得早的在前;待终审:等得久的在前;等我推进:逾期、阻塞多的在前
   const orderedReviews = [...reviews].sort((a, b) => b.waitingDays - a.waitingDays);
   const orderedAssign = [...assign].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  const orderedFinal = [...final].sort((a, b) => a.updatedAt.localeCompare(b.updatedAt));
   const orderedAdvance = [...advance].sort(
     (a, b) => (b.stats.overdue + b.stats.blocked) - (a.stats.overdue + a.stats.blocked) || a.createdAt.localeCompare(b.createdAt),
   );
@@ -96,12 +104,13 @@ export function computeWorkbench(me: { id: string; role: string; jobRole: string
   return {
     review: orderedReviews,
     assign: orderedAssign,
+    final: orderedFinal,
     advance: orderedAdvance,
     tasks: openTasks,
     risky,
     mine,
     oversee,
-    total: orderedReviews.length + orderedAssign.length + orderedAdvance.length + openTasks.length,
+    total: orderedReviews.length + orderedAssign.length + orderedFinal.length + orderedAdvance.length + openTasks.length,
     urgent,
   };
 }
