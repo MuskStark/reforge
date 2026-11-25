@@ -28,8 +28,8 @@ var (
 	reviewerRoleLabel = map[string]string{RoleCTO: "CTO", RoleHandler: "BH", "admin": "管理员裁决"}
 	itemTypeLabel     = map[string]string{ItemTask: "任务", ItemDeliverable: "交付物", ItemIssue: "问题", ItemRisk: "风险", ItemChange: "变更"}
 	versionKindLabel  = map[string]string{"as_is": "立项时（As-Is）", "to_be": "To-Be 基线", "published": "已发布"}
-	// 岗位与成员角色的显示名一律用英文缩写(BH 业务经办、TH 科技经办、GM 总经理),与前端 lib/labels.ts 一致
-	projectRoleLabel   = map[string]string{RolePM: "PM", RoleHandler: "BH", RoleDev: "TH", RoleViewer: "GM"}
+	// 岗位与成员角色的显示名一律用英文缩写(BH 业务经办、TH 科技经办、PMO 项目管理办公室),与前端 lib/labels.ts 一致
+	projectRoleLabel   = map[string]string{RolePM: "PM", RoleHandler: "BH", RoleDev: "TH", RoleViewer: "PMO"}
 	projectRoleOrderBy = map[string]int{RolePM: 0, RoleHandler: 1, RoleDev: 2, RoleViewer: 3}
 	eventKindLabel     = map[string]string{
 		"project_created": "建立项目", "project_updated": "修改项目信息", "project_status": "变更项目状态", "project_update": "提交简报",

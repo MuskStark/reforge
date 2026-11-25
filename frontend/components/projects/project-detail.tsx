@@ -720,7 +720,7 @@ function OverviewTab({ ctx, onStatus }: { ctx: DetailCtx; onStatus: (s: "on_hold
             <MemberRow label="PM" full="项目经理" people={pms} hint={pms.length ? "" : "未指派"} warn />
             <MemberRow label="BH" full="业务经办" people={handlers} hint={handlers.length ? "" : "尚未添加"} />
             {devs.length > 0 && <MemberRow label="TH" full="科技经办" people={devs} />}
-            {viewers.length > 0 && <MemberRow label="GM" full="总经理" people={viewers} />}
+            {viewers.length > 0 && <MemberRow label="PMO" full="项目管理办公室" people={viewers} />}
             <MemberRow label="CTO" full="首席技术官" people={ctos.map((u) => ({ userId: u.id, username: u.username, displayName: u.displayName, role: "pm" as const }))} hint={ctos.length ? "" : "未设置"} />
           </ul>
         </section>

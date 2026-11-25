@@ -264,7 +264,7 @@ func notifyManyTx(ctx context.Context, q runner, userIDs []string, kind, project
 	return nil
 }
 
-// memberUserIDsTx 项目全体成员(PM / BH / TH / GM)的用户 ID,去重
+// memberUserIDsTx 项目全体成员(PM / BH / TH / PMO)的用户 ID,去重
 func memberUserIDsTx(ctx context.Context, q runner, projectID string) ([]string, error) {
 	rows, err := q.QueryContext(ctx, `SELECT DISTINCT user_id FROM project_members WHERE project_id = $1`, projectID)
 	if err != nil {

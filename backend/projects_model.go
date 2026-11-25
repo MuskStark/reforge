@@ -25,13 +25,13 @@ const (
 )
 
 // 项目角色(CTO 是全局岗位,不入 project_members)。
-// 代码沿用历史取值不改(库里已有数据),括号里是界面上的显示名:PM 项目经理、BH 业务经办、TH 科技经办、GM 总经理。
+// 代码沿用历史取值不改(库里已有数据),括号里是界面上的显示名:PM 项目经理、BH 业务经办、TH 科技经办、PMO 项目管理办公室。
 const (
 	RolePM      = "pm"
 	RoleCTO     = "cto"
 	RoleHandler = "handler" // BH
 	RoleDev     = "dev"     // TH
-	RoleViewer  = "viewer"  // GM
+	RoleViewer  = "viewer"  // PMO
 )
 
 // 评审单状态与评审人表决

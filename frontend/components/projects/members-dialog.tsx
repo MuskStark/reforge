@@ -20,7 +20,7 @@ const ROLE_META: { role: Role; label: string; hint: string; flag: keyof ProjectC
   { role: "pm", label: "PM", hint: "项目经理：对项目交付负责，制定计划、拆解任务、推进阶段、提交评审", flag: "assign", empty: "未指派" },
   { role: "handler", label: "BH", hint: "业务经办：确认需求、执行试运行；需求基线与试运行结论由他们会签", flag: "assignHandler", empty: "尚未添加 —— 需求基线与试运行结论需要他们会签" },
   { role: "dev", label: "TH", hint: "科技经办：承接系统改造，开发、配置、联调、测试", flag: "assignDev", empty: "未添加" },
-  { role: "viewer", label: "GM", hint: "总经理：只读", flag: "assignViewer", empty: "未添加" },
+  { role: "viewer", label: "PMO", hint: "项目管理办公室：只读", flag: "assignViewer", empty: "未添加" },
 ];
 
 /** 能否打开成员管理:至少能分配一类成员(服务端仍然逐请求校验) */

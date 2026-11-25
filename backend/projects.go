@@ -415,7 +415,7 @@ func (s *postgresStore) handleMembers(w http.ResponseWriter, r *http.Request) {
 		if pr.Status == ProjDone || pr.Status == ProjCancelled {
 			return badRequest("项目已结束，不能再调整成员")
 		}
-		roleLabel := map[string]string{RolePM: "PM", RoleHandler: "BH", RoleDev: "TH", RoleViewer: "GM"}[body.Role]
+		roleLabel := map[string]string{RolePM: "PM", RoleHandler: "BH", RoleDev: "TH", RoleViewer: "PMO"}[body.Role]
 		if body.Action == "remove" {
 			if _, err := tx.ExecContext(r.Context(), `DELETE FROM project_members WHERE project_id = $1 AND user_id = $2 AND role = $3`,
 				pr.ID, u.ID, body.Role); err != nil {

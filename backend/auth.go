@@ -381,7 +381,7 @@ func handleAdminCreateUser(st store) http.HandlerFunc {
 			body.JobRole = RoleHandler
 		}
 		if !validJobRoles[body.JobRole] {
-			writeError(w, http.StatusBadRequest, "岗位无效（应为 GM、CTO、PM、BH 或 TH）")
+			writeError(w, http.StatusBadRequest, "岗位无效（应为 PMO、CTO、PM、BH 或 TH）")
 			return
 		}
 		if msg := validateCredential(body.Username, body.Password); msg != "" {

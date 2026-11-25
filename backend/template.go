@@ -286,7 +286,7 @@ func levelLabel(s string) string {
 	}
 }
 
-// jobRoleLabel 岗位的显示名(一律英文缩写):GM 总经理、CTO、PM 项目经理、BH 业务经办、TH 科技经办。
+// jobRoleLabel 岗位的显示名(一律英文缩写):CTO、PM 项目经理、BH 业务经办、TH 科技经办、PMO 项目管理办公室。
 // 岗位代码沿用历史取值不改(库里已有数据),与显示名并非字面对应。
 func jobRoleLabel(r string) string {
 	switch r {
@@ -299,7 +299,7 @@ func jobRoleLabel(r string) string {
 	case RoleDev:
 		return "TH"
 	case RoleViewer:
-		return "GM"
+		return "PMO"
 	}
 	return "BH"
 }

@@ -38,7 +38,7 @@ const ACTIONS = 5;
 
 const emptyDraft = () => ({ username: "", password: "", role: "member" as "member" | "admin", displayName: "", department: "", jobRole: "handler" as JobRole });
 
-/** 岗位徽章:CTO 紫红、PM 蓝、BH 绿、TH 琥珀、GM 灰 */
+/** 岗位徽章:CTO 紫红、PM 蓝、BH 绿、TH 琥珀、PMO 灰 */
 function jobBadge(job: JobRole): string {
   return cn(
     "badge !h-[22px] text-[11px]",
@@ -343,7 +343,7 @@ export function UsersManager() {
             <div className="mt-4 rounded-2xl bg-[color:var(--tint-soft)] px-3.5 py-2.5 text-xs leading-relaxed text-[color:var(--tint-deep)] shadow-[inset_0_0_0_0.5px_rgba(0,113,227,0.16)]">
               初始密码只在第一次登录前有效：用户首次登录后必须改成自己的密码，在那之前不能使用系统。
               <br />
-              岗位说明：CTO 评审立项、方案、上线与验收（全局生效），分配项目里的 TH；PM（项目经理）负责推进，分配 BH；BH（业务经办）确认需求、执行试运行；TH（科技经办）承接改造任务；GM（总经理）查看全部项目与数据大屏。
+              岗位说明：CTO 评审立项、方案、上线与验收（全局生效），分配项目里的 TH；PM（项目经理）负责推进，分配 BH；BH（业务经办）确认需求、执行试运行；TH（科技经办）承接改造任务；PMO（项目管理办公室）查看全部项目与数据大屏。
             </div>
           </form>
           <DialogActions>

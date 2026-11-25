@@ -85,7 +85,7 @@ func handleAdminUpdateUser(st *postgresStore) http.HandlerFunc {
 		if body.JobRole != nil {
 			job = strings.TrimSpace(*body.JobRole)
 			if !validJobRoles[job] {
-				writeError(w, http.StatusBadRequest, "岗位无效（应为 GM、CTO、PM、BH 或 TH）")
+				writeError(w, http.StatusBadRequest, "岗位无效（应为 PMO、CTO、PM、BH 或 TH）")
 				return
 			}
 		}

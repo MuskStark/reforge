@@ -15,7 +15,7 @@ import { cn } from "@/lib/utils";
 
 /**
  * 岗位与项目成员角色的显示名一律用英文缩写:
- *   GM 总经理 · CTO · PM 项目经理 · BH 业务经办(Business Handler) · TH 科技经办(Technical Handler)
+ *   CTO · PM 项目经理 · BH 业务经办(Business Handler) · TH 科技经办(Technical Handler) · PMO 项目管理办公室(Project Management Office)
  * 存储代码沿用历史取值(handler / dev / viewer)没有改,所以键与缩写并非字面对应;后端 export.go / template.go 里有一份同样的对照。
  */
 export const JOB_ROLE_LABEL: Record<JobRole, string> = {
@@ -23,7 +23,7 @@ export const JOB_ROLE_LABEL: Record<JobRole, string> = {
   pm: "PM",
   handler: "BH",
   dev: "TH",
-  viewer: "GM",
+  viewer: "PMO",
 };
 
 /** 缩写的中文全称:只放得下缩写的地方(徽章、成员标签)用它做悬停提示 */
@@ -32,12 +32,12 @@ export const JOB_ROLE_FULL: Record<JobRole, string> = {
   pm: "项目经理",
   handler: "业务经办",
   dev: "科技经办",
-  viewer: "总经理",
+  viewer: "项目管理办公室",
 };
 
 /** 缩写是名称,中文全称放在说明的开头 */
 export const JOB_ROLE_OPTIONS: { value: JobRole; label: string; hint: string }[] = [
-  { value: "viewer", label: "GM", hint: "总经理：查看全部项目与数据大屏" },
+  { value: "viewer", label: "PMO", hint: "项目管理办公室：查看全部项目与数据大屏" },
   { value: "cto", label: "CTO", hint: "评审立项 / 方案 / 上线 / 验收，全局生效；分配项目里的 TH" },
   { value: "pm", label: "PM", hint: "项目经理：负责一个流程从立项到上线的推进；分配项目里的 BH" },
   { value: "handler", label: "BH", hint: "业务经办：确认需求、执行试运行、办理业务" },
@@ -49,7 +49,7 @@ export const PROJECT_ROLE_LABEL: Record<ProjectRole, string> = {
   pm: "PM",
   handler: "BH",
   dev: "TH",
-  viewer: "GM",
+  viewer: "PMO",
 };
 
 /** 每类成员由谁分配(与服务端一致:管理员分配全部,CTO 分配 TH,PM 分配 BH) */

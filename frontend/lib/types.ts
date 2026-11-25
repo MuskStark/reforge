@@ -184,12 +184,12 @@ export function emptyProcess(): { name: string; description: string; applicant: 
    ============================================================ */
 
 /**
- * 全局岗位。显示名一律用英文缩写(lib/labels.ts):CTO、PM 项目经理、BH 业务经办、TH 科技经办、GM 总经理。
+ * 全局岗位。显示名一律用英文缩写(lib/labels.ts):CTO、PM 项目经理、BH 业务经办、TH 科技经办、PMO 项目管理办公室。
  * 存储代码沿用历史取值,所以代码与缩写并非字面对应。
  */
 export type JobRole = "cto" | "pm" | "handler" | "dev" | "viewer";
 
-/** 项目角色(按项目授予;CTO 是全局岗位,不在此列):PM、BH、TH、GM */
+/** 项目角色(按项目授予;CTO 是全局岗位,不在此列):PM、BH、TH、PMO */
 export type ProjectRole = "pm" | "handler" | "dev" | "viewer";
 
 export interface FlowMetrics {
@@ -313,7 +313,7 @@ export interface ProjectCaps {
   assignHandler: boolean;
   /** 分配 TH(科技经办):管理员、CTO */
   assignDev: boolean;
-  /** 添加 GM:管理员 */
+  /** 添加 PMO:管理员 */
   assignViewer: boolean;
   skip: boolean;
   comment: boolean;
