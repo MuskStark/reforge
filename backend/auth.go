@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/json"
 	"io"
-	"log"
 	"net/http"
 	"strings"
 	"sync"
@@ -187,6 +186,7 @@ func handleRegister(st store) http.HandlerFunc {
 		}
 		// 公开注册的密码由用户自己设定,不强制改
 		token := sessions.create(u.Username, u.Role, u.ID, false)
+		requestLogger(r).Info("audit", "action", "auth.register", "user", u.Username, "note", "首个注册用户,成为管理员")
 		writeJSON(w, http.StatusCreated, map[string]any{
 			"token": token,
 			"user":  publicUser(u),
@@ -217,6 +217,8 @@ func handleLogin(st store) http.HandlerFunc {
 		username := strings.TrimSpace(body.Username)
 		rlKey := "login:" + ip + "|" + username
 		if !loginLimiter.allow(rlKey) {
+			// 记下被锁定的尝试:是有人在试密码,还是用户自己忘了密码
+			requestLogger(r).Warn("audit", "action", "auth.login_locked", "user", username)
 			writeError(w, http.StatusTooManyRequests, "尝试次数过多,请 15 分钟后再试")
 			return
 		}
@@ -224,17 +226,20 @@ func handleLogin(st store) http.HandlerFunc {
 		fail := func(code int, msg string) {
 			loginLimiter.hit(rlKey)
 			loginAccountLimiter.hit("acct:" + username)
+			requestLogger(r).Warn("audit", "action", "auth.login_failed", "user", username, "reason", msg)
 			writeError(w, code, msg)
 		}
 
 		if u, err := st.GetUserByUsername(username); err != nil {
-			writeError(w, http.StatusInternalServerError, "登录失败: "+err.Error())
+			requestLogger(r).Error("登录时读取用户失败", "err", err)
+			writeError(w, http.StatusInternalServerError, "登录失败")
 			return
 		} else if u != nil {
 			if bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(body.Password)) != nil {
 				fail(http.StatusUnauthorized, "账号或密码错误")
 				return
 			}
+			requestLogger(r).Info("audit", "action", "auth.login", "user", u.Username, "how", "password", "must_change_password", u.MustChangePassword)
 			writeJSON(w, http.StatusOK, map[string]any{
 				"token": sessions.create(u.Username, u.Role, u.ID, u.MustChangePassword),
 				"user":  publicUser(u),
@@ -253,6 +258,7 @@ func handleLogin(st store) http.HandlerFunc {
 			return
 		}
 		if username == envUser && subtleEqual(body.Password, envPass) {
+			requestLogger(r).Info("audit", "action", "auth.login", "user", envUser, "how", "env-admin")
 			writeJSON(w, http.StatusOK, map[string]any{
 				"token": sessions.create(envUser, "admin", "", false),
 				"user": map[string]any{"id": "", "username": envUser, "role": "admin",
@@ -306,6 +312,10 @@ func publicUser(u *User) map[string]any {
 // handleLogout DELETE /api/auth/session
 func handleLogout(w http.ResponseWriter, r *http.Request) {
 	if token := bearerToken(r); token != "" {
+		// 吊销之前先认人:访问日志那一行认出的也是吊销前的会话
+		if sd := sessions.get(token); sd != nil {
+			requestLogger(r).Info("audit", "action", "auth.logout", "user", sd.Username)
+		}
 		sessions.revoke(token)
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"loggedOut": true})
@@ -371,7 +381,7 @@ func handleAdminCreateUser(st store) http.HandlerFunc {
 			body.JobRole = RoleHandler
 		}
 		if !validJobRoles[body.JobRole] {
-			writeError(w, http.StatusBadRequest, "岗位无效（应为 CTO、项目经理、经办、开发实施或观察者）")
+			writeError(w, http.StatusBadRequest, "岗位无效（应为 GM、CTO、PM、BH 或 TH）")
 			return
 		}
 		if msg := validateCredential(body.Username, body.Password); msg != "" {
@@ -402,6 +412,7 @@ func handleAdminCreateUser(st store) http.HandlerFunc {
 			writeError(w, http.StatusInternalServerError, "创建失败: "+err.Error())
 			return
 		}
+		audit(r, "user.create", "target", u.Username, "role", u.Role, "job", u.JobRole)
 		writeJSON(w, http.StatusCreated, u)
 	}
 }
@@ -438,7 +449,7 @@ func handleAdminDeleteUser(st store) http.HandlerFunc {
 		}
 		ok, err := st.DeleteUser(id)
 		if err != nil {
-			log.Printf("[DELETE /api/admin/users] 删除失败: %v", err)
+			requestLogger(r).Error("删除用户失败", "target", target.Username, "err", err)
 			writeError(w, http.StatusInternalServerError, "删除失败,请稍后重试")
 			return
 		}
@@ -450,6 +461,7 @@ func handleAdminDeleteUser(st store) http.HandlerFunc {
 		if target != nil {
 			sessions.revokeByUsername(target.Username)
 		}
+		audit(r, "user.delete", "target", target.Username, "role", target.Role)
 		writeJSON(w, http.StatusOK, map[string]bool{"deleted": true})
 	}
 }

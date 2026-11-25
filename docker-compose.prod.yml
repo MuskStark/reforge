@@ -4,10 +4,19 @@
 
 name: flow-prod
 
+# 容器日志的轮转(Docker 自带的 json-file 驱动):单个文件到 20MB 就换新文件,每个容器最多留 5 个,约 100MB。
+# 不配的话日志文件会无限增长——后端现在每个请求都记一行,不轮转迟早把磁盘写满。
+x-logging: &container-logging
+  driver: json-file
+  options:
+    max-size: "20m"
+    max-file: "5"
+
 services:
   postgres:
     image: postgres:16-alpine
     container_name: flow-prod-postgres
+    logging: *container-logging
     environment:
       POSTGRES_USER: flow
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?请在部署目录 .env 设置强口令}
@@ -30,6 +39,7 @@ services:
         GOLANG_IMAGE: ${GOLANG_IMAGE:-golang:1.27-alpine}
         ALPINE_IMAGE: ${ALPINE_IMAGE:-alpine:3.20}
     container_name: flow-prod-backend
+    logging: *container-logging
     environment:
       # 容器网络内指向 postgres 服务
       DATABASE_URL: postgres://flow:${POSTGRES_PASSWORD}@postgres:5432/flow?sslmode=disable
@@ -39,6 +49,9 @@ services:
       FLOW_ADMIN_PASS: ${FLOW_ADMIN_PASS:?请在部署目录 .env 设置管理员强口令}
       # 外部通知(群机器人 / 邮件)末尾附带的站点地址,例如 http://reforge.example.internal:3000;不设则消息里不带链接
       FLOW_PUBLIC_URL: ${FLOW_PUBLIC_URL:-}
+      # 日志:级别 debug | info | warn | error(默认 info);格式 text | json(默认 text)。详见 README「日志与排障」
+      FLOW_LOG_LEVEL: ${FLOW_LOG_LEVEL:-info}
+      FLOW_LOG_FORMAT: ${FLOW_LOG_FORMAT:-text}
       TZ: Asia/Shanghai
     depends_on:
       postgres:
@@ -54,6 +67,7 @@ services:
         NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmjs.org}
         NODE_IMAGE: ${NODE_IMAGE:-node:22-alpine}
     container_name: flow-prod-frontend
+    logging: *container-logging
     environment:
       BACKEND_ORIGIN: http://backend:8080
       TZ: Asia/Shanghai

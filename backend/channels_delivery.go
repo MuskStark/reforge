@@ -11,12 +11,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/smtp"
 	"net/url"
 	"os"
+	"runtime/debug"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -421,7 +422,7 @@ func deliverChannels(ctx context.Context, st *postgresStore) error {
 			return err
 		}
 		if sendErr != nil {
-			log.Printf("[channel] 「%s」发送失败: %v", ch.Name, sendErr)
+			slog.Warn("外部通知发送失败", "channel", ch.Name, "kind", ch.Kind, "count", len(items), "err", sendErr)
 		}
 	}
 	return nil
@@ -444,13 +445,13 @@ func startChannelDelivery(st *postgresStore) {
 			func() {
 				defer func() {
 					if v := recover(); v != nil {
-						log.Printf("[channel] panic: %v", v)
+						slog.Error("外部通知转发 panic", "err", fmt.Sprint(v), "stack", string(debug.Stack()))
 					}
 				}()
 				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 				defer cancel()
 				if err := deliverChannels(ctx, st); err != nil {
-					log.Printf("[channel] 转发失败: %v", err)
+					slog.Error("外部通知转发失败", "err", err)
 				}
 			}()
 		}

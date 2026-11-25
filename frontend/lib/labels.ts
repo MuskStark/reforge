@@ -13,34 +13,49 @@ import { cn } from "@/lib/utils";
 
 /* 流程项目的文案与配色:语义色沿用设计系统(蓝=线上、绿=线下/正常、琥珀=会签/提醒、靛蓝=依赖/评审、红=逾期/驳回) */
 
+/**
+ * 岗位与项目成员角色的显示名一律用英文缩写:
+ *   GM 总经理 · CTO · PM 项目经理 · BH 业务经办(Business Handler) · TH 科技经办(Technical Handler)
+ * 存储代码沿用历史取值(handler / dev / viewer)没有改,所以键与缩写并非字面对应;后端 export.go / template.go 里有一份同样的对照。
+ */
 export const JOB_ROLE_LABEL: Record<JobRole, string> = {
   cto: "CTO",
-  pm: "项目经理",
-  handler: "经办",
-  dev: "开发实施",
-  viewer: "观察者",
+  pm: "PM",
+  handler: "BH",
+  dev: "TH",
+  viewer: "GM",
 };
 
+/** 缩写的中文全称:只放得下缩写的地方(徽章、成员标签)用它做悬停提示 */
+export const JOB_ROLE_FULL: Record<JobRole, string> = {
+  cto: "首席技术官",
+  pm: "项目经理",
+  handler: "业务经办",
+  dev: "科技经办",
+  viewer: "总经理",
+};
+
+/** 缩写是名称,中文全称放在说明的开头 */
 export const JOB_ROLE_OPTIONS: { value: JobRole; label: string; hint: string }[] = [
-  { value: "cto", label: "CTO", hint: "评审立项 / 方案 / 上线 / 验收,全局生效;分配项目里的科技侧经办" },
-  { value: "pm", label: "项目经理", hint: "负责一个流程从立项到上线的推进;分配项目里的业务侧经办" },
-  { value: "handler", label: "经办", hint: "确认需求、执行试运行、办理业务(项目里的业务侧经办)" },
-  { value: "dev", label: "开发实施", hint: "承接系统改造任务(项目里的科技侧经办)" },
-  { value: "viewer", label: "观察者", hint: "只读" },
+  { value: "viewer", label: "GM", hint: "总经理：查看全部项目与数据大屏" },
+  { value: "cto", label: "CTO", hint: "评审立项 / 方案 / 上线 / 验收，全局生效；分配项目里的 TH" },
+  { value: "pm", label: "PM", hint: "项目经理：负责一个流程从立项到上线的推进；分配项目里的 BH" },
+  { value: "handler", label: "BH", hint: "业务经办：确认需求、执行试运行、办理业务" },
+  { value: "dev", label: "TH", hint: "科技经办：承接系统改造任务" },
 ];
 
-/** 项目里的成员角色:经办是业务侧,开发实施是科技侧 */
+/** 项目里的成员角色:BH 是业务侧,TH 是科技侧 */
 export const PROJECT_ROLE_LABEL: Record<ProjectRole, string> = {
-  pm: "项目经理",
-  handler: "业务侧经办",
-  dev: "科技侧经办",
-  viewer: "观察者",
+  pm: "PM",
+  handler: "BH",
+  dev: "TH",
+  viewer: "GM",
 };
 
-/** 每类成员由谁分配(与服务端一致:管理员分配全部,CTO 分配科技侧经办,项目经理分配业务侧经办) */
+/** 每类成员由谁分配(与服务端一致:管理员分配全部,CTO 分配 TH,PM 分配 BH) */
 export const PROJECT_ROLE_OWNER: Record<ProjectRole, string> = {
   pm: "由管理员指派",
-  handler: "由项目经理分配",
+  handler: "由 PM 分配",
   dev: "由 CTO 分配",
   viewer: "由管理员添加",
 };
@@ -91,10 +106,10 @@ export const ITEM_STATUS_LABEL: Record<ItemStatus, string> = {
 export const ITEM_STATUSES: ItemStatus[] = ["todo", "in_progress", "blocked", "in_review", "done", "cancelled"];
 
 export const PENDING_ON_LABEL: Record<string, string> = {
-  admin: "待指派项目经理",
-  pm: "待项目经理处理",
+  admin: "待指派 PM",
+  pm: "待 PM 处理",
   cto: "待 CTO 评审",
-  handler: "待经办确认",
+  handler: "待 BH 确认",
 };
 
 export const REVIEW_STATUS_LABEL: Record<string, string> = {

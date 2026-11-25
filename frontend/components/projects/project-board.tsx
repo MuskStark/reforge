@@ -128,7 +128,7 @@ function ProjectBoardBody({ me }: { me: SessionUser }) {
       {waitingAssign.length > 0 && projects.some((p) => p.can.assign) && (
         <div className="mb-4 flex flex-wrap items-center gap-3 rounded-2xl bg-[color:var(--amber-soft)] px-4 py-3 text-[13px] text-[color:var(--amber-deep)] shadow-[inset_0_0_0_0.5px_rgba(255,149,0,0.25)]">
           <span className="font-semibold">{waitingAssign.length} 个流程等待立项指派</span>
-          <span className="text-[color:var(--ink-2)]">指派项目经理后项目正式启动</span>
+          <span className="text-[color:var(--ink-2)]">指派 PM 后项目正式启动</span>
           <button
             type="button"
             onClick={() => setAssignOf(waitingAssign[0])}
@@ -160,10 +160,11 @@ function ProjectBoardBody({ me }: { me: SessionUser }) {
           className="field !h-9 w-auto !text-[13px]"
         >
           <option value="">全部状态</option>
-          <option value="admin">待指派项目经理</option>
-          <option value="pm">待项目经理处理</option>
-          <option value="cto">待 CTO 评审</option>
-          <option value="handler">待经办确认</option>
+          {/* 与卡片上的待处理徽章同一份文案 */}
+          <option value="admin">{PENDING_ON_LABEL.admin}</option>
+          <option value="pm">{PENDING_ON_LABEL.pm}</option>
+          <option value="cto">{PENDING_ON_LABEL.cto}</option>
+          <option value="handler">{PENDING_ON_LABEL.handler}</option>
         </select>
         <div className="relative min-w-[180px] flex-1">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[color:var(--ink-3)]" />
@@ -208,7 +209,8 @@ function ProjectBoardBody({ me }: { me: SessionUser }) {
       ) : shown.length === 0 ? (
         <StateLine>没有符合条件的项目</StateLine>
       ) : view === "board" ? (
-        <div className="grid items-start gap-3 grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
+        <div className="board-lanes">
+          <div className="grid items-start gap-3 grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 lane-cols-6">
           {lanes.map(({ lane, items }) => (
             <section key={lane.key} className="min-w-0">
               <h2 className="mb-2 flex items-center gap-2 px-1 text-[13px] font-semibold text-[color:var(--ink-2)]">
@@ -238,7 +240,7 @@ function ProjectBoardBody({ me }: { me: SessionUser }) {
                       footer={
                         canAssign(p) ? (
                           <button type="button" onClick={() => setAssignOf(p)} className="btn btn-primary !h-8 w-full !px-3 text-[12px]">
-                            <Users className="h-3.5 w-3.5" /> 指派项目经理
+                            <Users className="h-3.5 w-3.5" /> 指派 PM
                           </button>
                         ) : undefined
                       }
@@ -248,6 +250,7 @@ function ProjectBoardBody({ me }: { me: SessionUser }) {
               )}
             </section>
           ))}
+          </div>
         </div>
       ) : (
         <div className="glass-card p-2">

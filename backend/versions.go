@@ -37,7 +37,7 @@ func (s *postgresStore) handleVersions(w http.ResponseWriter, r *http.Request) {
 	rows, err := s.db.QueryContext(r.Context(), `SELECT `+versionCols+` FROM process_versions v
 		LEFT JOIN users u ON u.id = v.created_by WHERE v.project_id = $1 ORDER BY v.version ASC`, pathID(r))
 	if err != nil {
-		writeErr(w, err)
+		writeErr(w, r, err)
 		return
 	}
 	defer rows.Close()
@@ -45,7 +45,7 @@ func (s *postgresStore) handleVersions(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		v, err := scanVersion(rows, false)
 		if err != nil {
-			writeErr(w, err)
+			writeErr(w, r, err)
 			return
 		}
 		out = append(out, v)
@@ -71,7 +71,7 @@ func (s *postgresStore) handleVersionSteps(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	if err != nil {
-		writeErr(w, err)
+		writeErr(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, v)
@@ -84,7 +84,7 @@ func (s *postgresStore) handleCompare(w http.ResponseWriter, r *http.Request) {
 	}
 	pr, err := getProject(r.Context(), s.db, pathID(r), false)
 	if err != nil {
-		writeErr(w, err)
+		writeErr(w, r, err)
 		return
 	}
 	if pr == nil {
@@ -95,12 +95,12 @@ func (s *postgresStore) handleCompare(w http.ResponseWriter, r *http.Request) {
 		LEFT JOIN users u ON u.id = v.created_by
 		WHERE v.project_id = $1 AND v.kind = 'as_is' ORDER BY v.version ASC LIMIT 1`, pr.ID), false)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		writeErr(w, err)
+		writeErr(w, r, err)
 		return
 	}
 	p, err := processStepsTx(r.Context(), s.db, pr.ProcessID)
 	if err != nil {
-		writeErr(w, err)
+		writeErr(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{

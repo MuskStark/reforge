@@ -8,6 +8,7 @@ import "@fontsource/inter/700.css";
 import "@fontsource/jetbrains-mono/400.css";
 import "@fontsource/jetbrains-mono/600.css";
 import { AppToaster } from "@/components/app-toaster";
+import { ClientLogger } from "@/components/client-logger";
 import "./globals.css";
 
 /**
@@ -50,6 +51,8 @@ export default function RootLayout({
       <body className="font-sans">
         {children}
         <AppToaster />
+        {/* 浏览器端的报错与失败的接口调用,自动上报到后端日志 */}
+        <ClientLogger />
       </body>
     </html>
   );

@@ -536,7 +536,7 @@ func TestExportAndDeleteProcess(t *testing.T) {
 	if code != 200 || len(rows) != 2 || !strings.Contains(hdr.Get("Content-Disposition"), "attachment") {
 		t.Fatalf("清单不符: %d %q", code, body)
 	}
-	for _, want := range []string{"采购流程", "孙申报", "进行中", "2. 需求确认", "待项目经理处理", "高", "高", "中", "有风险", "李经理", "2026-12-31"} {
+	for _, want := range []string{"采购流程", "孙申报", "进行中", "2. 需求确认", "待 PM 处理", "高", "高", "中", "有风险", "李经理", "2026-12-31"} {
 		if !strings.Contains(rows[1], want) {
 			t.Errorf("清单应包含 %q: %s", want, rows[1])
 		}
@@ -558,7 +558,7 @@ func TestExportAndDeleteProcess(t *testing.T) {
 	}
 	for _, want := range []string{
 		"# 项目报告：采购流程", "## 基本信息", "## 阶段与关卡", "## 评审记录", "## 工作项", "## 项目简报", "## 流程改善指标", "## 时间线",
-		"G1 立项评审 · 分析立项 · 第 1 轮 —— 已通过", "同意立项", "或签 · CTO", "会签 · 经办",
+		"G1 立项评审 · 分析立项 · 第 1 轮 —— 已通过", "同意立项", "或签 · CTO", "会签 · BH",
 		"★必交付", "梳理接口清单", "健康度：有风险", "合同系统排期紧", "立项时（As-Is）", "同意立项",
 	} {
 		if !strings.Contains(md, want) {

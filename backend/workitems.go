@@ -119,11 +119,11 @@ func (s *postgresStore) handleListItems(w http.ResponseWriter, r *http.Request) 
 	flat, err := queryItems(r.Context(), s.db, `SELECT `+itemCols+itemFrom+` WHERE w.project_id = $1
 		ORDER BY w.stage_seq NULLS LAST, w.sort_key, w.created_at`, pathID(r))
 	if err != nil {
-		writeErr(w, err)
+		writeErr(w, r, err)
 		return
 	}
 	if err := attachLinks(r.Context(), s.db, flat); err != nil {
-		writeErr(w, err)
+		writeErr(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, nestItems(flat))
@@ -142,7 +142,7 @@ func (s *postgresStore) handleMyItems(w http.ResponseWriter, r *http.Request) {
 		WHERE w.assignee_id = $1 AND w.status IN ('todo','in_progress','blocked','in_review') AND pr.status = 'active'
 		ORDER BY w.due_date NULLS LAST, w.created_at`, a.ID)
 	if err != nil {
-		writeErr(w, err)
+		writeErr(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, flat)
@@ -320,7 +320,7 @@ func (s *postgresStore) handlePatchItem(w http.ResponseWriter, r *http.Request) 
 		if errors.Is(err, sql.ErrNoRows) {
 			writeError(w, http.StatusNotFound, "工作项不存在")
 		} else {
-			writeErr(w, err)
+			writeErr(w, r, err)
 		}
 		return
 	}
@@ -496,7 +496,7 @@ func (s *postgresStore) handleDeleteItem(w http.ResponseWriter, r *http.Request)
 		if errors.Is(err, sql.ErrNoRows) {
 			writeError(w, http.StatusNotFound, "工作项不存在")
 		} else {
-			writeErr(w, err)
+			writeErr(w, r, err)
 		}
 		return
 	}
@@ -513,7 +513,7 @@ func (s *postgresStore) handleDeleteItem(w http.ResponseWriter, r *http.Request)
 			return noPermission()
 		}
 		if it.Required {
-			return badRequest("必交付物不能删除；如不适用，请由项目经理取消其「必交付」标记")
+			return badRequest("必交付物不能删除；如不适用，请由 PM 取消其「必交付」标记")
 		}
 		var parent sql.NullString
 		if err := tx.QueryRowContext(ctx, `SELECT parent_id FROM work_items WHERE id = $1`, it.ID).Scan(&parent); err != nil {

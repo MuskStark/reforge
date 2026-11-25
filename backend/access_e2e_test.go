@@ -1,11 +1,12 @@
 package main
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
 
-// 端到端:流程的权限分配(管理员全部 / CTO 查看全部并分配科技侧经办 / 项目经理分配业务侧经办)
+// 端到端:流程的权限分配(管理员全部 / CTO 查看全部并分配 TH / PM 分配 BH)、流程定义的修改权限,
 // 与用户自助(修改个人信息、修改密码、首次登录强制改密码)。走真实路由表与真实 PostgreSQL。
 
 // submitProject 匿名提交一条流程,返回自动立项的项目 ID
@@ -91,16 +92,16 @@ func TestAssignmentRules(t *testing.T) {
 		t.Fatalf("CTO 分配的科技侧经办应出现在成员里")
 	}
 	e.expectCode(e.member(cto, pid, d1ID, RoleDev, "remove"), 200, "CTO 应能移除科技侧经办")
-	// 时间线里的角色名写的是"科技侧经办"
+	// 时间线里的角色名写的是英文缩写"TH"
 	sawLabel := false
 	_, events := e.list(admin, "/api/projects/"+pid+"/events")
 	for _, raw := range events {
-		if dig(raw, "kind") == "member_added" && dig(raw, "detail", "role") == "科技侧经办" {
+		if dig(raw, "kind") == "member_added" && dig(raw, "detail", "role") == "TH" {
 			sawLabel = true
 		}
 	}
 	if !sawLabel {
-		t.Fatalf("加入科技侧经办的事件应写明角色: %+v", events)
+		t.Fatalf("加入 TH 的事件应写明角色: %+v", events)
 	}
 
 	// ---- 还不是这个项目项目经理的人,分配不了 ----
@@ -159,6 +160,90 @@ func TestAssignmentRules(t *testing.T) {
 
 	// ---- 未登录一律 401 ----
 	e.fail("", "PUT", "/api/projects/"+pid+"/members", map[string]any{"userId": d2ID, "role": RoleDev, "action": "add"}, 401, "未登录")
+}
+
+// 流程定义的修改权限:节点上的经办人(PM / BH / TH)、CTO 与管理员都能改;GM 成员与项目外的人不能。
+// 能力表里的 editFlow 只放开「修改流程」,不带动计划与推进(那是 manage)。
+func TestEditFlowPermission(t *testing.T) {
+	e := newTestEnv(t)
+	admin := e.must("", "POST", "/api/auth/register", map[string]any{"username": "rootadmin", "password": "pass1234"})["token"].(string)
+	cto, _ := e.createUser(admin, "张技术", RoleCTO)
+	pm, pmID := e.createUser(admin, "李经理", RolePM)
+	bh, bhID := e.createUser(admin, "王经办", RoleHandler)
+	th, thID := e.createUser(admin, "钱开发", RoleDev)
+	gm, gmID := e.createUser(admin, "孙总", RoleViewer)
+	outsider, _ := e.createUser(admin, "路人甲", RoleHandler)
+
+	pid := e.submitProject(admin, "采购申请审批流程")
+	processID := e.must(admin, "GET", "/api/projects/"+pid, nil)["processId"].(string)
+	path := "/api/admin/processes/" + processID
+
+	// 取当前定义,改名后保存;返回状态码与保存后的流程
+	rename := func(token, name string) (int, map[string]any) {
+		cur := e.must(admin, "GET", path, nil)
+		cur["name"] = name
+		return e.req(token, "PUT", path+"?via=form", cur)
+	}
+	savedName := func() string { return e.must(admin, "GET", path, nil)["name"].(string) }
+
+	// ---- 还没有成员时:只有管理员与 CTO ----
+	e.fail(outsider, "PUT", path+"?via=form", processPayload("偷改"), 403, "只有项目成员")
+	for _, tok := range []string{admin, cto} {
+		if code, out := rename(tok, "采购申请审批流程"); code != 200 || out["name"] != "采购申请审批流程" {
+			t.Fatalf("管理员与 CTO 应能修改流程,得到 %d: %v", code, out)
+		}
+	}
+
+	for _, m := range []struct{ user, role string }{{pmID, RolePM}, {bhID, RoleHandler}, {thID, RoleDev}, {gmID, RoleViewer}} {
+		e.must(admin, "PUT", "/api/projects/"+pid+"/members", map[string]any{"userId": m.user, "role": m.role, "action": "add"})
+	}
+
+	// ---- 节点上的经办人都能改,保存生效并写进时间线 ----
+	for i, tok := range []string{pm, bh, th} {
+		name := fmt.Sprintf("采购申请审批流程·改%d", i+1)
+		if code, out := rename(tok, name); code != 200 || out["name"] != name {
+			t.Fatalf("项目成员应能修改流程,得到 %d: %v", code, out)
+		}
+		if savedName() != name {
+			t.Fatalf("保存后应读到新名称 %q,得到 %q", name, savedName())
+		}
+	}
+	sawBH := false
+	_, events := e.list(admin, "/api/projects/"+pid+"/events")
+	for _, raw := range events {
+		if dig(raw, "kind") == "edited_form" && dig(raw, "actorName") == "王经办" {
+			sawBH = true
+		}
+	}
+	if !sawBH {
+		t.Fatalf("BH 修改流程应记入时间线: %+v", events)
+	}
+
+	// ---- GM 成员、项目外的人、未登录:都不能改 ----
+	for _, tok := range []string{gm, outsider} {
+		e.fail(tok, "PUT", path+"?via=form", processPayload("越权"), 403, "只有项目成员")
+	}
+	e.fail("", "PUT", path+"?via=form", processPayload("未登录"), 401, "未登录")
+	if savedName() != "采购申请审批流程·改3" {
+		t.Fatalf("被拒绝的保存不应改动流程,得到 %q", savedName())
+	}
+
+	// ---- 能力表:editFlow 与 manage 各自独立 ----
+	for _, who := range []struct {
+		token         string
+		editFlow, man bool
+	}{
+		{admin, true, true}, {cto, true, true}, {pm, true, true}, {bh, true, false}, {th, true, false}, {gm, false, false}, {outsider, false, false},
+	} {
+		view := e.must(who.token, "GET", "/api/projects/"+pid, nil)
+		got(t, view, "can", "editFlow", who.editFlow)
+		got(t, view, "can", "manage", who.man)
+	}
+
+	// ---- 移出项目后,修改权随之收回 ----
+	e.expectCode(e.member(admin, pid, bhID, RoleHandler, "remove"), 200, "管理员应能移出 BH")
+	e.fail(bh, "PUT", path+"?via=form", processPayload("离队后"), 403, "只有项目成员")
+	got(t, e.must(bh, "GET", "/api/projects/"+pid, nil), "can", "editFlow", false)
 }
 
 func TestFirstLoginMustChangePassword(t *testing.T) {

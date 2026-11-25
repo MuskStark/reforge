@@ -17,18 +17,19 @@ import (
 // ---- 文案(与前端 lib/labels.ts 保持同一口径) ----
 
 var (
-	projStatusLabel    = map[string]string{ProjActive: "进行中", ProjOnHold: "已搁置", ProjCancelled: "已取消", ProjDone: "已完成"}
-	priorityLabel      = map[string]string{"high": "高", "medium": "中", "low": "低"}
-	healthLabel        = map[string]string{"on_track": "正常", "at_risk": "有风险", "off_track": "已偏离"}
-	stageStatusLabel   = map[string]string{StagePending: "待开始", StageInProgress: "进行中", StageInReview: "评审中", StageApproved: "已通过", StageSkipped: "已跳过"}
-	pendingOnLabel     = map[string]string{"admin": "待指派项目经理", "pm": "待项目经理处理", "cto": "待 CTO 评审", "handler": "待经办确认"}
-	reviewStatusLabel  = map[string]string{ReviewPending: "待决", ReviewApproved: "已通过", ReviewRejected: "已驳回", ReviewWithdrawn: "已撤回"}
-	decisionLabel      = map[string]string{DecisionPending: "待表决", DecisionApprove: "通过", DecisionReject: "驳回"}
-	modeLabel          = map[string]string{ModeAll: "会签", ModeAny: "或签"}
-	reviewerRoleLabel  = map[string]string{RoleCTO: "CTO", RoleHandler: "经办", "admin": "管理员裁决"}
-	itemTypeLabel      = map[string]string{ItemTask: "任务", ItemDeliverable: "交付物", ItemIssue: "问题", ItemRisk: "风险", ItemChange: "变更"}
-	versionKindLabel   = map[string]string{"as_is": "立项时（As-Is）", "to_be": "To-Be 基线", "published": "已发布"}
-	projectRoleLabel   = map[string]string{RolePM: "项目经理", RoleHandler: "经办", RoleDev: "开发实施", RoleViewer: "观察者"}
+	projStatusLabel   = map[string]string{ProjActive: "进行中", ProjOnHold: "已搁置", ProjCancelled: "已取消", ProjDone: "已完成"}
+	priorityLabel     = map[string]string{"high": "高", "medium": "中", "low": "低"}
+	healthLabel       = map[string]string{"on_track": "正常", "at_risk": "有风险", "off_track": "已偏离"}
+	stageStatusLabel  = map[string]string{StagePending: "待开始", StageInProgress: "进行中", StageInReview: "评审中", StageApproved: "已通过", StageSkipped: "已跳过"}
+	pendingOnLabel    = map[string]string{"admin": "待指派 PM", "pm": "待 PM 处理", "cto": "待 CTO 评审", "handler": "待 BH 确认"}
+	reviewStatusLabel = map[string]string{ReviewPending: "待决", ReviewApproved: "已通过", ReviewRejected: "已驳回", ReviewWithdrawn: "已撤回"}
+	decisionLabel     = map[string]string{DecisionPending: "待表决", DecisionApprove: "通过", DecisionReject: "驳回"}
+	modeLabel         = map[string]string{ModeAll: "会签", ModeAny: "或签"}
+	reviewerRoleLabel = map[string]string{RoleCTO: "CTO", RoleHandler: "BH", "admin": "管理员裁决"}
+	itemTypeLabel     = map[string]string{ItemTask: "任务", ItemDeliverable: "交付物", ItemIssue: "问题", ItemRisk: "风险", ItemChange: "变更"}
+	versionKindLabel  = map[string]string{"as_is": "立项时（As-Is）", "to_be": "To-Be 基线", "published": "已发布"}
+	// 岗位与成员角色的显示名一律用英文缩写(BH 业务经办、TH 科技经办、GM 总经理),与前端 lib/labels.ts 一致
+	projectRoleLabel   = map[string]string{RolePM: "PM", RoleHandler: "BH", RoleDev: "TH", RoleViewer: "GM"}
 	projectRoleOrderBy = map[string]int{RolePM: 0, RoleHandler: 1, RoleDev: 2, RoleViewer: 3}
 	eventKindLabel     = map[string]string{
 		"project_created": "建立项目", "project_updated": "修改项目信息", "project_status": "变更项目状态", "project_update": "提交简报",
@@ -80,7 +81,7 @@ func (s *postgresStore) handleExportProjectsCSV(w http.ResponseWriter, r *http.R
 	}
 	projects, err := listProjects(r.Context(), s.db, where, args...)
 	if err != nil {
-		writeErr(w, err)
+		writeErr(w, r, err)
 		return
 	}
 	if order != nil {
@@ -96,7 +97,7 @@ func (s *postgresStore) handleExportProjectsCSV(w http.ResponseWriter, r *http.R
 	}
 	bundle, err := loadBundle(r.Context(), s.db, ids)
 	if err != nil {
-		writeErr(w, err)
+		writeErr(w, r, err)
 		return
 	}
 	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
@@ -106,7 +107,7 @@ func (s *postgresStore) handleExportProjectsCSV(w http.ResponseWriter, r *http.R
 	cw := csv.NewWriter(w)
 	cw.UseCRLF = true
 	_ = cw.Write([]string{
-		"项目名称", "申报人", "状态", "当前阶段", "待处理", "优先级", "改造价值", "复杂度", "健康度", "项目经理", "目标完成日",
+		"项目名称", "申报人", "状态", "当前阶段", "待处理", "优先级", "改造价值", "复杂度", "健康度", "PM", "目标完成日",
 		"工作项", "已完成", "逾期", "阻塞", "未完成必交付物",
 		"步骤数", "线下步骤占比", "断点数", "涉及系统数", "移动端支持率", "会签数", "创建时间", "完成时间",
 	})
@@ -173,7 +174,7 @@ func (s *postgresStore) handleExportProject(w http.ResponseWriter, r *http.Reque
 	id := pathID(r)
 	pr, err := getProject(r.Context(), s.db, id, false)
 	if err != nil {
-		writeErr(w, err)
+		writeErr(w, r, err)
 		return
 	}
 	if pr == nil {
@@ -182,7 +183,7 @@ func (s *postgresStore) handleExportProject(w http.ResponseWriter, r *http.Reque
 	}
 	ex, err := s.collectExport(r, id, pr)
 	if err != nil {
-		writeErr(w, err)
+		writeErr(w, r, err)
 		return
 	}
 	safe := fmt.Sprintf("reforge-project-%s", id)
@@ -377,7 +378,7 @@ func renderProjectMarkdown(ex *projectExport) string {
 		{"当前阶段", mdCell(stageNameOfView(p, p.CurrentStage))},
 		{"优先级 / 改造价值 / 复杂度", label(priorityLabel, p.Priority) + " / " + orDash(p.Value) + " / " + orDash(p.Complexity)},
 		{"健康度", label(healthLabel, p.Health)},
-		{"项目经理", orDash(strings.Join(pms, "、"))},
+		{"PM", orDash(strings.Join(pms, "、"))},
 		{"项目成员", orDash(strings.Join(members, "、"))},
 		{"目标完成日", orDash(p.DueDate)},
 		{"建立 / 完成", p.CreatedAt.Local().Format("2006-01-02") + " / " + orDash(completedOn)},

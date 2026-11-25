@@ -71,7 +71,7 @@ export function ReviewTab({ ctx }: { ctx: DetailCtx }) {
   const required = ctx.items.filter((i) => i.required && cur && i.stageSeq === cur.seq);
   const missing = required.filter((i) => i.status !== "done" && i.status !== "cancelled");
   const canSubmit = live && cur?.status === "in_progress" && !!cur.gate && project.can.manage;
-  const reviewerName = cur?.reviewerRole === "cto" ? "CTO" : "经办";
+  const reviewerName = cur?.reviewerRole === "cto" ? "CTO" : "BH";
   const earlier = project.stages.filter((s) => s.seq < project.currentStage);
 
   const run = async (label: string, fn: () => Promise<unknown>, ok?: string) => {
@@ -117,7 +117,7 @@ export function ReviewTab({ ctx }: { ctx: DetailCtx }) {
       });
       toast.success(decision === "approve" ? "已表决通过" : "已驳回", {
         description:
-          r.status === "approved" ? "评审通过，已进入下一阶段并通知全体成员" : r.status === "rejected" ? "已退回项目经理修改" : "已记录你的表决，等待其他评审人",
+          r.status === "approved" ? "评审通过，已进入下一阶段并通知全体成员" : r.status === "rejected" ? "已退回 PM 修改" : "已记录你的表决，等待其他评审人",
       });
       setComment("");
       await ctx.refresh();
@@ -171,7 +171,7 @@ export function ReviewTab({ ctx }: { ctx: DetailCtx }) {
   };
 
   return (
-    <div className="grid grid-cols-[minmax(0,1fr)] items-start gap-4 lg:grid-cols-[minmax(0,1fr)_380px]">
+    <div className="grid grid-cols-[minmax(0,1fr)] items-start gap-4 xl:grid-cols-[minmax(0,1fr)_380px]">
       <div className="grid grid-cols-[minmax(0,1fr)] gap-4">
         {/* 当前关卡 */}
         <section className="glass-card p-5">
@@ -212,7 +212,7 @@ export function ReviewTab({ ctx }: { ctx: DetailCtx }) {
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="text-[13px] font-semibold text-neutral-900">{r.displayName || r.username || "系统管理员"}</span>
-                        <span className="text-[11px] text-[color:var(--ink-3)]">{r.role === "cto" ? "CTO" : r.role === "handler" ? "经办" : r.role === "admin" ? "管理员裁决" : r.role}</span>
+                        <span className="text-[11px] text-[color:var(--ink-3)]">{r.role === "cto" ? "CTO" : r.role === "handler" ? "BH" : r.role === "admin" ? "管理员裁决" : r.role}</span>
                         <span className={cn(voteBadge(r.decision), "ml-auto")}>
                           {r.decision === "approve" ? "通过" : r.decision === "reject" ? "驳回" : "待表决"}
                         </span>
@@ -324,7 +324,7 @@ export function ReviewTab({ ctx }: { ctx: DetailCtx }) {
                   </div>
                 </>
               ) : (
-                <p className="mt-3 text-[13px] text-[color:var(--ink-3)]">等待项目经理完成必交付物并提交评审。</p>
+                <p className="mt-3 text-[13px] text-[color:var(--ink-3)]">等待 PM 完成必交付物并提交评审。</p>
               )}
             </div>
           )}
@@ -422,7 +422,7 @@ export function ReviewTab({ ctx }: { ctx: DetailCtx }) {
                 <span className="min-w-0 flex-1">
                   <span className="block truncate font-medium text-neutral-900">{s.name}</span>
                   <span className="block truncate text-[11px] text-[color:var(--ink-3)]">
-                    {s.gate ? `${s.gate} · ${s.reviewerRole === "cto" ? "CTO" : "经办"}${MODE_LABEL[s.mode]}` : "无门禁"}
+                    {s.gate ? `${s.gate} · ${s.reviewerRole === "cto" ? "CTO" : "BH"}${MODE_LABEL[s.mode]}` : "无门禁"}
                   </span>
                 </span>
                 <span className={cn("shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold", s.status === "approved" ? "bg-[color:var(--green-soft)] text-[color:var(--green-deep)]" : s.status === "skipped" ? "bg-[rgba(120,120,128,0.12)] text-[color:var(--ink-2)]" : s.status === "in_review" ? "bg-[color:var(--indigo-soft)] text-[color:var(--indigo-deep)]" : s.status === "in_progress" ? "bg-[color:var(--tint-soft)] text-[color:var(--tint-deep)]" : "bg-[rgba(120,120,128,0.08)] text-[color:var(--ink-3)]")}>

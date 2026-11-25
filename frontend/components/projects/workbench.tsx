@@ -1,404 +1,425 @@
 "use client";
 
 /**
- * 我的工作台(登录后首页):按角色组织。
- *   CTO  / 管理员:待我评审 → 需要关注的项目(有风险 / 逾期)→ 在途项目
- *   项目经理      :待我处理(待提交评审、逾期、阻塞)→ 我负责的项目 → 我的任务
- *   经办 / 开发   :待我确认 / 评审 → 我的任务 → 我参与的项目
+ * 工作台(登录后的首页):只回答"我现在要做什么"。
+ * 主列是一张按动作分组的清单——待我评审 / 待我指派 / 等我推进 / 我的任务,不同的人看到不同的组;
+ * 右栏是我的项目与需要关注的。有内容才成卡,空的收成一行,四类全空显示「都处理完了」。
+ * 分组的口径与侧栏上的待办数字共用 lib/workbench.ts。
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { AlertTriangle, ArrowRight, CheckCircle2, ClipboardCheck, FileSignature, Hourglass, Layers } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, ClipboardCheck, FileSignature, Hourglass, Plus, Presentation, TriangleAlert, UserPlus, Waypoints, Workflow, Users } from "lucide-react";
+import { AppShell, PageHead, StateLine, announceTodo } from "@/components/shell/app-shell";
+import { MembersDialog } from "@/components/projects/members-dialog";
+import { PendingOnBadge } from "@/components/projects/stage-rail";
+import { computeWorkbench, riskWhy } from "@/lib/workbench";
 import { authFetch, type SessionUser } from "@/lib/auth";
-import type { Overview, PendingReview, ProjectView, WorkItem } from "@/lib/types";
-import { HEALTH_LABEL, ITEM_STATUS_LABEL, MODE_LABEL, PRIORITY_LABEL, dueInfo, healthClass, priorityClass } from "@/lib/labels";
-import { AppShell, PageHead, StateLine } from "@/components/shell/app-shell";
-import { ProjectCard } from "@/components/projects/project-card";
-import { Avatar } from "@/components/projects/stage-rail";
+import type { PendingReview, ProjectView, UserDir, WorkItem } from "@/lib/types";
+import { HEALTH_LABEL, ITEM_STATUS_LABEL, MODE_LABEL, PENDING_ON_LABEL, PRIORITY_LABEL, STATUS_LABEL, dueInfo, fmtDate, pct, priorityClass, statusClass } from "@/lib/labels";
 import { cn } from "@/lib/utils";
 
-type Tab = "todo" | "reviews" | "projects" | "tasks";
+/** 每组默认最多显示几行,其余「显示全部」就地展开 */
+const FOLD = 3;
+
+const DAY = 86_400_000;
+const daysAgo = (iso: string) => Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / DAY));
+
+/** 「今天提交 / N 天前提交」;等了 3 天以上标红成「已等 N 天」 */
+function Wait({ days }: { days: number }) {
+  if (days >= 3) return <span className="act-when warn">已等 {days} 天</span>;
+  return <span className="act-when">{days === 0 ? "今天提交" : `${days} 天前提交`}</span>;
+}
+
+/** 健康度徽章:已偏离用红,有风险用琥珀 */
+const healthBadge = (p: ProjectView) => <span className={cn("badge !h-[20px] !px-2 text-[11px]", p.health === "off_track" ? "badge-warn" : "badge-amber")}>{HEALTH_LABEL[p.health]}</span>;
+
+/**
+ * 清单里的一组。条目的类型随组走(PendingReview / ProjectView / WorkItem 各不相同),
+ * 所以渲染在组内部完成,对外只暴露统一的形状:数量、是否适用、画出前几行或全部。
+ */
+function group<T>(g: { key: string; icon: LucideIcon; tone: string; title: string; empty: string; items: T[]; keyOf: (item: T) => string; render: (item: T) => React.ReactNode; applies: boolean }) {
+  return {
+    key: g.key,
+    icon: g.icon,
+    tone: g.tone,
+    title: g.title,
+    empty: g.empty,
+    applies: g.applies,
+    count: g.items.length,
+    draw: (all: boolean) =>
+      g.items
+        .slice(0, all ? g.items.length : FOLD)
+        .map((item) => <Fragment key={g.keyOf(item)}>{g.render(item)}</Fragment>),
+  };
+}
 
 export function Workbench() {
   return <AppShell active="work">{(me) => <WorkbenchBody me={me} />}</AppShell>;
 }
 
 function WorkbenchBody({ me }: { me: SessionUser }) {
-  const [tab, setTab] = useState<Tab>("todo");
   const [projects, setProjects] = useState<ProjectView[] | null>(null);
   const [reviews, setReviews] = useState<PendingReview[]>([]);
   const [tasks, setTasks] = useState<WorkItem[]>([]);
-  const [overview, setOverview] = useState<Overview | null>(null);
+  const [users, setUsers] = useState<UserDir[]>([]);
+  const [assignOf, setAssignOf] = useState<ProjectView | null>(null);
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+
+  const isAdmin = me.role === "admin";
+  const isPM = me.jobRole === "pm";
 
   const load = useCallback(async () => {
     try {
-      const [ps, rv, mine, ov] = await Promise.all([
+      // 用户名单只有管理员指派 PM 时用得上
+      const [ps, rv, mine, us] = await Promise.all([
         authFetch<ProjectView[]>("/api/projects", { cache: "no-store" }),
         authFetch<PendingReview[]>("/api/reviews/pending", { cache: "no-store" }),
         authFetch<WorkItem[]>("/api/me/items", { cache: "no-store" }),
-        authFetch<Overview>("/api/overview", { cache: "no-store" }),
+        isAdmin ? authFetch<UserDir[]>("/api/users", { cache: "no-store" }) : Promise.resolve([] as UserDir[]),
       ]);
       setProjects(ps);
       setReviews(rv ?? []);
       setTasks(mine ?? []);
-      setOverview(ov);
+      setUsers(us ?? []);
     } catch {
       /* 会话失效由外壳处理 */
     }
-  }, []);
+  }, [isAdmin]);
 
   useEffect(() => {
     void load();
   }, [load]);
 
-  const isCTO = me?.jobRole === "cto" || me?.role === "admin";
+  const model = useMemo(() => (projects ? computeWorkbench(me, projects, reviews, tasks) : null), [me, projects, reviews, tasks]);
 
-  const mine = useMemo(() => {
-    const myId = me?.id ?? "";
-    return (projects ?? []).filter((p) => p.members.some((m) => m.userId === myId));
-  }, [projects, me?.id]);
+  // 侧栏「工作台」后面的数字:这里已经算好,直接告诉外壳,外壳不必再请求一遍
+  const total = model?.total;
+  useEffect(() => {
+    if (total != null) announceTodo(total);
+  }, [total]);
 
-  /** 有风险 / 逾期 / 阻塞的在途项目 */
-  const risky = useMemo(
-    () => (projects ?? []).filter((p) => p.status === "active" && (p.health !== "on_track" || p.stats.overdue > 0 || p.stats.blocked > 0)),
-    [projects],
-  );
+  // 指派完成后刷新这一个项目
+  const refreshOne = useCallback(async () => {
+    if (!assignOf) return;
+    try {
+      const p = await authFetch<ProjectView>(`/api/projects/${assignOf.id}`, { cache: "no-store" });
+      setProjects((prev) => (prev ?? []).map((x) => (x.id === p.id ? p : x)));
+      setAssignOf(p);
+    } catch {
+      /* 忽略 */
+    }
+  }, [assignOf]);
 
-  /** 需要我出手的在途项目:待我评审;CTO / 管理员另含待指派与有风险的;项目经理另含轮到自己推进的 */
-  const needsMe = useMemo(() => {
-    const myId = me?.id ?? "";
-    const oversight = me?.role === "admin" || me?.jobRole === "cto";
-    const riskyIds = new Set(risky.map((p) => p.id));
-    return (projects ?? []).filter((p) => {
-      if (p.status !== "active") return false;
-      if (reviews.some((r) => r.projectId === p.id)) return true;
-      if (oversight && (p.pendingOn === "admin" || riskyIds.has(p.id))) return true;
-      const iAmPM = p.members.some((m) => m.userId === myId && m.role === "pm");
-      return iAmPM && (p.pendingOn === "pm" || p.stats.overdue > 0 || p.stats.blocked > 0);
-    });
-  }, [projects, reviews, risky, me?.id, me?.role, me?.jobRole]);
+  if (!model) return <StateLine>加载中…</StateLine>;
 
-  if (!projects) return <StateLine>加载中…</StateLine>;
+  const showRisk = model.oversee || isPM;
+  const projectOf = (id: string) => projects?.find((p) => p.id === id);
+  const stageOf = (p?: ProjectView) => p?.stages[p.currentStage - 1];
 
-  const myTasks = tasks.filter((t) => t.status !== "done" && t.status !== "cancelled");
-  const empty = projects.length === 0 && reviews.length === 0 && myTasks.length === 0;
+  /** 四类行动:顺序固定,人人一样;不适用的组不出现 */
+  const groups = [
+    group<PendingReview>({
+      key: "review",
+      icon: FileSignature,
+      tone: "indigo",
+      title: "待我评审",
+      empty: "没有等你评审的关卡",
+      items: model.review,
+      keyOf: (r) => r.id,
+      applies: true,
+      render: (r) => {
+        const stage = projectOf(r.projectId)?.stages[r.stageSeq - 1];
+        const href = `/projects/${r.projectId}?tab=review`;
+        return (
+          <div className="act-row">
+            <Link href={href} prefetch={false} className="act-main">
+              <span className="act-title">{r.projectName}</span>
+              <span className="act-meta">
+                阶段 {r.stageSeq} · {stage?.name ?? ""}
+                {stage?.gate && ` · ${stage.gate}`}（{MODE_LABEL[r.mode]} · 第 {r.round} 轮）
+                {r.summary ? ` · ${r.summary}` : ""}
+              </span>
+            </Link>
+            <span className="act-tags">
+              <span className={cn(priorityClass(r.priority), "!h-[20px] !px-2 text-[11px]")}>{PRIORITY_LABEL[r.priority]}优先</span>
+              <Wait days={r.waitingDays} />
+            </span>
+            <Link href={href} prefetch={false} className="btn-tint">
+              去评审
+            </Link>
+          </div>
+        );
+      },
+    }),
+    group<ProjectView>({
+      key: "assign",
+      icon: UserPlus,
+      tone: "amber",
+      title: "待我指派",
+      empty: "没有等你指派的流程",
+      items: model.assign,
+      keyOf: (p) => p.id,
+      applies: isAdmin,
+      render: (p) => (
+        <div className="act-row">
+          <Link href={`/projects/${p.id}`} prefetch={false} className="act-main">
+            <span className="act-title">{p.name}</span>
+            <span className="act-meta">
+              {p.applicant ? `${p.applicant} 提交 · ` : ""}
+              {fmtDate(p.createdAt)} · {p.metrics.steps} 个步骤
+              {p.metrics.countersigns > 0 && ` · 会签 ${p.metrics.countersigns} 处`}
+            </span>
+          </Link>
+          <span className="act-tags">
+            <Wait days={daysAgo(p.createdAt)} />
+          </span>
+          <button type="button" className="btn-tint" onClick={() => setAssignOf(p)}>
+            <UserPlus aria-hidden="true" />
+            指派 PM
+          </button>
+        </div>
+      ),
+    }),
+    group<ProjectView>({
+      key: "advance",
+      icon: Hourglass,
+      tone: "blue",
+      title: "等我推进",
+      empty: "没有等你推进的项目",
+      items: model.advance,
+      keyOf: (p) => p.id,
+      applies: isPM,
+      render: (p) => {
+        const stage = stageOf(p);
+        const due = dueInfo(stage?.dueDate ?? p.dueDate);
+        const why = riskWhy(p);
+        const pendingMe = p.pendingOn === "pm";
+        return (
+          <div className="act-row">
+            <Link href={`/projects/${p.id}`} prefetch={false} className="act-main">
+              <span className="act-title">{p.name}</span>
+              <span className="act-meta">
+                阶段 {p.currentStage} · {stage?.name ?? ""}
+                <span className="mx-1.5 text-[color:var(--ink-3)]">·</span>
+                {pendingMe ? PENDING_ON_LABEL.pm : why || HEALTH_LABEL[p.health]}
+              </span>
+            </Link>
+            <span className="act-tags">
+              {p.health !== "on_track" && healthBadge(p)}
+              {/* 轮到我了,同时还有逾期 / 阻塞:原因单独亮出来 */}
+              {pendingMe && why && <span className="act-when warn">{why}</span>}
+              {due && <span className={cn("act-when", due.overdue && "warn")}>{due.label}</span>}
+            </span>
+            <Link href={`/projects/${p.id}`} prefetch={false} className="btn-tint">
+              去推进
+            </Link>
+          </div>
+        );
+      },
+    }),
+    group<WorkItem>({
+      key: "tasks",
+      icon: ClipboardCheck,
+      tone: "plain",
+      title: "我的任务",
+      empty: "没有分配给你的任务",
+      items: model.tasks,
+      keyOf: (t) => t.id,
+      applies: true,
+      render: (t) => {
+        const due = dueInfo(t.dueDate);
+        const href = `/projects/${t.projectId}?tab=plan&item=${t.id}`;
+        return (
+          <div className="act-row">
+            <Link href={href} prefetch={false} className="act-main">
+              <span className="act-title">{t.title}</span>
+              <span className="act-meta">
+                {t.projectName}
+                {t.blockReason && (
+                  <>
+                    <span className="mx-1.5 text-[color:var(--ink-3)]">·</span>
+                    <b className="warn">阻塞：{t.blockReason}</b>
+                  </>
+                )}
+              </span>
+            </Link>
+            <span className="act-tags">
+              <span className={cn("badge !h-[20px] !px-2 text-[11px]", t.status === "blocked" ? "badge-warn" : t.status === "in_progress" ? "badge-blue" : "badge-plain")}>
+                {ITEM_STATUS_LABEL[t.status]}
+              </span>
+              {due && <span className={cn("act-when", due.overdue && "warn")}>{due.label}</span>}
+            </span>
+            <Link href={href} prefetch={false} className="btn-tint">
+              去处理
+            </Link>
+          </div>
+        );
+      },
+    }),
+  ].filter((g) => g.applies);
+  const filled = groups.filter((g) => g.count > 0);
+  const idle = groups.filter((g) => g.count === 0);
 
-  const tabs: { id: Tab; label: string; n?: number }[] = [
-    { id: "todo", label: "待我处理", n: reviews.length + myTasks.length + needsMe.filter((p) => !reviews.some((r) => r.projectId === p.id)).length },
-    { id: "reviews", label: "待我评审", n: reviews.length },
-    { id: "projects", label: isCTO ? "全部项目" : "我参与的项目", n: isCTO ? projects.length : mine.length },
-    { id: "tasks", label: "我的任务", n: myTasks.length },
-  ];
-  const roleLine =
-    me.role === "admin"
-      ? "系统管理员"
-      : me.jobRole === "cto"
-        ? "CTO"
-        : me.jobRole === "pm"
-          ? "项目经理"
-          : me.jobRole === "handler"
-            ? "经办"
-            : me.jobRole === "dev"
-              ? "开发实施"
-              : "成员";
+  /** 页头的一句话摘要 */
+  const summary = model.total === 0 ? "现在没有等你处理的事情。" : <>{model.total} 件事等你处理{model.urgent > 0 && <>，其中 <b className="warn">{model.urgent} 件</b>已经拖了</>}。</>;
+
+  /** 都处理完时的快捷入口,按角色给 */
+  const quick = isAdmin
+    ? [
+        { icon: Workflow, label: "流程定义", href: "/admin/processes" },
+        { icon: Users, label: "用户与岗位", href: "/admin/users" },
+        { icon: Presentation, label: "数据大屏", href: "/monitor" },
+        { icon: Plus, label: "提交流程", href: "/" },
+      ]
+    : model.oversee
+      ? [
+          { icon: Waypoints, label: "流程项目", href: "/projects" },
+          { icon: Presentation, label: "数据大屏", href: "/monitor" },
+          { icon: Plus, label: "提交流程", href: "/" },
+        ]
+      : [
+          { icon: Waypoints, label: "流程项目", href: "/projects" },
+          { icon: Plus, label: "提交流程", href: "/" },
+        ];
+
+  const projRow = (p: ProjectView) => {
+    const progress = pct(p.stats.done, p.stats.total);
+    const tag =
+      p.status !== "active" ? (
+        <span className={cn(statusClass(p.status), "!h-[20px] text-[11px]")}>{STATUS_LABEL[p.status]}</span>
+      ) : p.health !== "on_track" ? (
+        healthBadge(p)
+      ) : (
+        <PendingOnBadge on={p.pendingOn} />
+      );
+    return (
+      <Link key={p.id} href={`/projects/${p.id}`} prefetch={false} className="proj-row">
+        <span className="proj-top">
+          <span className="proj-name">{p.name}</span>
+          {tag}
+        </span>
+        <span className="proj-bottom">
+          <span className="proj-stage">
+            <b>
+              {p.currentStage}/{p.stages.length}
+            </b>{" "}
+            · {stageOf(p)?.name ?? ""}
+          </span>
+          <span className={cn("proj-bar", p.health !== "on_track" && "is-warn")} aria-hidden="true">
+            <i style={{ width: `${progress}%` }} />
+          </span>
+          <span className="proj-pct">{progress}%</span>
+        </span>
+      </Link>
+    );
+  };
 
   return (
     <>
-      <PageHead
-        title={
-          <span className="flex items-center gap-2.5">
-            <Avatar name={me.displayName || me.username} size={34} />
-            {me.displayName || me.username}，你好
-          </span>
-        }
-        subtitle={
-          me.role === "admin" || me.jobRole === "cto"
-            ? "先处理等你评审的关卡，再看哪些项目需要你介入。"
-            : me.jobRole === "pm"
-              ? "推进你负责的流程：完成必交付物、提交评审、及时写简报。"
-              : "这里是你需要确认、评审或办理的事项。"
-        }
-      >
-        <span className="badge badge-plain !h-[24px]">{roleLine}</span>
-        {overview && (
-          <>
-            <span className="lg-chip font-data px-3 py-1.5 text-xs text-[color:var(--ink-2)]">在途 {overview.active}</span>
-            <span className="lg-chip px-3 py-1.5 text-xs text-[color:var(--ink-2)]">
-              待评审 <b className="font-data text-[color:var(--indigo-deep)]">{overview.pendingReviews}</b>
-            </span>
-            <span className={cn("lg-chip px-3 py-1.5 text-xs", overview.overdueItems > 0 ? "text-[color:var(--red-deep)]" : "text-[color:var(--ink-2)]")}>
-              逾期 <b className="font-data">{overview.overdueItems}</b>
-            </span>
-            <span className="lg-chip px-3 py-1.5 text-xs text-[color:var(--ink-2)]">
-              阻塞 <b className="font-data">{overview.blockedItems}</b>
-            </span>
-          </>
-        )}
-      </PageHead>
+      <PageHead title="工作台" subtitle={summary} />
 
-      {empty ? (
-        <section className="glass-card p-8 text-center">
-          <Layers className="mx-auto h-9 w-9 text-[color:var(--ink-3)]" />
-          <h2 className="mt-3 text-[17px] font-semibold">还没有需要你处理的事情</h2>
-          <p className="mx-auto mt-2 max-w-md text-[13px] leading-relaxed text-[color:var(--ink-2)]">
-            流程一提交就会自动立项，管理员指派项目经理后启动；业务侧经办由项目经理分配，科技侧经办由 CTO 分配。被加入项目后，待办会出现在这里。
-          </p>
-          <div className="mt-5 flex flex-wrap justify-center gap-2.5">
-            <Link href="/projects" prefetch={false} className="btn btn-glass">
-              查看全部项目
-            </Link>
-            <Link href="/" prefetch={false} className="btn btn-primary">
-              去提交流程
-            </Link>
-          </div>
-        </section>
-      ) : (
-        <>
-          {/* 分段 */}
-          <div className="seg mb-4 max-w-[560px] overflow-x-auto">
-            {tabs.map((t) => (
-              <button key={t.id} type="button" onClick={() => setTab(t.id)} className={tab === t.id ? "on" : undefined}>
-                {t.label}
-                {t.n ? <span className="font-data ml-1.5 text-[11px] text-[color:var(--ink-3)]">{t.n}</span> : null}
-              </button>
-            ))}
-          </div>
-
-          {tab === "todo" && (
-            <div className="grid grid-cols-[minmax(0,1fr)] gap-4 lg:grid-cols-[minmax(0,1fr)_340px]">
-              <div className="space-y-4">
-                {/* 待我评审 */}
-                <Section icon={FileSignature} title="待我评审" count={reviews.length} tone="indigo">
-                  {reviews.length === 0 ? (
-                    <EmptyLine>没有等你评审的关卡。</EmptyLine>
-                  ) : (
-                    <ul className="grid gap-2.5">
-                      {reviews.map((r) => {
-                        const stage = projects.find((p) => p.id === r.projectId)?.stages[r.stageSeq - 1];
-                        return (
-                          <li key={r.id}>
-                            <Link
-                              href={`/projects/${r.projectId}?tab=review`}
-                              prefetch={false}
-                              className="flex flex-wrap items-center gap-3 rounded-2xl bg-white/60 px-3.5 py-3 shadow-[inset_0_0_0_0.5px_rgba(255,255,255,0.65),inset_0_0_0_0.5px_rgba(88,86,214,0.22)] transition hover:bg-white/80"
-                            >
-                              <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-[color:var(--indigo-soft)] text-[color:var(--indigo-deep)]">
-                                <FileSignature className="h-4 w-4" />
-                              </span>
-                              <span className="min-w-0 flex-1">
-                                <span className="block truncate text-[14px] font-semibold text-neutral-900">{r.projectName}</span>
-                                <span className="mt-0.5 block truncate text-xs text-[color:var(--ink-2)]">
-                                  阶段 {r.stageSeq} · {stage?.name} · {stage?.gate}（{MODE_LABEL[r.mode]} · 第 {r.round} 轮）
-                                  {r.summary ? ` · ${r.summary}` : ""}
-                                </span>
-                              </span>
-                              <span className={priorityClass(r.priority)}>{PRIORITY_LABEL[r.priority]}优先</span>
-                              {r.waitingDays >= 3 ? (
-                                <span className="badge badge-warn !h-[20px] text-[11px] font-data">已等 {r.waitingDays} 天</span>
-                              ) : (
-                                <span className="font-data text-[11px] text-[color:var(--ink-3)]">{r.waitingDays === 0 ? "今天提交" : `${r.waitingDays} 天前提交`}</span>
-                              )}
-                              <ArrowRight className="h-4 w-4 shrink-0 text-[color:var(--ink-3)]" />
-                            </Link>
-                          </li>
-                        );
-                      })}
-                    </ul>
-                  )}
-                </Section>
-
-                {/* 轮到我推进 / 需要我处理的项目 */}
-                <Section icon={Hourglass} title={isCTO ? "需要关注的项目" : me.jobRole === "pm" ? "等我推进的项目" : "等我处理的项目"} count={needsMe.length}>
-                  {needsMe.length === 0 ? (
-                    <EmptyLine>{isCTO ? "没有需要你关注的项目。" : "没有等你处理的项目。"}</EmptyLine>
-                  ) : (
-                    <div className="grid gap-2.5 sm:grid-cols-2">
-                      {needsMe.map((p) => (
-                        <ProjectCard key={p.id} p={p} dense />
-                      ))}
-                    </div>
-                  )}
-                </Section>
-
-                {/* 我的任务摘要 */}
-                <Section icon={ClipboardCheck} title="我的待办任务" count={myTasks.length}>
-                  {myTasks.length === 0 ? (
-                    <EmptyLine>没有分配给你的任务。</EmptyLine>
-                  ) : (
-                    <ul className="grid gap-1">
-                      {myTasks.slice(0, 6).map((t) => (
-                        <TaskRow key={t.id} t={t} />
-                      ))}
-                    </ul>
-                  )}
-                </Section>
+      <div className="wb-grid">
+        <div className="min-w-0 space-y-3.5">
+          {model.total === 0 ? (
+            <section className="glass-card allclear">
+              <span className="allclear-bead" aria-hidden="true">
+                <Check />
+              </span>
+              <h2 className="text-[22px] font-bold tracking-[-0.02em] text-neutral-900">都处理完了</h2>
+              <p className="mx-auto mt-2 max-w-[30em] text-[15px] leading-relaxed text-[color:var(--ink-2)]">现在没有等你评审、指派或办理的事情。新的待办一出现就会列在这里。</p>
+              <div className="mt-5 flex flex-wrap justify-center gap-2.5 border-t border-[color:var(--sep)] pt-5">
+                {quick.map(({ icon: Icon, label, href }) => (
+                  <Link
+                    key={href}
+                    href={href}
+                    prefetch={false}
+                    className="inline-flex h-9 items-center gap-2 rounded-full bg-white/75 px-4 text-[13px] font-semibold text-neutral-900 shadow-[inset_0_1px_0_#fff,inset_0_0_0_0.5px_rgba(255,255,255,0.6),0_3px_10px_-5px_rgba(23,42,80,0.25)]"
+                  >
+                    <Icon className="h-4 w-4 text-[color:var(--tint)]" aria-hidden="true" />
+                    {label}
+                  </Link>
+                ))}
               </div>
-
-              {/* 侧栏:风险与概况 */}
-              <aside className="space-y-4">
-                <section className="glass-card p-5">
-                  <h3 className="flex items-center gap-2 text-[15px] font-semibold">
-                    <AlertTriangle className="h-4 w-4 text-[color:var(--amber)]" />
-                    风险与逾期
-                    <span className="badge badge-warn ml-auto !h-[20px] text-[11px]">{risky.filter((p) => p.health !== "on_track").length}</span>
-                  </h3>
-                  {risky.length === 0 ? (
-                    <p className="mt-3 text-[13px] text-[color:var(--ink-3)]">所有在途项目状态正常。</p>
-                  ) : (
-                    <ul className="mt-3 grid gap-1">
-                      {risky.slice(0, 8).map((p) => (
-                        <li key={p.id}>
-                          <Link href={`/projects/${p.id}`} prefetch={false} className="flex items-center gap-2 rounded-xl px-2 py-1.5 transition hover:bg-white/60">
-                            <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-neutral-900">{p.name}</span>
-                            <span className={healthClass(p.health)}>{HEALTH_LABEL[p.health]}</span>
-                          </Link>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </section>
-
-                <section className="glass-card p-5">
-                  <h3 className="flex items-center gap-2 text-[15px] font-semibold">
-                    <CheckCircle2 className="h-4 w-4 text-[color:var(--green)]" />
-                    阶段分布
-                  </h3>
-                  {overview && overview.active === 0 ? (
-                    <p className="mt-3 text-[13px] text-[color:var(--ink-3)]">当前没有在途项目。</p>
-                  ) : (
-                    <ul className="mt-3 space-y-1.5">
-                      {(overview?.byStage ?? []).map((n, i) => {
-                        const name = overview?.stageNames?.[i] ?? `阶段 ${i + 1}`;
-                        const max = Math.max(1, ...(overview?.byStage ?? [1]));
-                        return (
-                          <li key={i} className="flex items-center gap-2 text-xs">
-                            <span className="w-[62px] shrink-0 text-[color:var(--ink-2)]">{name}</span>
-                            <span className="h-1.5 flex-1 overflow-hidden rounded-full bg-[rgba(120,120,128,0.12)]">
-                              <span className="block h-full rounded-full bg-[color:var(--tint)]" style={{ width: `${(n / max) * 100}%` }} />
-                            </span>
-                            <span className="font-data w-5 text-right tabular-nums text-[color:var(--ink-2)]">{n}</span>
-                          </li>
-                        );
-                      })}
-                    </ul>
-                  )}
-                  {overview && overview.pendingReviews > 0 && (
-                    <p className="mt-3 text-xs leading-relaxed text-[color:var(--ink-2)]">
-                      待决评审平均已等待 <b className="font-data text-[color:var(--indigo-deep)]">{overview.reviewWaitDays}</b> 天
-                      {overview.reviewWaitDays >= 3 ? "，评审正在成为瓶颈" : ""}。
-                    </p>
-                  )}
-                </section>
-              </aside>
-            </div>
-          )}
-
-          {tab === "reviews" && (
-            <Section icon={FileSignature} title="待我评审" count={reviews.length} tone="indigo">
-              {reviews.length === 0 ? (
-                <EmptyLine>没有等你评审的关卡。提交后会在这里出现。</EmptyLine>
-              ) : (
-                <ul className="grid gap-2.5">
-                  {reviews.map((r) => {
-                    const stage = projects.find((p) => p.id === r.projectId)?.stages[r.stageSeq - 1];
-                    return (
-                      <li key={r.id}>
-                        <Link href={`/projects/${r.projectId}?tab=review`} prefetch={false} className="glass-card flex flex-wrap items-center gap-3 p-4 transition hover:-translate-y-0.5">
-                          <span className="min-w-0 flex-1">
-                            <span className="block truncate text-[15px] font-semibold text-neutral-900">{r.projectName}</span>
-                            <span className="mt-1 block text-xs text-[color:var(--ink-2)]">
-                              {stage?.gate} · {MODE_LABEL[r.mode]} · 第 {r.round} 轮 · {r.submittedByName} 提交
-                            </span>
-                            {r.summary && <span className="mt-1.5 block line-clamp-2 text-[13px] leading-relaxed text-[color:var(--ink-2)]">{r.summary}</span>}
-                          </span>
-                          {r.waitingDays >= 3 && <span className="badge badge-warn !h-[20px] text-[11px] font-data">已等 {r.waitingDays} 天</span>}
-                          <span className="btn btn-primary !h-9 !px-3.5 text-[13px]">去评审</span>
-                        </Link>
-                      </li>
-                    );
-                  })}
-                </ul>
-              )}
-            </Section>
-          )}
-
-          {tab === "projects" && (
-            <Section icon={Layers} title={isCTO ? "全部项目" : "我参与的项目"} count={isCTO ? projects.length : mine.length}>
-              {(isCTO ? projects : mine).length === 0 ? (
-                <EmptyLine>你还没有参与任何项目。</EmptyLine>
-              ) : (
-                <div className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-3">
-                  {(isCTO ? projects : mine).map((p) => (
-                    <ProjectCard key={p.id} p={p} />
+            </section>
+          ) : (
+            <>
+              {filled.map((g) => {
+                const showAll = Boolean(expanded[g.key]);
+                return (
+                  <section key={g.key} className="glass-card act-card" aria-label={g.title}>
+                    <header className="act-head">
+                      <span className={cn("act-ic", g.tone)}>
+                        <g.icon aria-hidden="true" />
+                      </span>
+                      <h2>{g.title}</h2>
+                      <span className="badge badge-plain !h-[20px] font-data text-[11px]">{g.count}</span>
+                    </header>
+                    {g.draw(showAll)}
+                    {g.count > FOLD && (
+                      <button type="button" className="act-more" aria-expanded={showAll} onClick={() => setExpanded((prev) => ({ ...prev, [g.key]: !showAll }))}>
+                        {showAll ? "收起" : `显示全部 ${g.count} 项`}
+                        <ChevronDown className={cn("h-4 w-4 transition-transform", showAll && "rotate-180")} aria-hidden="true" />
+                      </button>
+                    )}
+                  </section>
+                );
+              })}
+              {idle.length > 0 && (
+                <p className="act-quiet">
+                  {idle.map((g) => (
+                    <span key={g.key}>
+                      <Check aria-hidden="true" />
+                      {g.empty}
+                    </span>
                   ))}
-                </div>
+                </p>
               )}
-            </Section>
+            </>
           )}
+        </div>
 
-          {tab === "tasks" && (
-            <Section icon={ClipboardCheck} title="我的任务" count={myTasks.length}>
-              {myTasks.length === 0 ? (
-                <EmptyLine>没有分配给你的任务。</EmptyLine>
+        <aside className="min-w-0 space-y-3.5">
+          <section className="glass-card side-card">
+            <header className="side-head">
+              <h2>{model.oversee ? "在途项目" : "我参与的项目"}</h2>
+              <Link href="/projects" prefetch={false} className="side-more">
+                查看全部
+                <ChevronRight aria-hidden="true" />
+              </Link>
+            </header>
+            {model.mine.length === 0 ? (
+              <p className="side-empty">{model.oversee ? "当前没有在途项目。" : "你还没有参与任何项目。被加入项目后，会出现在这里。"}</p>
+            ) : (
+              model.mine.slice(0, 5).map(projRow)
+            )}
+          </section>
+
+          {showRisk && (
+            <section className="glass-card side-card">
+              <header className="side-head">
+                <TriangleAlert aria-hidden="true" />
+                <h2>需要关注</h2>
+                <span className={cn("badge !h-[20px] font-data text-[11px]", model.risky.length > 0 ? "badge-warn" : "badge-plain")}>{model.risky.length}</span>
+              </header>
+              {model.risky.length === 0 ? (
+                <p className="side-empty">{isPM && !model.oversee ? "你负责的项目状态都正常。" : "所有在途项目状态正常。"}</p>
               ) : (
-                <ul className="grid gap-1">
-                  {myTasks.map((t) => (
-                    <TaskRow key={t.id} t={t} />
-                  ))}
-                </ul>
+                model.risky.slice(0, 6).map((p) => (
+                  <Link key={p.id} href={`/projects/${p.id}`} prefetch={false} className="risk-row">
+                    <TriangleAlert style={{ color: p.health === "off_track" ? "var(--red)" : "var(--amber)" }} aria-hidden="true" />
+                    <span className="proj-name">{p.name}</span>
+                    <span className={cn("risk-why", p.health !== "off_track" && "is-warn")}>{riskWhy(p) || HEALTH_LABEL[p.health]}</span>
+                  </Link>
+                ))
               )}
-            </Section>
+            </section>
           )}
-        </>
-      )}
+        </aside>
+      </div>
+
+      {assignOf && <MembersDialog project={assignOf} users={users} onClose={() => setAssignOf(null)} onSaved={() => void refreshOne()} />}
     </>
-  );
-}
-
-function Section({
-  icon: Icon,
-  title,
-  count,
-  tone = "default",
-  children,
-}: {
-  icon: typeof Layers;
-  title: string;
-  count?: number;
-  tone?: "default" | "indigo";
-  children: React.ReactNode;
-}) {
-  return (
-    <section className="glass-card p-5">
-      <h2 className="flex items-center gap-2 text-[15px] font-semibold text-neutral-900">
-        <span className={cn("grid h-7 w-7 place-items-center rounded-full", tone === "indigo" ? "bg-[color:var(--indigo-soft)] text-[color:var(--indigo-deep)]" : "bg-[color:var(--tint-soft)] text-[color:var(--tint-deep)]")}>
-          <Icon className="h-3.5 w-3.5" />
-        </span>
-        {title}
-        {count != null && <span className="badge badge-plain ml-auto !h-[20px] font-data text-[11px]">{count}</span>}
-      </h2>
-      <div className="mt-3.5">{children}</div>
-    </section>
-  );
-}
-
-function EmptyLine({ children }: { children: React.ReactNode }) {
-  return <p className="rounded-xl border border-dashed border-black/10 bg-white/30 px-3 py-3 text-center text-xs text-[color:var(--ink-3)]">{children}</p>;
-}
-
-function TaskRow({ t }: { t: WorkItem }) {
-  const due = dueInfo(t.dueDate);
-  return (
-    <li>
-      <Link href={`/projects/${t.projectId}?tab=plan&item=${t.id}`} prefetch={false} className="flex flex-wrap items-center gap-2.5 rounded-xl px-2 py-1.5 transition hover:bg-white/60">
-        <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-neutral-900">{t.title}</span>
-        <span className="hidden text-xs text-[color:var(--ink-3)] sm:block">{t.projectName}</span>
-        <span className={cn("rounded-full px-2 py-0.5 text-[11px] font-medium", t.status === "blocked" ? "bg-[color:var(--red-soft)] text-[color:var(--red-deep)]" : t.status === "in_progress" ? "bg-[color:var(--tint-soft)] text-[color:var(--tint-deep)]" : "bg-[rgba(120,120,128,0.12)] text-[color:var(--ink-2)]")}>
-          {ITEM_STATUS_LABEL[t.status]}
-        </span>
-        {due && <span className={cn("font-data text-[11px] tabular-nums", due.overdue ? "font-semibold text-[color:var(--red-deep)]" : "text-[color:var(--ink-3)]")}>{due.label}</span>}
-      </Link>
-    </li>
   );
 }

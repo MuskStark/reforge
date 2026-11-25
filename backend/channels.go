@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"log"
 	"net/http"
 	"net/url"
 	"sort"
@@ -200,7 +199,7 @@ func (s *postgresStore) handleListChannels(w http.ResponseWriter, r *http.Reques
 	}
 	list, err := listChannelsTx(r.Context(), s.db)
 	if err != nil {
-		writeErr(w, err)
+		writeErr(w, r, err)
 		return
 	}
 	out := make([]map[string]any, 0, len(list))
@@ -224,7 +223,7 @@ func (s *postgresStore) handleCreateChannel(w http.ResponseWriter, r *http.Reque
 		CreatedAt: now, UpdatedAt: now, KindsSince: now}
 	ch.apply(in)
 	if err := validateChannel(ch); err != nil {
-		writeErr(w, err)
+		writeErr(w, r, err)
 		return
 	}
 	kinds, _ := json.Marshal(ch.Kinds)
@@ -234,10 +233,10 @@ func (s *postgresStore) handleCreateChannel(w http.ResponseWriter, r *http.Reque
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb, $13, $14, $15, $16)`,
 		ch.ID, ch.Name, ch.Kind, ch.Webhook, ch.Secret, ch.SMTPHost, ch.SMTPPort, ch.SMTPUser, ch.SMTPPass, ch.SMTPFrom,
 		ch.Recipients, string(kinds), ch.Enabled, now, now, now); err != nil {
-		writeErr(w, err)
+		writeErr(w, r, err)
 		return
 	}
-	log.Printf("[admin] 新建通知渠道「%s」(%s)", ch.Name, ch.Kind)
+	audit(r, "channel.create", "target", ch.Name, "kind", ch.Kind, "enabled", ch.Enabled)
 	writeJSON(w, http.StatusCreated, channelView(ch))
 }
 
@@ -252,7 +251,7 @@ func (s *postgresStore) handleUpdateChannel(w http.ResponseWriter, r *http.Reque
 	}
 	ch, err := getChannel(r.Context(), s.db, pathID(r))
 	if err != nil {
-		writeErr(w, err)
+		writeErr(w, r, err)
 		return
 	}
 	if ch == nil {
@@ -261,7 +260,7 @@ func (s *postgresStore) handleUpdateChannel(w http.ResponseWriter, r *http.Reque
 	}
 	ch.apply(in)
 	if err := validateChannel(ch); err != nil {
-		writeErr(w, err)
+		writeErr(w, r, err)
 		return
 	}
 	kinds, _ := json.Marshal(ch.Kinds)
@@ -270,10 +269,12 @@ func (s *postgresStore) handleUpdateChannel(w http.ResponseWriter, r *http.Reque
 		smtp_from = $10, recipients = $11, kinds = $12::jsonb, enabled = $13, kinds_since = $14, updated_at = now() WHERE id = $1`,
 		ch.ID, ch.Name, ch.Kind, ch.Webhook, ch.Secret, ch.SMTPHost, ch.SMTPPort, ch.SMTPUser, ch.SMTPPass,
 		ch.SMTPFrom, ch.Recipients, string(kinds), ch.Enabled, ch.KindsSince); err != nil {
-		writeErr(w, err)
+		writeErr(w, r, err)
 		return
 	}
 	ch.UpdatedAt = time.Now()
+	// 渠道地址与密钥会在这里被换掉,必须留痕;密钥本身不进日志,只记"是否改了"
+	audit(r, "channel.update", "target", ch.Name, "kind", ch.Kind, "enabled", ch.Enabled, "secret_changed", in.Secret != nil || in.ClearSecret != nil)
 	writeJSON(w, http.StatusOK, channelView(ch))
 }
 
@@ -283,7 +284,7 @@ func (s *postgresStore) handleDeleteChannel(w http.ResponseWriter, r *http.Reque
 	}
 	ch, err := getChannel(r.Context(), s.db, pathID(r))
 	if err != nil {
-		writeErr(w, err)
+		writeErr(w, r, err)
 		return
 	}
 	if ch == nil {
@@ -292,10 +293,10 @@ func (s *postgresStore) handleDeleteChannel(w http.ResponseWriter, r *http.Reque
 	}
 	// 投递记录随渠道级联删除
 	if _, err := s.db.ExecContext(r.Context(), `DELETE FROM notify_channels WHERE id = $1`, ch.ID); err != nil {
-		writeErr(w, err)
+		writeErr(w, r, err)
 		return
 	}
-	log.Printf("[admin] 删除通知渠道「%s」(%s)", ch.Name, ch.Kind)
+	audit(r, "channel.delete", "target", ch.Name, "kind", ch.Kind)
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
@@ -306,7 +307,7 @@ func (s *postgresStore) handleTestChannel(w http.ResponseWriter, r *http.Request
 	}
 	ch, err := getChannel(r.Context(), s.db, pathID(r))
 	if err != nil {
-		writeErr(w, err)
+		writeErr(w, r, err)
 		return
 	}
 	if ch == nil {
@@ -315,7 +316,7 @@ func (s *postgresStore) handleTestChannel(w http.ResponseWriter, r *http.Request
 	}
 	n, err := notifierFor(ch)
 	if err != nil {
-		writeErr(w, err)
+		writeErr(w, r, err)
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)

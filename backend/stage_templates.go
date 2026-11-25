@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"log"
 	"net/http"
 )
 
@@ -144,7 +143,7 @@ func (s *postgresStore) handleGetStageTemplates(w http.ResponseWriter, r *http.R
 	}
 	tpl, err := loadStageTemplates(r.Context(), s.db)
 	if err != nil {
-		writeErr(w, err)
+		writeErr(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, tpl)
@@ -164,16 +163,16 @@ func (s *postgresStore) handlePutStageTemplates(w http.ResponseWriter, r *http.R
 	}
 	tpl, err := normalizeStageTemplates(body.Templates)
 	if err != nil {
-		writeErr(w, err)
+		writeErr(w, r, err)
 		return
 	}
 	err = s.withTx(r.Context(), func(tx *sql.Tx) error {
 		return replaceStageTemplates(r.Context(), tx, tpl)
 	})
 	if err != nil {
-		writeErr(w, err)
+		writeErr(w, r, err)
 		return
 	}
-	log.Printf("[admin] 阶段模板已更新为 %d 个阶段(只影响此后新建的项目)", len(tpl))
+	audit(r, "template.replace", "stages", len(tpl), "note", "只影响此后新建的项目")
 	writeJSON(w, http.StatusOK, tpl)
 }

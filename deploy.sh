@@ -391,7 +391,9 @@ if [ -z "$FLOW_PUBLIC_URL" ]; then
 else
   echo "经 $FLOW_PUBLIC_URL 取回页面,与本机 127.0.0.1:3000 核对"
   tmp=$(mktemp -d)
-  for page in / /admin; do
+  # 后台核对 /admin/processes 而不是 /admin:后者现在只是跳到第一个分区的重定向,
+  # 没有页面内容,取不到构建指纹会被当成"本机未取到页面"而跳过核对
+  for page in / /admin/processes; do
     check_public_page "$page" "$FLOW_PUBLIC_URL$page" "$tmp"
   done
   rm -rf "$tmp"

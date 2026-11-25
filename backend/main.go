@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"strings"
@@ -34,6 +35,8 @@ func newMux(st *postgresStore) *http.ServeMux {
 	mux.HandleFunc("GET /api/users", handleUserDirectory(st))
 	mux.HandleFunc("PATCH /api/admin/users/{id}", handleAdminUpdateUser(st))
 	mux.HandleFunc("DELETE /api/auth/session", handleLogout)
+	// 浏览器与 Next 服务端的日志上报(不要求登录,见 logging.go)
+	mux.HandleFunc("POST "+clientLogsPath, handleClientLogs(clientLogLimiter))
 	mux.HandleFunc("GET /api/admin/users", handleListUsers(st))
 	mux.HandleFunc("POST /api/admin/users", handleAdminCreateUser(st))
 	mux.HandleFunc("DELETE /api/admin/users/{id}", handleAdminDeleteUser(st))
@@ -70,17 +73,18 @@ func newMux(st *postgresStore) *http.ServeMux {
 		}
 		created, err := st.Create(&p)
 		if err != nil {
-			log.Printf("[POST /api/processes] 保存失败: %v", err)
+			requestLogger(r).Error("流程保存失败", "err", err)
 			writeError(w, http.StatusInternalServerError, "保存失败,请检查输入后重试")
 			return
 		}
-		// 流程一提交即自动立项:进入阶段 1「分析立项」,等待指派项目经理
+		// 流程一提交即自动立项:进入阶段 1「分析立项」,等待指派 PM
 		if pid, perr := st.CreateProjectForProcess(r.Context(), created); perr != nil {
-			log.Printf("[POST /api/processes] 自动立项失败(可由启动时的补建兜底): %v", perr)
+			requestLogger(r).Error("自动立项失败(可由启动时的补建兜底)", "process", created.ID, "err", perr)
 		} else if admins, aerr := usersWithRoleTx(r.Context(), st.db, "admin"); aerr == nil {
 			_ = notifyManyTx(r.Context(), st.db, userIDs(admins), "project_created", pid, "", "",
-				"新流程「"+created.Name+"」已提交，等待立项与指派项目经理", "project_created:"+pid)
+				"新流程「"+created.Name+"」已提交，等待立项与指派 PM", "project_created:"+pid)
 		}
+		requestLogger(r).Info("新流程提交", "process", created.ID, "steps", len(created.Steps))
 		writeJSON(w, http.StatusCreated, created)
 	})
 	mux.HandleFunc("GET /api/processes/{id}", func(w http.ResponseWriter, r *http.Request) {
@@ -98,32 +102,25 @@ func newMux(st *postgresStore) *http.ServeMux {
 		}
 		writeJSON(w, http.StatusOK, p)
 	})
-	// S0 修复:公开删除 → 管理员(此前无鉴权,任何人都可删任意流程)
-	mux.HandleFunc("DELETE /api/processes/{id}", func(w http.ResponseWriter, r *http.Request) {
-		if !requireAdmin(w, r) {
-			return
-		}
-		ok, err := st.Delete(r.PathValue("id"))
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "删除失败: "+err.Error())
-			return
-		}
-		if !ok {
-			writeError(w, http.StatusNotFound, "流程不存在或已删除")
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]bool{"deleted": true})
-	})
+	// S0 修复:公开删除 → 管理员(此前无鉴权,任何人都可删任意流程)。旧地址,与后台那条共用同一个处理函数
+	mux.HandleFunc("DELETE /api/processes/{id}", handleAdminDeleteProcess(st))
 
 	return mux
 }
 
 func main() {
+	// 先建日志器并设为默认:之后所有日志(包括包里原有的 log.Printf)都是同一种格式、同一条流
+	logger := newLogger()
+	slog.SetDefault(logger)
+
 	addr := defaultAddr
 	if v := os.Getenv("FLOW_ADDR"); v != "" {
 		addr = v
 	}
-	st, err := newStore(os.Getenv("DATABASE_URL"))
+	// 连接串里有口令,只记主机和库名
+	dsn := os.Getenv("DATABASE_URL")
+	slog.Info("正在启动", "addr", addr, "log_level", logLevel().String(), "log_format", logFormat(), "db", dbTarget(dsn))
+	st, err := newStore(dsn)
 	if err != nil {
 		log.Fatalf("初始化存储失败: %v", err)
 	}
@@ -135,11 +132,13 @@ func main() {
 	startScheduler(st)
 	startChannelDelivery(st)
 
-	log.Printf("ReForge（流程再造工程收集表）后端已启动: http://%s (API 前缀 /api，存储: PostgreSQL)", addr)
-	// S5 服务器超时(防 slowloris)与安全头
+	slog.Info("ReForge 后端已启动", "addr", addr, "api_prefix", "/api", "store", "PostgreSQL")
+	// S5 服务器超时(防 slowloris);中间件链见 logging.go 的 newHandler(访问日志在最外层,记最终状态码)
 	srv := &http.Server{
-		Addr:              addr,
-		Handler:           withSecurityHeaders(withCORS(mux)),
+		Addr:    addr,
+		Handler: newHandler(mux),
+		// net/http 自己报的错(连接异常等)也进同一条日志流
+		ErrorLog:          slog.NewLogLogger(logger.Handler(), slog.LevelError),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      60 * time.Second,

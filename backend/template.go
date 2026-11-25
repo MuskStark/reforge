@@ -181,7 +181,7 @@ func normalizeStageTemplates(in []StageTemplate) ([]StageTemplate, error) {
 		t.Gate = trimRunes(t.Gate, 40)
 		if t.Gate != "" {
 			if t.ReviewerRole != RoleCTO && t.ReviewerRole != RoleHandler {
-				return nil, badRequest("「" + t.Name + "」的评审人应为 CTO 或经办")
+				return nil, badRequest("「" + t.Name + "」的评审人应为 CTO 或 BH")
 			}
 			if t.Mode != ModeAll && t.Mode != ModeAny {
 				return nil, badRequest("「" + t.Name + "」的表决方式应为会签或或签")
@@ -286,19 +286,20 @@ func levelLabel(s string) string {
 	}
 }
 
-// jobRoleLabel 岗位角色的中文名
+// jobRoleLabel 岗位的显示名(一律英文缩写):GM 总经理、CTO、PM 项目经理、BH 业务经办、TH 科技经办。
+// 岗位代码沿用历史取值不改(库里已有数据),与显示名并非字面对应。
 func jobRoleLabel(r string) string {
 	switch r {
 	case RoleCTO:
 		return "CTO"
 	case RolePM:
-		return "项目经理"
+		return "PM"
 	case RoleHandler:
-		return "经办"
+		return "BH"
 	case RoleDev:
-		return "开发实施"
+		return "TH"
 	case RoleViewer:
-		return "观察者"
+		return "GM"
 	}
-	return "经办"
+	return "BH"
 }

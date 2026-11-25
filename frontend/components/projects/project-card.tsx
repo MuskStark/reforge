@@ -6,7 +6,7 @@ import { HEALTH_LABEL, PRIORITY_LABEL, STAGE_STATUS_LABEL, STATUS_LABEL, dueInfo
 import { PendingOnBadge } from "@/components/projects/stage-rail";
 import { cn } from "@/lib/utils";
 
-/** 看板 / 列表里的项目卡片:整卡可点进详情;底部可带一个操作(如「指派项目经理」) */
+/** 看板 / 列表里的项目卡片:整卡可点进详情;底部可带一个操作(如「指派 PM」) */
 export function ProjectCard({ p, dense, footer }: { p: ProjectView; dense?: boolean; footer?: React.ReactNode }) {
   const stage = p.stages[p.currentStage - 1];
   const due = dueInfo(p.dueDate);
@@ -73,7 +73,7 @@ export function ProjectCard({ p, dense, footer }: { p: ProjectView; dense?: bool
           {pms.length > 0 ? (
             <span className="truncate">PM {pms.map((m) => m.displayName).join("、")}</span>
           ) : p.status === "active" ? (
-            <span className="text-[color:var(--amber-deep)]">尚未指派项目经理</span>
+            <span className="text-[color:var(--amber-deep)]">尚未指派 PM</span>
           ) : null}
           {due && (
             <span className={cn("font-data tabular-nums", due.overdue ? "font-semibold text-[color:var(--red-deep)]" : undefined)}>

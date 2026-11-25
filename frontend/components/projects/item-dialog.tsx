@@ -287,7 +287,7 @@ export function ItemDialog({
 
         {/* 归属 */}
         <div className="grid gap-3 sm:grid-cols-2">
-          <Field label="负责人" hint={canManage ? undefined : "由项目经理指派"}>
+          <Field label="负责人" hint={canManage ? undefined : "由 PM 指派"}>
             <select
               aria-label="负责人"
               value={form.assigneeId}
@@ -331,7 +331,7 @@ export function ItemDialog({
           <label className="flex cursor-pointer items-center gap-2.5 rounded-2xl bg-[color:var(--amber-soft)] px-3.5 py-2.5 text-[13px] text-[color:var(--amber-deep)]">
             <input type="checkbox" checked={form.required} onChange={(e) => setForm({ ...form, required: e.target.checked })} className="size-4 accent-[color:var(--amber)]" />
             <span className="font-semibold">必交付物</span>
-            <span className="text-[color:var(--ink-2)]">未完成时，项目经理不能提交本阶段的评审</span>
+            <span className="text-[color:var(--ink-2)]">未完成时，PM 不能提交本阶段的评审</span>
           </label>
         )}
 

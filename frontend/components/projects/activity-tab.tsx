@@ -150,7 +150,7 @@ export function ActivityTab({ ctx }: { ctx: DetailCtx }) {
   const updates = comments.filter((c) => c.kind === "update");
 
   return (
-    <div className="grid grid-cols-[minmax(0,1fr)] items-start gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
+    <div className="grid grid-cols-[minmax(0,1fr)] items-start gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
       <section className="glass-card p-5">
         <h2 className="flex items-center gap-2 text-[15px] font-semibold text-neutral-900">
           动态

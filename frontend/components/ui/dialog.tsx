@@ -34,16 +34,17 @@ export function Dialog({
 
   return (
     <div
-      className="fixed inset-0 z-[80] overflow-y-auto bg-[rgba(18,26,48,0.32)] p-4 backdrop-blur-md sm:p-8"
+      className="fixed inset-0 z-[80] flex overflow-y-auto bg-[rgba(18,26,48,0.32)] p-4 backdrop-blur-md sm:p-8"
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
     >
+      {/* m-auto:垂直居中;内容比视口高时上下留出边距,可以滚动,顶部不会被裁掉 */}
       <div
         role="dialog"
         aria-modal="true"
         aria-labelledby={labelledBy}
-        className={cn("mx-auto w-full rounded-[28px] p-5 sm:p-6", className ?? "max-w-[560px]")}
+        className={cn("m-auto w-full rounded-[28px] p-5 sm:p-6", className ?? "max-w-[560px]")}
         style={{
           background: "linear-gradient(180deg, rgba(255,255,255,0.86), rgba(255,255,255,0.68))",
           backdropFilter: "blur(36px) saturate(180%)",

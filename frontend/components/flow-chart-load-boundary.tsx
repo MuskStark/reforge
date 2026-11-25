@@ -1,6 +1,7 @@
 "use client";
 
 import { Component, type ErrorInfo, type ReactNode } from "react";
+import { attachToReportedError } from "@/lib/client-logger";
 
 /**
  * 兜住按需加载的流程图弹窗加载失败的情况（页面打开后正好发了版，旧构建的代码块已不存在；
@@ -19,6 +20,8 @@ export class FlowChartLoadBoundary extends Component<
 
   componentDidCatch(error: Error, info: ErrorInfo) {
     console.error("流程图组件加载失败", error, info.componentStack);
+    // 上面这句 console.error 已经被日志模块接住并上报;这里只把那条的分类改成"流程图加载失败"
+    attachToReportedError(error, { tag: "chart-load" });
   }
 
   render() {

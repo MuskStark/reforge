@@ -75,7 +75,7 @@ export function PlanTab({ ctx, focusItem, clearFocus }: { ctx: DetailCtx; focusI
       </div>
 
       <div className="board-lanes">
-        <div className="grid items-start gap-3 grid-cols-1 sm:grid-cols-2 xl:grid-cols-5">
+        <div className="grid items-start gap-3 grid-cols-1 sm:grid-cols-2 lane-cols-5">
           {COLUMNS.map((col) => {
             const list = shown.filter((i) => col.status.includes(i.status));
             return (

@@ -50,21 +50,7 @@ func registerAdminRoutes(mux *http.ServeMux, st store) {
 		writeJSON(w, http.StatusOK, p)
 	})
 
-	mux.HandleFunc("DELETE /api/admin/processes/{id}", func(w http.ResponseWriter, r *http.Request) {
-		if !requireAdmin(w, r) {
-			return
-		}
-		ok, err := st.Delete(r.PathValue("id"))
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "删除失败: "+err.Error())
-			return
-		}
-		if !ok {
-			writeError(w, http.StatusNotFound, "流程不存在或已删除")
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]bool{"deleted": true})
-	})
+	mux.HandleFunc("DELETE /api/admin/processes/{id}", handleAdminDeleteProcess(st))
 
 	// ---- 线上系统库（公开读，管理写）----
 
@@ -95,9 +81,11 @@ func registerAdminRoutes(mux *http.ServeMux, st store) {
 		}
 		so, err := st.CreateSystem(name)
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, "保存失败: "+err.Error())
+			requestLogger(r).Error("新建线上系统失败", "err", err)
+			writeError(w, http.StatusInternalServerError, "保存失败，请稍后重试")
 			return
 		}
+		audit(r, "system.create", "target", so.Name)
 		writeJSON(w, http.StatusOK, so)
 	})
 
@@ -105,15 +93,51 @@ func registerAdminRoutes(mux *http.ServeMux, st store) {
 		if !requireAdmin(w, r) {
 			return
 		}
-		ok, err := st.DeleteSystem(r.PathValue("id"))
+		id := r.PathValue("id")
+		ok, err := st.DeleteSystem(id)
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, "删除失败: "+err.Error())
+			requestLogger(r).Error("删除线上系统失败", "id", id, "err", err)
+			writeError(w, http.StatusInternalServerError, "删除失败，请稍后重试")
 			return
 		}
 		if !ok {
 			writeError(w, http.StatusNotFound, "系统不存在或已删除")
 			return
 		}
+		audit(r, "system.delete", "id", id)
 		writeJSON(w, http.StatusOK, map[string]bool{"deleted": true})
 	})
+}
+
+// handleAdminDeleteProcess 管理员删除流程:连同它的项目与全部记录(见 postgresStore.Delete)。
+// 后台用的 /api/admin/processes/{id} 与旧地址 /api/processes/{id} 共用。
+// 删掉的东西在数据库里不留痕,所以成败都在后端日志里留一行;失败原因只进日志,
+// 不把内部错误原文返回给浏览器(2026-11-25 线上出现过一次「删除失败」却无从查起)。
+func handleAdminDeleteProcess(st store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !requireAdmin(w, r) {
+			return
+		}
+		id := r.PathValue("id")
+		p, err := st.Get(id)
+		if err != nil {
+			requestLogger(r).Error("删除流程前读取失败", "process", id, "err", err)
+			writeError(w, http.StatusInternalServerError, "读取失败，请稍后重试")
+			return
+		}
+		if p == nil {
+			writeError(w, http.StatusNotFound, "流程不存在或已删除")
+			return
+		}
+		if ok, err := st.Delete(id); err != nil {
+			requestLogger(r).Error("删除流程失败", "process", id, "name", p.Name, "err", err)
+			writeError(w, http.StatusInternalServerError, "删除失败，请稍后重试")
+			return
+		} else if !ok {
+			writeError(w, http.StatusNotFound, "流程不存在或已删除")
+			return
+		}
+		audit(r, "process.delete", "process", id, "name", p.Name, "note", "连同其项目与全部记录")
+		writeJSON(w, http.StatusOK, map[string]bool{"deleted": true})
+	}
 }

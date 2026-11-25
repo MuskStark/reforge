@@ -6,11 +6,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
+	"time"
 )
 
 // 端到端测试:连真实 PostgreSQL,走真实路由表,把"提交流程 → 立项指派 → 六个关卡 → 验收完成"整条主线跑一遍。
@@ -44,10 +46,17 @@ func newTestEnv(t *testing.T) *env {
 		t.Fatalf("写入内置阶段模板失败: %v", err)
 	}
 	sessions = newSessionStore()
-	srv := httptest.NewServer(newMux(st))
+	clientLogLimiter = newWindowLimiter(clientLogsPerMinute, time.Minute)
+	// 测试期间日志一律丢弃:每个请求都会经访问日志,不丢会把测试输出淹掉。
+	// 个别用例要看日志时,自己临时换成写到缓冲区的日志器。
+	prevLogger := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	// 和生产同一个中间件链(访问日志、panic 恢复、安全头、CORS),见 logging.go 的 newHandler
+	srv := httptest.NewServer(newHandler(newMux(st)))
 	t.Cleanup(func() {
 		srv.Close()
 		st.Close()
+		slog.SetDefault(prevLogger)
 	})
 	return &env{t: t, srv: srv, st: st}
 }

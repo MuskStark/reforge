@@ -12,15 +12,15 @@ import { cn } from "@/lib/utils";
 type Role = "pm" | "handler" | "dev" | "viewer";
 
 /**
- * 项目里的四类成员。每类由谁分配与服务端一致:管理员分配全部;CTO 分配科技侧经办;
- * 项目经理分配业务侧经办。flag 是服务端为当前用户下发的对应能力。
- * 经办 = 业务侧确认需求、执行试运行;开发实施 = 科技侧承接系统改造。
+ * 项目里的四类成员。每类由谁分配与服务端一致:管理员分配全部;CTO 分配 TH(科技经办);
+ * PM 分配 BH(业务经办)。flag 是服务端为当前用户下发的对应能力。
+ * 名称一律用英文缩写,中文全称放在说明的开头。
  */
 const ROLE_META: { role: Role; label: string; hint: string; flag: keyof ProjectCaps; empty: string }[] = [
-  { role: "pm", label: "项目经理", hint: "对项目交付负责：制定计划、拆解任务、推进阶段、提交评审", flag: "assign", empty: "未指派" },
-  { role: "handler", label: "业务侧经办", hint: "业务侧确认需求、执行试运行；需求基线与试运行结论由他们会签", flag: "assignHandler", empty: "尚未添加 —— 需求基线与试运行结论需要他们会签" },
-  { role: "dev", label: "科技侧经办", hint: "科技侧承接系统改造：开发、配置、联调、测试（岗位为「开发实施」的人）", flag: "assignDev", empty: "未添加" },
-  { role: "viewer", label: "观察者", hint: "只读", flag: "assignViewer", empty: "未添加" },
+  { role: "pm", label: "PM", hint: "项目经理：对项目交付负责，制定计划、拆解任务、推进阶段、提交评审", flag: "assign", empty: "未指派" },
+  { role: "handler", label: "BH", hint: "业务经办：确认需求、执行试运行；需求基线与试运行结论由他们会签", flag: "assignHandler", empty: "尚未添加 —— 需求基线与试运行结论需要他们会签" },
+  { role: "dev", label: "TH", hint: "科技经办：承接系统改造，开发、配置、联调、测试", flag: "assignDev", empty: "未添加" },
+  { role: "viewer", label: "GM", hint: "总经理：只读", flag: "assignViewer", empty: "未添加" },
 ];
 
 /** 能否打开成员管理:至少能分配一类成员(服务端仍然逐请求校验) */
@@ -29,8 +29,8 @@ export function canAssignMembers(can: ProjectCaps): boolean {
 }
 
 /**
- * 成员管理 / 立项指派。管理员可以分配全部成员;CTO 只分配科技侧经办,项目经理只分配业务侧经办,
- * 其余区块只读并注明由谁分配。第一位项目经理到岗时项目正式启动。
+ * 成员管理 / 立项指派。管理员可以分配全部成员;CTO 只分配 TH,PM 只分配 BH,
+ * 其余区块只读并注明由谁分配。第一位 PM 到岗时项目正式启动。
  */
 export function MembersDialog({
   project,
@@ -82,14 +82,14 @@ export function MembersDialog({
       <DialogHeader
         id="members-title"
         title="项目成员"
-        subtitle="管理员可分配全部成员；CTO 分配科技侧经办，项目经理分配业务侧经办。第一位项目经理到岗后项目正式启动。"
+        subtitle="管理员可分配全部成员；CTO 分配 TH，PM 分配 BH。第一位 PM 到岗后项目正式启动。"
         onClose={onClose}
       />
 
       <div className="mt-5 space-y-3">
         {!project.hasPm && !ended && (
           <p className="rounded-2xl bg-[color:var(--amber-soft)] px-3.5 py-2.5 text-[13px] leading-relaxed text-[color:var(--amber-deep)] shadow-[inset_0_0_0_0.5px_rgba(255,149,0,0.25)]">
-            尚未指派项目经理。流程已自动立项，指派后进入阶段 1「{project.stages[0]?.name ?? "分析立项"}」。
+            尚未指派 PM。流程已自动立项，指派后进入阶段 1「{project.stages[0]?.name ?? "分析立项"}」。
           </p>
         )}
 
@@ -100,7 +100,7 @@ export function MembersDialog({
           const candidates = users
             .filter((u) => !has.has(u.id))
             .sort((a, b) => {
-              // 岗位对口的人排前面;经办再优先显示流程里登记过的人
+              // 岗位对口的人排前面;BH 再优先显示流程里登记过的人
               const rank = (u: UserDir) => (u.jobRole === role ? 0 : 1) * 10 + (role === "handler" && hinted.has(u.id) ? 0 : 1);
               return rank(a) - rank(b) || a.displayName.localeCompare(b.displayName, "zh-CN");
             });
@@ -136,7 +136,7 @@ export function MembersDialog({
                       aria-label={`选择${label}`}
                       className="field pr-9 !h-11"
                     >
-                      <option value="">{candidates.length ? `选择${role === "pm" ? "项目经理" : "成员"}…` : "没有可选的人"}</option>
+                      <option value="">{candidates.length ? `选择${role === "pm" ? "PM" : "成员"}…` : "没有可选的人"}</option>
                       {candidates.map((u) => (
                         <option key={u.id} value={u.id}>
                           {u.displayName}
@@ -176,7 +176,7 @@ export function MembersDialog({
 
         {unmatched.length > 0 && (
           <p className="rounded-2xl bg-white/45 px-3.5 py-2.5 text-xs leading-relaxed text-[color:var(--ink-2)]">
-            流程里登记过、但系统里没有对应账号的人员：{unmatched.join("、")}。在「用户与岗位」按姓名创建账号后，会自动出现在业务侧经办的候选里。
+            流程里登记过、但系统里没有对应账号的人员：{unmatched.join("、")}。在「用户与岗位」按姓名创建账号后，会自动出现在 BH 的候选里。
           </p>
         )}
       </div>

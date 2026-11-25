@@ -8,7 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"strings"
 	"time"
@@ -140,7 +140,7 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN NOT NULL
 		db.Close()
 		return nil, fmt.Errorf("流程项目迁移失败: %w", err)
 	} else if n > 0 {
-		log.Printf("已为 %d 条存量流程建立流程项目", n)
+		slog.Info("已为存量流程建立流程项目", "count", n)
 	}
 	if err := s.SeedSystemsFromProcesses(); err != nil {
 		db.Close()
@@ -156,7 +156,7 @@ type postgresStore struct {
 // userCols 用户表的查询列(与 User 字段扫描顺序一致)
 const userCols = `SELECT id, username, password_hash, role, display_name, department, job_role, created_at, must_change_password FROM users`
 
-// defaultJobRole 岗位为空或非法时回落为经办
+// defaultJobRole 岗位为空或非法时回落为 BH(业务经办)
 func defaultJobRole(r string) string {
 	if !validJobRoles[r] {
 		return RoleHandler
@@ -454,7 +454,7 @@ func (s *postgresStore) SeedSystemsFromProcesses() error {
 		}
 	}
 	if len(names) > 0 {
-		log.Printf("已从既有流程归集 %d 个线上系统名称", len(names))
+		slog.Info("已从既有流程归集线上系统名称", "count", len(names))
 	}
 	return nil
 }
@@ -526,7 +526,7 @@ func (s *postgresStore) migrateFromJSON(path string) error {
 			return fmt.Errorf("迁移流程 %q 失败: %w", p.Name, err)
 		}
 	}
-	log.Printf("已从 %s 迁移 %d 条历史流程至 PostgreSQL", path, len(items))
+	slog.Info("已迁移历史流程", "source", path, "count", len(items))
 	return os.Rename(path, path+".migrated")
 }
 

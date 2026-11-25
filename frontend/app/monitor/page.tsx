@@ -5,16 +5,16 @@
  * 暗色玻璃。口径:
  *  - 顶部六个数:累计收集 / 在途项目 / 待评审 / 逾期预警 / 改造完成 / 按期完成率与平均周期
  *  - 第二行:近 6 个月趋势、在途项目的阶段分布、在途健康度构成
- *  - 第三行:项目经理负载、申报部门 TOP5、线上系统涉及度
+ *  - 第三行:PM 负载、申报部门 TOP5、线上系统涉及度
  *  - 底部:最新动态
- * 数据来自 /api/admin/overview?full=1,每 30 秒刷新。需登录;未登录回 /admin。
+ * 数据来自 /api/admin/overview?full=1,每 30 秒刷新。需登录;未登录或会话失效去 /login。
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Maximize2, Minimize2 } from "lucide-react";
-import { authFetch, clearSession, getToken } from "@/lib/auth";
+import { authFetch, getToken } from "@/lib/auth";
 import type { Overview, OverviewCount, OverviewEvent, OverviewTrend } from "@/lib/types";
 
 const INK = "rgba(255,255,255,0.92)";
@@ -70,7 +70,7 @@ export default function MonitorPage() {
 
   useEffect(() => {
     if (!getToken()) {
-      router.replace("/admin");
+      router.replace("/login");
       return;
     }
     void load();
@@ -82,12 +82,9 @@ export default function MonitorPage() {
     };
   }, [load, router]);
 
-  // 会话失效 → 回登录
+  // 会话失效 → 回登录页(本地会话已由 authFetch 清掉)
   useEffect(() => {
-    if (denied) {
-      clearSession();
-      router.replace("/admin");
-    }
+    if (denied) router.replace("/login");
   }, [denied, router]);
 
   useEffect(() => {
@@ -182,8 +179,13 @@ export default function MonitorPage() {
               {isFull ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
               <span className="ml-1.5 hidden sm:inline">{isFull ? "退出全屏" : "全屏"}</span>
             </button>
-            <button type="button" onClick={() => router.push("/admin")} className="rounded-full bg-white/10 px-3.5 py-2 text-xs font-semibold text-white/80 transition hover:bg-white/20">
-              返回管理后台
+            {/* 从哪来回哪去;直接打开大屏(没有上一页)就回工作台 */}
+            <button
+              type="button"
+              onClick={() => (window.history.length > 1 ? router.back() : router.push("/work"))}
+              className="rounded-full bg-white/10 px-3.5 py-2 text-xs font-semibold text-white/80 transition hover:bg-white/20"
+            >
+              返回
             </button>
           </div>
         </header>
@@ -253,8 +255,8 @@ export default function MonitorPage() {
 
         {/* 第三行:负责人负载 / 申报部门 / 线上系统 */}
         <div className="grid gap-3.5 py-3.5 md:grid-cols-3">
-          <Panel title="项目经理负载（在办）" accent={C.amber} aside={d?.pmLoad?.length ? `人均在办 ${avg(d.pmLoad.map((x) => x.active))} 个` : undefined}>
-            {pmRows.length ? <Bars rows={pmRows} unit=" 个" color={C.cyan} /> : <Empty text="还没有项目经理在推进项目" />}
+          <Panel title="PM 负载（在办）" accent={C.amber} aside={d?.pmLoad?.length ? `人均在办 ${avg(d.pmLoad.map((x) => x.active))} 个` : undefined}>
+            {pmRows.length ? <Bars rows={pmRows} unit=" 个" color={C.cyan} /> : <Empty text="还没有 PM 在推进项目" />}
           </Panel>
           <Panel title="申报部门 TOP5" accent={C.violet}>
             {d?.departmentTop?.length ? <Bars rows={toRows(d.departmentTop)} unit=" 条" color={C.violet} /> : <Empty />}
@@ -281,7 +283,7 @@ export default function MonitorPage() {
         {/* 底部口径 */}
         <footer className="flex flex-wrap items-center gap-x-4 gap-y-1 pt-3 text-xs" style={{ color: INK3 }}>
           <span>
-            口径:在途 = 进行中的流程项目;逾期 = 已过截止日且未完成的工作项与阶段;健康度取项目经理最近一次简报;按期完成率与平均周期只统计已完成项目。
+            口径:在途 = 进行中的流程项目;逾期 = 已过截止日且未完成的工作项与阶段;健康度取 PM 最近一次简报;按期完成率与平均周期只统计已完成项目。
           </span>
           <span className="ml-auto">数据每 30 秒自动刷新</span>
         </footer>

@@ -1,7 +1,7 @@
 "use client";
 
 import type { ProjectRole, ProjectView, StageView, UserDir } from "@/lib/types";
-import { JOB_ROLE_LABEL, PENDING_ON_LABEL, PROJECT_ROLE_LABEL, STAGE_STATUS_LABEL, stageTone } from "@/lib/labels";
+import { JOB_ROLE_FULL, JOB_ROLE_LABEL, PENDING_ON_LABEL, PROJECT_ROLE_LABEL, STAGE_STATUS_LABEL, stageTone } from "@/lib/labels";
 import { cn } from "@/lib/utils";
 
 export const stageDone = (s: StageView) => s.status === "approved" || s.status === "skipped";
@@ -85,12 +85,14 @@ export function UserOptionLine({ u, suffix }: { u: UserDir; suffix?: React.React
     <span className="flex min-w-0 items-center gap-2">
       <Avatar name={u.displayName} size={22} />
       <span className="min-w-0 flex-1 truncate text-left text-[13px] text-neutral-900">{u.displayName}</span>
-      <span className="shrink-0 text-[11px] text-[color:var(--ink-3)]">{suffix ?? JOB_ROLE_LABEL[u.jobRole]}</span>
+      <span className="shrink-0 text-[11px] text-[color:var(--ink-3)]" title={suffix ? undefined : JOB_ROLE_FULL[u.jobRole]}>
+        {suffix ?? JOB_ROLE_LABEL[u.jobRole]}
+      </span>
     </span>
   );
 }
 
-/** 成员标签:头像 + 名字 + 角色,可删除 */
+/** 成员标签:头像 + 名字 + 角色缩写(悬停显示全称),可删除 */
 export function MemberChip({
   name,
   role,
@@ -103,7 +105,9 @@ export function MemberChip({
   return (
     <span className="tag-chip !h-[28px] !text-[12px]">
       {name}
-      <span className="ml-1 text-[11px] text-[color:var(--ink-3)]">{PROJECT_ROLE_LABEL[role] ?? role}</span>
+      <span className="ml-1 text-[11px] text-[color:var(--ink-3)]" title={JOB_ROLE_FULL[role]}>
+        {PROJECT_ROLE_LABEL[role] ?? role}
+      </span>
       {onRemove && (
         <button type="button" onClick={onRemove} aria-label={`移除 ${name}`} className="ml-1">
           <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" aria-hidden="true">

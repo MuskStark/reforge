@@ -47,7 +47,8 @@ func loadProcess(w http.ResponseWriter, st *postgresStore, id string) (*Process,
 }
 
 // registerDefinitionRoutes 编辑流程定义。
-// 流程定义是项目的"To-Be 工作副本":改它的是项目经理、CTO 或管理员;版本快照由关卡引擎在 G3 / G6 通过时自动留存。
+// 流程定义是项目的"To-Be 工作副本":节点上的经办人(PM / BH / TH)、CTO 与管理员都能改(见 caps.editFlow);
+// 版本快照由关卡引擎在 G3 / G6 通过时自动留存。
 func registerDefinitionRoutes(mux *http.ServeMux, st *postgresStore) {
 	mux.HandleFunc("PUT /api/admin/processes/{id}", func(w http.ResponseWriter, r *http.Request) {
 		a, ok := currentActor(w, r, st)
@@ -58,15 +59,16 @@ func registerDefinitionRoutes(mux *http.ServeMux, st *postgresStore) {
 		if !ok {
 			return
 		}
+		// 还没有挂到项目上的流程,只有管理员与 CTO 能改
 		allowed := a.isAdmin() || a.isCTO()
 		projectID, _ := projectIDForProcess(r.Context(), st.db, p.ID)
-		if !allowed && projectID != "" {
+		if projectID != "" {
 			if c, err := loadCaps(r.Context(), st.db, projectID, a); err == nil {
-				allowed = c.PM
+				allowed = c.editFlow()
 			}
 		}
 		if !allowed {
-			writeError(w, http.StatusForbidden, "仅项目经理、CTO 或管理员可编辑流程定义")
+			writeError(w, http.StatusForbidden, "只有项目成员、CTO 或管理员可以修改流程")
 			return
 		}
 		var body Process

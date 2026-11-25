@@ -11,7 +11,7 @@ type actor struct {
 	Username    string
 	DisplayName string
 	SysRole     string // admin | member
-	JobRole     string // cto | pm | handler | dev | viewer
+	JobRole     string // 岗位代码:cto | pm | handler(BH) | dev(TH) | viewer(GM);界面显示名见 jobRoleLabel
 }
 
 func (a *actor) isAdmin() bool { return a.SysRole == "admin" }
@@ -26,7 +26,7 @@ func (a *actor) name() string {
 }
 
 // caps 行为人在某个项目里的有效能力。
-// 系统管理员与 CTO 是全局的;PM / 经办 / 开发 / 观察者按项目授予。
+// 系统管理员与 CTO 是全局的;PM / BH / TH / GM 按项目授予。
 type caps struct {
 	Admin   bool
 	CTO     bool
@@ -53,11 +53,15 @@ func capsFor(a actor, projectRoles []string) caps {
 	return c
 }
 
-// member 是否项目参与者(可看可评论的范围内的人;观察者只读)
+// member 是否项目参与者(可看可评论的范围内的人;GM 只读)
 func (c caps) member() bool { return c.Admin || c.CTO || c.PM || c.Handler || c.Dev }
 
 // manage 能否计划与推进:改计划、提交评审、回退阶段(成员的分配另见 canAssign)
 func (c caps) manage() bool { return c.Admin || c.CTO || c.PM }
+
+// editFlow 能否修改流程定义(表单与流程图)。节点上的经办人最清楚流程实际怎么走,
+// 所以项目里的 PM、BH、TH 都能改,管理员与 CTO 照旧;GM 在项目里仍是只读。
+func (c caps) editFlow() bool { return c.Admin || c.CTO || c.PM || c.Handler || c.Dev }
 
 // canReview 能否在某类关卡上表决
 func (c caps) canReview(reviewerRole string) bool {
@@ -72,9 +76,9 @@ func (c caps) assign() bool { return c.Admin }
 
 // canAssign 能否增删某一类项目成员。流程的权限分配按类划分:
 //
-//	管理员 —— 全部;CTO —— 科技侧经办(开发实施);项目经理 —— 业务侧经办(经办)
+//	管理员 —— 全部;CTO —— TH(科技经办);PM —— BH(业务经办)
 //
-// 观察者不属于任何一侧,只有管理员能添加。
+// GM 不属于任何一侧,只有管理员能添加。
 func (c caps) canAssign(role string) bool {
 	switch role {
 	case RolePM, RoleViewer:
@@ -95,6 +99,7 @@ func (c caps) flags() map[string]bool {
 	return map[string]bool{
 		"view":          true,
 		"manage":        c.manage(),
+		"editFlow":      c.editFlow(),
 		"assign":        c.assign(),
 		"assignHandler": c.canAssign(RoleHandler),
 		"assignDev":     c.canAssign(RoleDev),

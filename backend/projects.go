@@ -90,7 +90,7 @@ func (s *postgresStore) handleListProjects(w http.ResponseWriter, r *http.Reques
 	}
 	projects, err := listProjects(r.Context(), s.db, where, args...)
 	if err != nil {
-		writeErr(w, err)
+		writeErr(w, r, err)
 		return
 	}
 	ids := make([]string, 0, len(projects))
@@ -99,7 +99,7 @@ func (s *postgresStore) handleListProjects(w http.ResponseWriter, r *http.Reques
 	}
 	bundle, err := loadBundle(r.Context(), s.db, ids)
 	if err != nil {
-		writeErr(w, err)
+		writeErr(w, r, err)
 		return
 	}
 	wantPending, wantStatus, query := r.URL.Query().Get("pending"), r.URL.Query().Get("status"), strings.TrimSpace(r.URL.Query().Get("q"))
@@ -107,7 +107,7 @@ func (s *postgresStore) handleListProjects(w http.ResponseWriter, r *http.Reques
 	for _, pr := range projects {
 		c, err := loadCaps(r.Context(), s.db, pr.ID, a)
 		if err != nil {
-			writeErr(w, err)
+			writeErr(w, r, err)
 			return
 		}
 		v := bundle.view(pr, nil, c)
@@ -132,7 +132,7 @@ func (s *postgresStore) handleGetProject(w http.ResponseWriter, r *http.Request)
 	}
 	pr, err := getProject(r.Context(), s.db, pathID(r), false)
 	if err != nil {
-		writeErr(w, err)
+		writeErr(w, r, err)
 		return
 	}
 	if pr == nil {
@@ -141,17 +141,17 @@ func (s *postgresStore) handleGetProject(w http.ResponseWriter, r *http.Request)
 	}
 	bundle, err := loadBundle(r.Context(), s.db, []string{pr.ID})
 	if err != nil {
-		writeErr(w, err)
+		writeErr(w, r, err)
 		return
 	}
 	users, err := s.ListUsers()
 	if err != nil {
-		writeErr(w, err)
+		writeErr(w, r, err)
 		return
 	}
 	c, err := loadCaps(r.Context(), s.db, pr.ID, a)
 	if err != nil {
-		writeErr(w, err)
+		writeErr(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, bundle.view(pr, users, c))
@@ -252,7 +252,7 @@ func (s *postgresStore) handlePatchProject(w http.ResponseWriter, r *http.Reques
 		return addEventTx(r.Context(), tx, pr.ID, "project", "", a, "project_updated", map[string]any{"fields": changed})
 	})
 	if err != nil {
-		writeErr(w, err)
+		writeErr(w, r, err)
 		return
 	}
 	s.writeProject(w, r, a, pathID(r))
@@ -262,7 +262,7 @@ func (s *postgresStore) handlePatchProject(w http.ResponseWriter, r *http.Reques
 func (s *postgresStore) writeProject(w http.ResponseWriter, r *http.Request, a *actor, id string) {
 	pr, err := getProject(r.Context(), s.db, id, false)
 	if err != nil {
-		writeErr(w, err)
+		writeErr(w, r, err)
 		return
 	}
 	if pr == nil {
@@ -271,17 +271,17 @@ func (s *postgresStore) writeProject(w http.ResponseWriter, r *http.Request, a *
 	}
 	bundle, err := loadBundle(r.Context(), s.db, []string{id})
 	if err != nil {
-		writeErr(w, err)
+		writeErr(w, r, err)
 		return
 	}
 	users, err := s.ListUsers()
 	if err != nil {
-		writeErr(w, err)
+		writeErr(w, r, err)
 		return
 	}
 	c, err := loadCaps(r.Context(), s.db, id, a)
 	if err != nil {
-		writeErr(w, err)
+		writeErr(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, bundle.view(pr, users, c))
@@ -369,14 +369,14 @@ func (s *postgresStore) handleProjectStatus(w http.ResponseWriter, r *http.Reque
 			"「"+pr.Name+"」"+label, "project_status:"+pr.ID+":"+body.Status+":"+now.Format("20060102150405"))
 	})
 	if err != nil {
-		writeErr(w, err)
+		writeErr(w, r, err)
 		return
 	}
 	s.writeProject(w, r, a, pathID(r))
 }
 
 // handleMembers 增删项目成员(流程的权限分配,规则见 caps.canAssign):
-// 管理员分配全部;CTO 分配科技侧经办;项目经理分配业务侧经办。
+// 管理员分配全部;CTO 分配 TH(科技经办);PM 分配 BH(业务经办)。
 func (s *postgresStore) handleMembers(w http.ResponseWriter, r *http.Request) {
 	a, ok := currentActor(w, r, s)
 	if !ok {
@@ -415,7 +415,7 @@ func (s *postgresStore) handleMembers(w http.ResponseWriter, r *http.Request) {
 		if pr.Status == ProjDone || pr.Status == ProjCancelled {
 			return badRequest("项目已结束，不能再调整成员")
 		}
-		roleLabel := map[string]string{RolePM: "项目经理", RoleHandler: "业务侧经办", RoleDev: "科技侧经办", RoleViewer: "观察者"}[body.Role]
+		roleLabel := map[string]string{RolePM: "PM", RoleHandler: "BH", RoleDev: "TH", RoleViewer: "GM"}[body.Role]
 		if body.Action == "remove" {
 			if _, err := tx.ExecContext(r.Context(), `DELETE FROM project_members WHERE project_id = $1 AND user_id = $2 AND role = $3`,
 				pr.ID, u.ID, body.Role); err != nil {
@@ -447,7 +447,7 @@ func (s *postgresStore) handleMembers(w http.ResponseWriter, r *http.Request) {
 			"你被加入「"+pr.Name+"」，担任"+roleLabel, "member:"+pr.ID+":"+u.ID+":"+body.Role+":"+time.Now().Format("20060102150405"))
 	})
 	if err != nil {
-		writeErr(w, err)
+		writeErr(w, r, err)
 		return
 	}
 	s.writeProject(w, r, a, pathID(r))
@@ -520,7 +520,7 @@ func (s *postgresStore) handleStageEnter(w http.ResponseWriter, r *http.Request)
 			"「"+pr.Name+"」退回到「"+pr.stageName(seq)+"」："+body.Reason, "stage_rewound:"+pr.ID+":"+time.Now().Format("20060102150405"))
 	})
 	if err != nil {
-		writeErr(w, err)
+		writeErr(w, r, err)
 		return
 	}
 	s.writeProject(w, r, a, pathID(r))
@@ -586,7 +586,7 @@ func (s *postgresStore) handleStageSkip(w http.ResponseWriter, r *http.Request) 
 			"stage_skipped:"+pr.ID+":"+itoa(seq)+":"+time.Now().Format("20060102150405"))
 	})
 	if err != nil {
-		writeErr(w, err)
+		writeErr(w, r, err)
 		return
 	}
 	s.writeProject(w, r, a, pathID(r))
@@ -599,7 +599,7 @@ func (s *postgresStore) handleProjectEvents(w http.ResponseWriter, r *http.Reque
 	rows, err := s.db.QueryContext(r.Context(), `SELECT id, project_id, scope, target_id, actor_id, actor_name, kind, detail, created_at
 		FROM events WHERE project_id = $1 ORDER BY created_at DESC, id DESC LIMIT 300`, pathID(r))
 	if err != nil {
-		writeErr(w, err)
+		writeErr(w, r, err)
 		return
 	}
 	defer rows.Close()
@@ -608,7 +608,7 @@ func (s *postgresStore) handleProjectEvents(w http.ResponseWriter, r *http.Reque
 		var e Event
 		var detail []byte
 		if err := rows.Scan(&e.ID, &e.ProjectID, &e.Scope, &e.TargetID, &e.ActorID, &e.ActorName, &e.Kind, &detail, &e.CreatedAt); err != nil {
-			writeErr(w, err)
+			writeErr(w, r, err)
 			return
 		}
 		e.Detail = rawOrNull(detail)

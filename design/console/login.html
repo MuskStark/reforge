@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>ReForge · 登录 — 设计稿 01</title>
+<link rel="stylesheet" href="../liquid-glass/assets/tokens.css">
+<link rel="stylesheet" href="console.css">
+<style>
+  /* 登录页没有侧栏与底部 Tab:整屏居中一张玻璃卡 */
+  body.login { font-size: 15px; }
+  body.login .center {
+    position: relative;
+    z-index: 1;
+    min-height: 100vh;
+    min-height: 100dvh;
+    display: grid;
+    place-items: center;
+    padding: 40px 20px 96px;
+  }
+  .auth { width: min(400px, 100%); padding: 32px 30px 26px; text-align: center; }
+  .auth .mark-lg {
+    width: 64px;
+    height: 64px;
+    margin: 0 auto 18px;
+    display: grid;
+    place-items: center;
+    border-radius: 18px;
+    color: #fff;
+    background: linear-gradient(180deg, var(--tint-hi), var(--tint));
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4), inset 0 -10px 18px -12px rgba(0, 45, 110, 0.5), 0 10px 26px -10px rgba(0, 113, 227, 0.65);
+  }
+  .auth .mark-lg .ic { font-size: 34px; }
+  .auth h1 { font: var(--t-title2); letter-spacing: -0.02em; }
+  .auth .sub { margin-top: 6px; font: var(--t-footnote); color: var(--ink-2); }
+  .auth .fields { display: grid; gap: 14px; margin-top: 22px; text-align: left; }
+  .auth .btn-primary.full { width: 100%; height: 50px; margin-top: 20px; font-size: 17px; }
+  .auth .field-wrap { position: relative; }
+  .auth .field-wrap .lead-ic { position: absolute; left: 14px; top: 50%; transform: translateY(-50%); font-size: 17px; color: var(--ink-3); pointer-events: none; }
+  .auth .field-wrap .field { height: 46px; padding-left: 42px; }
+  .auth .back { display: inline-flex; align-items: center; gap: 5px; margin-top: 18px; font: var(--t-footnote); font-weight: 500; color: var(--tint); }
+  .auth .back .ic { font-size: 13px; }
+  .goes-to {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    margin: 0 auto 14px;
+    padding: 7px 14px;
+    border-radius: 980px;
+    background: rgba(255, 255, 255, 0.62);
+    box-shadow: inset 0 1px 0 #fff, inset 0 0 0 0.5px rgba(255, 255, 255, 0.6), 0 4px 12px -6px rgba(23, 42, 80, 0.22);
+    font: 600 13px/1 var(--font);
+    color: var(--ink-2);
+  }
+  .goes-to b { color: var(--ink); }
+  .goes-to .ic { font-size: 14px; color: var(--tint); }
+</style>
+</head>
+<body class="login">
+<div id="root"></div>
+
+<script src="icons.js"></script>
+<script src="mock.js"></script>
+<script>
+(function () {
+  "use strict";
+  const M = window.Mock;
+  // 这页没有桌面 / 手机两套外壳,不必切 mob(mob 会改 .page 的留白,这里用不上)
+  document.body.classList.remove("mob");
+
+  document.getElementById("root").innerHTML =
+    M.WALLPAPER +
+    `<div class="center"><section class="auth lg-card">
+      <span class="mark-lg">${M.brandMark()}</span>
+      <h1>登录 ReForge</h1>
+      <p class="sub">流程再造工程收集表</p>
+
+      <div class="fields">
+        <div>
+          <div class="field-label">账号</div>
+          <div class="field-wrap">${M.icon("user-round", "", "ic lead-ic")}<input class="field" placeholder="请输入账号" autocomplete="username"></div>
+        </div>
+        <div>
+          <div class="field-label">密码</div>
+          <div class="field-wrap"><svg class="ic lead-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg><input class="field" type="password" placeholder="请输入密码" autocomplete="current-password"></div>
+        </div>
+      </div>
+
+      <button type="button" class="btn btn-primary full" onclick="location.href='workbench.html'">登 录</button>
+
+      <div class="form-note" style="text-align:left;margin-top:6px">${M.icon("info")}<span>登录后进入<b>工作台</b>：项目经理推进流程改造，CTO 评审方案，经办确认需求与试运行。没有账号请联系管理员开通。</span></div>
+
+      <a class="back" href="#todo:流程收集表">${M.icon("arrow-left")}返回流程收集表</a>
+    </section></div>` +
+    M.anno({ no: "01", name: "登录", url: "/login", extra: `<span class="url" style="background:rgba(255,255,255,.5);color:var(--ink-2)">登录成功 → /work</span>` });
+})();
+</script>
+</body>
+</html>

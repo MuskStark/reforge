@@ -9,7 +9,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { Braces, ChevronDown, ClipboardList, Download, Eye, FileSignature, FileText, GitCompareArrows, History, UserCog, Users } from "lucide-react";
+import { Braces, ChevronDown, ClipboardList, Download, Eye, FileSignature, FileText, GitCompareArrows, History, Pencil, UserCog, Users } from "lucide-react";
 import { toast } from "sonner";
 import { authFetch, authFetchBlob, saveBlob, type SessionUser } from "@/lib/auth";
 import type { FlowProcess, ProjectComment, ProjectView, UserDir, WorkItem } from "@/lib/types";
@@ -29,6 +29,9 @@ import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 
 export type DetailTab = "overview" | "plan" | "review" | "flow" | "activity";
+
+/** 流程定义的两个编辑器:流程图(画布 + 检查器)与表单(与收集表同一套) */
+export type FlowEditor = "chart" | "form";
 
 const TABS: { id: DetailTab; label: string; icon: typeof History }[] = [
   { id: "overview", label: "概览", icon: Eye },
@@ -72,6 +75,8 @@ function ProjectDetailBody({ id, me }: { id: string; me: SessionUser }) {
   const [membersOpen, setMembersOpen] = useState(false);
   const [updateOpen, setUpdateOpen] = useState(false);
   const [flowChartOpen, setFlowChartOpen] = useState(false);
+  /** 页头「修改流程」要打开的编辑器:等「流程」标签页挂载后由它消费 */
+  const [flowEdit, setFlowEdit] = useState<FlowEditor | null>(null);
   const [statusAsk, setStatusAsk] = useState<"on_hold" | "active" | "done" | "cancelled" | null>(null);
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
@@ -157,9 +162,10 @@ function ProjectDetailBody({ id, me }: { id: string; me: SessionUser }) {
   if (!project && !missing) return <StateLine>加载中…</StateLine>;
   if (!project) {
     return (
-      <PageHead title="项目不存在" back={{ href: "/projects", label: "流程项目" }}>
+      <>
+        <PageHead title="项目不存在" size="md" back={{ href: "/projects", label: "流程项目" }} />
         <StateLine>这个项目不存在或已被删除。</StateLine>
-      </PageHead>
+      </>
     );
   }
 
@@ -170,6 +176,9 @@ function ProjectDetailBody({ id, me }: { id: string; me: SessionUser }) {
     (cur.reviewerRole === "cto" ? project.can.reviewCTO : cur.reviewerRole === "handler" ? project.can.reviewHandler : project.can.manage);
   const openItems = items.filter((i) => i.status !== "done" && i.status !== "cancelled").length;
   const acceptStage = acceptStageOf(project);
+  // 流程定义改的是 To-Be 工作副本:项目里的 PM / BH / TH、CTO 与管理员都能改,项目结束后锁定
+  const ended = project.status === "done" || project.status === "cancelled";
+  const canEditFlow = project.can.editFlow && !ended && !!process;
 
   const ctx: DetailCtx = {
     project,
@@ -190,12 +199,13 @@ function ProjectDetailBody({ id, me }: { id: string; me: SessionUser }) {
     <>
       <PageHead
         title={project.name}
+        size="md"
         back={{ href: "/projects", label: "流程项目" }}
         subtitle={process?.description || undefined}
       >
         {project.can.assign && project.status === "active" && !project.hasPm && (
           <button type="button" onClick={() => setMembersOpen(true)} className="btn btn-primary !h-10">
-            <Users className="h-4 w-4" /> 指派项目经理
+            <Users className="h-4 w-4" /> 指派 PM
           </button>
         )}
         {project.status === "active" && cur?.status === "in_progress" && project.can.manage && cur.gate && (
@@ -216,6 +226,19 @@ function ProjectDetailBody({ id, me }: { id: string; me: SessionUser }) {
         {canAssignMembers(project.can) && project.status !== "done" && project.status !== "cancelled" && (
           <button type="button" onClick={() => setMembersOpen(true)} className="btn btn-glass !h-10">
             <UserCog className="h-4 w-4" /> 成员
+          </button>
+        )}
+        {canEditFlow && (
+          <button
+            type="button"
+            onClick={() => {
+              setFlowEdit("chart");
+              goTab("flow");
+            }}
+            className="btn btn-glass !h-10"
+            title="修改当前流程定义（To-Be 工作副本）"
+          >
+            <Pencil className="h-4 w-4" /> 修改流程
           </button>
         )}
         <button type="button" onClick={() => setFlowChartOpen(true)} className="btn btn-glass !h-10">
@@ -256,7 +279,7 @@ function ProjectDetailBody({ id, me }: { id: string; me: SessionUser }) {
       {tab === "overview" && <OverviewTab ctx={ctx} onStatus={setStatusAsk} />}
       {tab === "plan" && <PlanTab ctx={ctx} focusItem={focusItem} clearFocus={() => setFocusItem(null)} />}
       {tab === "review" && <ReviewTab ctx={ctx} />}
-      {tab === "flow" && <FlowTab ctx={ctx} />}
+      {tab === "flow" && <FlowTab ctx={ctx} autoEdit={flowEdit} onAutoEditDone={() => setFlowEdit(null)} />}
       {tab === "activity" && <ActivityTab ctx={ctx} />}
 
       {membersOpen && (
@@ -406,14 +429,14 @@ function OverviewTab({ ctx, onStatus }: { ctx: DetailCtx; onStatus: (s: "on_hold
     }
     if (cur.status === "in_progress") {
       if (!project.hasPm) {
-        return <p className="text-[13px] leading-relaxed text-[color:var(--amber-deep)]">尚未指派项目经理。指派后项目正式启动，进入「{cur.name}」。</p>;
+        return <p className="text-[13px] leading-relaxed text-[color:var(--amber-deep)]">尚未指派 PM。指派后项目正式启动，进入「{cur.name}」。</p>;
       }
       if (!cur.gate) {
         return <p className="text-[13px] leading-relaxed text-[color:var(--ink-2)]">流程已上线。持续跟踪运营指标，积累的优化项可以再次立项。</p>;
       }
       return (
         <p className="text-[13px] leading-relaxed text-[color:var(--ink-2)]">
-          完成下列必交付物后，由项目经理提交「{cur.gate}」（{cur.reviewerRole === "cto" ? "CTO" : "经办"}
+          完成下列必交付物后，由 PM 提交「{cur.gate}」（{cur.reviewerRole === "cto" ? "CTO" : "BH"}
           {MODE_LABEL[cur.mode]}）。
         </p>
       );
@@ -424,7 +447,7 @@ function OverviewTab({ ctx, onStatus }: { ctx: DetailCtx; onStatus: (s: "on_hold
   const inlineSelect = "field !h-8 !px-2.5 !text-[13px] w-auto min-w-[64px]";
 
   return (
-    <div className="grid grid-cols-[minmax(0,1fr)] items-start gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
+    <div className="grid grid-cols-[minmax(0,1fr)] items-start gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
       <div className="grid grid-cols-[minmax(0,1fr)] gap-4">
         {/* 阶段进度 */}
         <section className="glass-card p-5">
@@ -501,7 +524,7 @@ function OverviewTab({ ctx, onStatus }: { ctx: DetailCtx; onStatus: (s: "on_hold
                 </div>
               )}
               {cur.status === "in_progress" && !project.can.manage && cur.gate && project.hasPm && (
-                <p className="mt-3 text-xs text-[color:var(--ink-3)]">等待项目经理完成必交付物并提交评审。</p>
+                <p className="mt-3 text-xs text-[color:var(--ink-3)]">等待 PM 完成必交付物并提交评审。</p>
               )}
             </div>
           )}
@@ -694,11 +717,11 @@ function OverviewTab({ ctx, onStatus }: { ctx: DetailCtx; onStatus: (s: "on_hold
             )}
           </h2>
           <ul className="mt-3 space-y-2.5 text-[13px]">
-            <MemberRow label="项目经理" people={pms} hint={pms.length ? "" : "未指派"} warn />
-            <MemberRow label="业务侧经办" people={handlers} hint={handlers.length ? "" : "尚未添加"} />
-            {devs.length > 0 && <MemberRow label="科技侧经办" people={devs} />}
-            {viewers.length > 0 && <MemberRow label="观察者" people={viewers} />}
-            <MemberRow label="CTO" people={ctos.map((u) => ({ userId: u.id, username: u.username, displayName: u.displayName, role: "pm" as const }))} hint={ctos.length ? "" : "未设置"} />
+            <MemberRow label="PM" full="项目经理" people={pms} hint={pms.length ? "" : "未指派"} warn />
+            <MemberRow label="BH" full="业务经办" people={handlers} hint={handlers.length ? "" : "尚未添加"} />
+            {devs.length > 0 && <MemberRow label="TH" full="科技经办" people={devs} />}
+            {viewers.length > 0 && <MemberRow label="GM" full="总经理" people={viewers} />}
+            <MemberRow label="CTO" full="首席技术官" people={ctos.map((u) => ({ userId: u.id, username: u.username, displayName: u.displayName, role: "pm" as const }))} hint={ctos.length ? "" : "未设置"} />
           </ul>
         </section>
 
@@ -746,18 +769,21 @@ function OverviewTab({ ctx, onStatus }: { ctx: DetailCtx; onStatus: (s: "on_hold
 
 function MemberRow({
   label,
+  full,
   people,
   hint,
   warn,
 }: {
+  /** 岗位缩写;full 是它的中文全称,做成悬停提示 */
   label: string;
+  full?: string;
   people: { userId: string; username: string; displayName: string; role: "pm" | "handler" | "dev" | "viewer" }[];
   hint?: string;
   warn?: boolean;
 }) {
   return (
     <li className="flex items-start gap-2.5">
-      <span className="w-[62px] shrink-0 pt-0.5 text-[color:var(--ink-2)]">{label}</span>
+      <span className="w-[62px] shrink-0 pt-0.5 text-[color:var(--ink-2)]" title={full}>{label}</span>
       {people.length ? (
         <span className="flex min-w-0 flex-1 flex-wrap gap-1.5">
           {people.map((m) => (

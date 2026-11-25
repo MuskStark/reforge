@@ -1,0 +1,268 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>ReForge · 管理后台 — 设计稿 03</title>
+<link rel="stylesheet" href="../liquid-glass/assets/tokens.css">
+<link rel="stylesheet" href="console.css">
+</head>
+<body class="app">
+<div id="root"></div>
+
+<script src="icons.js"></script>
+<script src="mock.js"></script>
+<script>
+(function () {
+  "use strict";
+  const M = window.Mock;
+  const user = M.USERS.admin;
+
+  /* ---------- 小工具 ---------- */
+
+  const icoBtn = (ic, label, danger) =>
+    `<button type="button" class="icon-btn${danger ? " danger" : ""}" title="${label}" aria-label="${label}" onclick="Mock.toast('${label}（设计稿未接交互）')">${M.icon(ic)}</button>`;
+  const cell = (label, html, cls = "") =>
+    `<td class="${cls}${label ? "" : " wide"}">${label ? `<span class="lbl">${label}</span>` : ""}${html}</td>`;
+  const rowEnd = (btns) => `<td class="r"><span class="actions">${btns.join("")}</span></td>`;
+  const head = (labels) => `<thead><tr>${labels.map((l) => `<th${typeof l === "object" && l.r ? ' class="r"' : ""}>${typeof l === "object" ? l.t : l}</th>`).join("")}</tr></thead>`;
+  const search = (ph) => `<div class="search">${M.icon("search")}<input class="field" placeholder="${ph}" aria-label="${ph}"></div>`;
+  const num = (t) => `<span class="num">${t}</span>`;
+  const select = (opts, label, cls = "") =>
+    `<select class="field ${cls}" aria-label="${label}">${opts.map((o) => `<option>${o}</option>`).join("")}</select>`;
+
+  /* ---------- 弹层表单:新增类操作统一走这里,不再把表单常驻在页面顶部 ---------- */
+
+  function closeDialog() {
+    document.getElementById("dlg")?.remove();
+  }
+  M.closeDialog = closeDialog;
+  M.openDialog = function ({ title, sub, body, primary }) {
+    closeDialog();
+    const el = document.createElement("div");
+    el.className = "scrim";
+    el.id = "dlg";
+    el.onclick = (e) => {
+      if (e.target === el) closeDialog();
+    };
+    el.innerHTML = `<div class="dlg" role="dialog" aria-modal="true" aria-label="${title}">
+      <div class="dlg-head"><div><h2>${title}</h2><p>${sub}</p></div><button type="button" class="icon-btn" aria-label="关闭" onclick="Mock.closeDialog()">${M.icon("x")}</button></div>
+      <div class="dlg-body">${body}</div>
+      <div class="dlg-foot"><button type="button" class="btn btn-glass" onclick="Mock.closeDialog()">取消</button><button type="button" class="btn btn-primary" onclick="Mock.closeDialog();Mock.toast('已保存（设计稿）')">${primary}</button></div>
+    </div>`;
+    document.body.appendChild(el);
+  };
+  const field = (label, inner, { req = false, opt = "", full = false, help = "" } = {}) =>
+    `<div class="${full ? "full" : ""}"><div class="f-label">${label}${req ? '<span class="req">*</span>' : ""}${opt ? `<span class="opt">${opt}</span>` : ""}</div>${inner}${help ? `<p class="f-help">${help}</p>` : ""}</div>`;
+  const input = (ph, more = "") => `<input class="field" placeholder="${ph}" ${more}>`;
+  const seg = (opts) => `<div class="seg field-seg">${opts.map((t, i) => `<button type="button" class="${i === 0 ? "on" : ""}">${t}</button>`).join("")}</div>`;
+
+  /* ---------- 分区一:流程定义 ---------- */
+
+  const PROCESSES = [
+    { name: "采购申请审批流程改造", desc: "合并三级行政审批为两级，线上会签替代纸质会签", steps: 11, countersign: 3, by: "周宁", dept: "采购部", at: "11-18 14:22" },
+    { name: "差旅报销流程再造", desc: "", steps: 9, countersign: 1, by: "苏航", dept: "财务部", at: "11-17 09:40" },
+    { name: "合同用印审批流程", desc: "法务、财务并行会签", steps: 9, countersign: 2, by: "赵磊", dept: "法务部", at: "11-22 10:12" },
+    { name: "用车申请流程", desc: "", steps: 6, countersign: 0, by: "苏航", dept: "行政部", at: "11-15 16:05" },
+    { name: "新员工入职办理流程", desc: "", steps: 12, countersign: 1, by: "周宁", dept: "人力资源部", at: "11-10 11:30" },
+    { name: "供应商准入流程", desc: "", steps: 8, countersign: 1, by: "苏航", dept: "供应链管理部", at: "11-06 15:48" },
+  ];
+
+  function processes() {
+    return `<div class="toolbar">${search("搜索流程名称、申报人")}<span class="count">共 ${PROCESSES.length} 条</span></div>
+      <div class="lg-card tbl-card"><table class="tbl">
+        ${head([{ t: "流程" }, { t: "步骤", r: 1 }, "会签", "申报人", "提交时间", { t: "操作", r: 1 }])}
+        <tbody>${PROCESSES.map(
+          (p) => `<tr>
+            ${cell("", `<div class="name">${p.name}</div>${p.desc ? `<div class="sub">${p.desc}</div>` : ""}`)}
+            ${cell("步骤", num(p.steps), "r")}
+            ${cell("会签", p.countersign ? M.badge(`${p.countersign} 处`, "amber", "sm") : `<span class="sub">—</span>`)}
+            ${cell("申报人", `<span class="who">${M.avatarOf(p.by)}<div><div>${p.by}</div><div class="sub">${p.dept}</div></div></span>`)}
+            ${cell("提交时间", num(p.at))}
+            ${rowEnd([icoBtn("eye", "查看详情"), icoBtn("waypoints", "查看流程图"), icoBtn("trash-2", "删除流程", true)])}
+          </tr>`,
+        ).join("")}</tbody>
+      </table></div>`;
+  }
+
+  /* ---------- 分区二:线上系统库 ---------- */
+
+  const SYSTEMS = ["OA 办公系统", "财务共享服务平台", "人力资源系统", "合同管理系统", "采购管理系统", "费控报销系统", "资产管理系统", "电子签章平台", "档案管理系统", "车辆调度系统", "供应链协同平台", "企业微信"];
+
+  function systems() {
+    return `<div class="toolbar">${search("搜索系统名称")}<span class="count">共 ${SYSTEMS.length} 个系统</span></div>
+      <div class="grid-cards">${SYSTEMS.map(
+        (s) => `<div class="sys-card"><span class="tile-ic lg">${M.icon("server")}</span><span class="t">${s}</span>${icoBtn("x", `删除「${s}」`, true)}</div>`,
+      ).join("")}</div>`;
+  }
+  M.newSystem = () =>
+    M.openDialog({
+      title: "新增系统",
+      sub: "添加后立即出现在前台「线上处理系统」下拉里。",
+      primary: "添加",
+      body: `<div class="form-grid">${field("系统名称", input("如：OA 办公系统"), { req: true, full: true })}</div>`,
+    });
+
+  /* ---------- 分区三:用户与岗位 ---------- */
+
+  const USERS = [
+    { name: "林远", username: "linyuan", dept: "信息中心", job: "", role: "admin", pending: false, at: "2026-11-02", self: true },
+    { name: "陈曦", username: "chenxi", dept: "科技部", job: "cto", role: "admin", pending: false, at: "2026-11-02" },
+    { name: "苏航", username: "suhang", dept: "流程管理部", job: "pm", role: "member", pending: false, at: "2026-11-03" },
+    { name: "周宁", username: "zhouning", dept: "流程管理部", job: "pm", role: "member", pending: false, at: "2026-11-03" },
+    { name: "王倩", username: "wangqian", dept: "信息中心", job: "handler", role: "member", pending: true, at: "2026-11-20" },
+    { name: "赵磊", username: "zhaolei", dept: "法务部", job: "handler", role: "member", pending: false, at: "2026-11-08" },
+    { name: "李沐", username: "limu", dept: "科技部", job: "dev", role: "member", pending: false, at: "2026-11-08" },
+    { name: "顾言", username: "guyan", dept: "审计部", job: "viewer", role: "member", pending: false, at: "2026-11-12" },
+  ];
+
+  function users() {
+    return `<div class="toolbar">${search("搜索姓名、账号或部门")}
+        ${select(["全部岗位", "CTO", "项目经理", "经办", "开发实施", "观察者"], "按岗位筛选", "toolbar-select")}
+        <span class="count">共 ${USERS.length} 人</span></div>
+      <div class="lg-card tbl-card"><table class="tbl">
+        ${head(["成员", "岗位", "系统角色", "状态", "创建时间", { t: "操作", r: 1 }])}
+        <tbody>${USERS.map(
+          (u) => `<tr>
+            ${cell("", `<span class="who">${M.avatarOf(u.name)}<div><div class="name with-badge">${u.name}${u.self ? M.badge("当前登录", "blue", "sm") : ""}</div><div class="sub">@${u.username} · ${u.dept}</div></div></span>`)}
+            ${cell("岗位", u.job ? M.badge(M.JOB_BADGE[u.job][0], M.JOB_BADGE[u.job][1], "sm") : `<span class="sub">未设置</span>`)}
+            ${cell("系统角色", u.role === "admin" ? `<span class="with-ic admin">${M.icon("shield-check")}管理员</span>` : `<span class="soft">普通账号</span>`)}
+            ${cell("状态", u.pending ? M.badge("待首次登录改密", "amber", "sm") : `<span class="soft">正常</span>`)}
+            ${cell("创建时间", num(u.at))}
+            ${rowEnd([icoBtn("pencil", "编辑"), u.self ? "" : icoBtn("x", "删除用户", true)])}
+          </tr>`,
+        ).join("")}</tbody>
+      </table></div>`;
+  }
+  M.newUser = () =>
+    M.openDialog({
+      title: "创建账号",
+      sub: "公开注册已关闭，账号只能由管理员创建。",
+      primary: "创建账号",
+      body: `<div class="form-grid">
+        ${field("用户名", input("2–32 个字符，用于登录", 'autocomplete="off"'), { req: true })}
+        ${field("显示名", input("如：张三"), { req: true })}
+        ${field("初始密码", input("至少 6 位", 'type="password" autocomplete="new-password"'), { req: true, help: "用户首次登录后必须改成自己的密码，在那之前不能使用系统。" })}
+        ${field("部门", input("如：信息中心"), { opt: "选填" })}
+        ${field("岗位", select(["经办", "CTO", "项目经理", "开发实施", "观察者"], "岗位"), { help: "岗位决定这个人能在项目里做什么。" })}
+        ${field("系统角色", seg(["普通账号", "系统管理员"]), { help: "管理员可以进入系统管理。" })}
+      </div>
+      <div class="form-note">${M.icon("info")}<span>CTO 评审立项、方案、上线与验收，并分配科技侧经办；项目经理负责推进，分配业务侧经办；经办确认需求、执行试运行；开发实施承接改造任务；观察者只读。</span></div>`,
+    });
+
+  /* ---------- 分区四:阶段模板 ---------- */
+
+  const TPL = [
+    { seq: 1, key: "intake", name: "分析立项", gate: "G1 立项评审", mode: "会签", by: "CTO、管理员", required: ["As-Is 流程图", "改造价值评估", "项目章程"], tasks: ["指派项目经理", "召开启动会"] },
+    { seq: 2, key: "require", name: "需求确认", gate: "G2 需求基线", mode: "会签", by: "CTO、业务侧经办", required: ["需求规格说明书", "需求确认单"], tasks: ["业务侧需求访谈", "确认数据互通范围"] },
+    { seq: 3, key: "design", name: "方案设计", gate: "G3 方案评审", mode: "或签", by: "CTO", required: ["To-Be 流程图", "技术方案", "改造工作量评估"], tasks: ["编写技术方案", "评估改造成本"], note: "通过时留存 To-Be 基线" },
+    { seq: 4, key: "build", name: "系统改造", gate: "G4 上线评审", mode: "或签", by: "CTO", required: ["改造完成报告", "测试报告", "上线方案"], tasks: ["系统开发", "内部测试", "安全扫描"] },
+    { seq: 5, key: "trial", name: "试运行", gate: "G5 试运行评审", mode: "会签", by: "CTO、业务侧经办", required: ["试运行报告", "问题清单"], tasks: ["小范围试运行", "收集用户反馈"] },
+    { seq: 6, key: "accept", name: "验收上线", gate: "G6 验收评审", mode: "会签", by: "CTO、管理员", required: ["验收报告", "发布记录"], tasks: ["正式上线", "用户培训"], note: "通过后才能标记项目完成" },
+    { seq: 7, key: "operate", name: "运营优化", gate: "G7 运营回顾", mode: "或签", by: "项目经理", required: ["运营月报"], tasks: ["监控运营指标", "沉淀优化清单"] },
+  ];
+
+  function stages() {
+    return `<div class="lg-card stages-card"><div class="stages">${TPL.map(
+      (s, i) => `<div class="stage">
+        <div class="stage-rail"><span class="rail-bead">${s.seq}</span>${i < TPL.length - 1 ? '<span class="rail-line"></span>' : ""}</div>
+        <div class="stage-body"><div class="stage-card">
+          <div class="stage-top"><h3>${s.name}</h3><span class="key">${s.key}</span>${s.note ? M.badge(s.note, "amber-soft", "sm") : ""}
+            <span class="tools">${icoBtn("chevron-up", "上移")}${icoBtn("chevron-down", "下移")}${icoBtn("x", `删除阶段「${s.name}」`, true)}</span></div>
+          <div class="stage-facts"><span><span class="lbl">出口关卡</span><b>${s.gate}</b></span><span><span class="lbl">评审方式</span><b>${s.mode}</b></span><span><span class="lbl">评审人</span><b>${s.by}</b></span></div>
+          <div class="chips"><span class="chip-label">必交付物</span>${s.required.map((r) => `<span>${r}</span>`).join("")}<span class="gap"></span><span class="chip-label">默认任务</span>${s.tasks.map((t) => `<span class="amber">${M.icon("plus", "font-size:12px;margin-right:4px")}${t}</span>`).join("")}</div>
+        </div></div>
+      </div>`,
+    ).join("")}</div></div>`;
+  }
+
+  /* ---------- 分区五:通知渠道 ---------- */
+
+  const KIND = { wecom: ["企业微信", "message-square", "blue"], dingtalk: ["钉钉", "message-square", "indigo"], feishu: ["飞书", "message-square", "green"], email: ["邮件", "mail", "gray"] };
+  const CHANNELS = [
+    { name: "流程改造管理群", kind: "wecom", to: "qyapi.weixin.qq.com/…key=••••a3f2", on: true, last: "5 分钟前" },
+    { name: "CTO 评审提醒", kind: "dingtalk", to: "oapi.dingtalk.com/…token=••••7b1e", on: true, last: "23 分钟前" },
+    { name: "项目周报", kind: "feishu", to: "open.feishu.cn/…hook=••••c90d", on: false, last: "3 天前" },
+    { name: "运维告警", kind: "email", to: "ops@example.com 等 3 人", on: true, last: "1 小时前" },
+  ];
+
+  function channels() {
+    return `<div class="lg-card tbl-card"><table class="tbl">
+        ${head(["名称", "类型", "发送到", "启用", "最近发送", { t: "操作", r: 1 }])}
+        <tbody>${CHANNELS.map(
+          (c) => `<tr>
+            ${cell("", `<div class="name">${c.name}</div>`)}
+            ${cell("类型", `<span class="who kind"><span class="tile-ic ${KIND[c.kind][2]}">${M.icon(KIND[c.kind][1])}</span>${KIND[c.kind][0]}</span>`)}
+            ${cell("发送到", `<span class="mono">${c.to}</span>`)}
+            ${cell("启用", `<span class="switch sm${c.on ? " on" : ""}" role="switch" aria-checked="${c.on}"></span>`)}
+            ${cell("最近发送", num(c.last))}
+            ${rowEnd([icoBtn("send", "发送测试消息"), icoBtn("pencil", "编辑"), icoBtn("trash-2", "删除渠道", true)])}
+          </tr>`,
+        ).join("")}</tbody>
+      </table></div>`;
+  }
+  M.newChannel = () =>
+    M.openDialog({
+      title: "新增通知渠道",
+      sub: "保存后约 15 秒内生效，只转发此后新产生的通知。",
+      primary: "保存渠道",
+      body: `<div class="form-grid">
+        ${field("类型", seg(["企业微信", "钉钉", "飞书", "邮件"]), { full: true })}
+        ${field("名称", input("如：流程改造管理群"), { req: true, full: true })}
+        ${field("Webhook 地址", input("https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=…"), { req: true, full: true })}
+        ${field("签名密钥", input("选填"), { help: "安全设置用了「自定义关键词」时，请把关键词设为 ReForge。" })}
+        ${field("转发事件", select(["全部关键动态", "仅评审与逾期"], "转发事件"))}
+      </div>`,
+    });
+
+  /* ---------- 分区注册:每个分区一条 URL ---------- */
+
+  const SECTIONS = {
+    processes: { title: "流程定义", lede: "前台提交上来的流程及其步骤构成。流程的推进与评审在「流程项目」里进行，不在这里。", actions: "", body: processes },
+    systems: { title: "线上系统库", lede: "前台填写流程时可选的线上系统。增删即时生效。", primary: "新增系统", open: "newSystem", body: systems },
+    users: { title: "用户与岗位", lede: "公开注册已关闭，账号由管理员在这里创建。岗位决定每个人能在项目里做什么。", primary: "创建账号", open: "newUser", body: users },
+    stages: {
+      title: "阶段模板",
+      lede: "新立项的项目按这套阶段推进。修改只影响此后新建的项目，已立项的不变。",
+      actions:
+        M.badge("有未保存的修改", "amber") +
+        `<button type="button" class="btn btn-glass" onclick="Mock.toast('载入内置模板（需确认）')">${M.icon("rotate-ccw", "font-size:16px")}载入内置模板</button>` +
+        `<button type="button" class="btn btn-primary" onclick="Mock.toast('模板已保存（设计稿）')">${M.icon("save", "font-size:16px")}保存模板</button>`,
+      body: stages,
+    },
+    channels: { title: "通知渠道", lede: "把项目的关键动态转发到企业微信、钉钉、飞书群或邮箱。地址与密钥只显示脱敏值。", primary: "新增渠道", open: "newChannel", body: channels },
+  };
+
+  function current() {
+    const key = (location.hash.match(/^#\/admin\/(\w+)/) || [])[1];
+    return SECTIONS[key] ? key : "processes";
+  }
+
+  function render() {
+    const key = current();
+    const s = SECTIONS[key];
+    const main = s.primary
+      ? `<button type="button" class="btn btn-primary" onclick="Mock.${s.open}()">${M.icon("plus", "font-size:16px")}${s.primary}</button>`
+      : s.actions;
+    document.getElementById("root").innerHTML =
+      M.WALLPAPER +
+      M.sidebar({ active: "admin:" + key, user, unread: 3, todo: 2 }) +
+      `<div class="page">
+        <nav class="m-nav lg-clear" aria-label="管理后台"><a class="back" href="me.html">${M.icon("chevron-left")}我的</a><span class="title">管理后台</span></nav>
+        <div class="m-secs">${M.ADMIN_NAV.map((i) => `<a class="${i.id === "admin:" + key ? "on" : ""}" href="admin.html#/${i.href.slice(1)}">${i.label}</a>`).join("")}</div>
+        <header class="pg-head">
+          <div class="pg-head-text"><h1>${s.title}</h1><p class="lede">${s.lede}</p></div>
+          ${main ? `<div class="pg-actions">${main}</div>` : ""}
+        </header>
+        ${s.body()}
+      </div>` +
+      M.anno({ no: "03", name: `管理后台 · ${s.title}`, url: document.body.classList.contains("mob") ? "/me → /admin/" + key : "/admin/" + key });
+  }
+
+  window.addEventListener("hashchange", render);
+  render();
+  M.refreshSidebarOverflow();
+})();
+</script>
+</body>
+</html>

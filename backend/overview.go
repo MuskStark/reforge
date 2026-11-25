@@ -77,7 +77,7 @@ func (s *postgresStore) handleOverview(w http.ResponseWriter, r *http.Request) {
 	}
 	ov, err := s.buildOverview(r.Context(), r.URL.Query().Get("full") == "1")
 	if err != nil {
-		writeErr(w, err)
+		writeErr(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, ov)

@@ -1,7 +1,8 @@
 "use client";
 
 /**
- * 编辑已有流程表单(复用 FlowBuilder):管理员或被指派跟进人可保存(PUT)。
+ * 编辑已有流程表单(复用 FlowBuilder)。谁能保存由服务端决定(PUT /api/admin/processes/{id}):
+ * 管理员、CTO,以及这个项目里的 PM / BH / TH;项目页「流程」标签与后台「流程定义」共用。
  */
 
 import { useEffect, useState } from "react";

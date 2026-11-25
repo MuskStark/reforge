@@ -56,7 +56,7 @@ func (s *postgresStore) handleListComments(w http.ResponseWriter, r *http.Reques
 		FROM comments c LEFT JOIN work_items w ON w.id = c.item_id LEFT JOIN users u ON u.id = c.author_id
 		WHERE c.project_id = $1 ORDER BY c.created_at DESC LIMIT 200`, pathID(r))
 	if err != nil {
-		writeErr(w, err)
+		writeErr(w, r, err)
 		return
 	}
 	defer rows.Close()
@@ -64,7 +64,7 @@ func (s *postgresStore) handleListComments(w http.ResponseWriter, r *http.Reques
 	for rows.Next() {
 		c, err := scanComment(rows)
 		if err != nil {
-			writeErr(w, err)
+			writeErr(w, r, err)
 			return
 		}
 		out = append(out, c)
@@ -88,7 +88,7 @@ func (s *postgresStore) handleCreateComment(w http.ResponseWriter, r *http.Reque
 	}
 	users, err := s.ListUsers()
 	if err != nil {
-		writeErr(w, err)
+		writeErr(w, r, err)
 		return
 	}
 	mentioned := parseMentions(body.Body, users)

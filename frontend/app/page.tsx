@@ -1,12 +1,13 @@
 "use client";
 
-import { Suspense, lazy, useCallback, useState } from "react";
+import { Suspense, lazy, useCallback, useLayoutEffect, useState } from "react";
 import Link from "next/link";
-import { ShieldCheck } from "lucide-react";
+import { LayoutGrid, LogIn } from "lucide-react";
 import { toast } from "sonner";
 import { FlowBuilder } from "@/components/flow-builder";
 import { FlowChartLoadBoundary } from "@/components/flow-chart-load-boundary";
 import type { ChartSource } from "@/components/flow-chart";
+import { getToken } from "@/lib/auth";
 import { stepIssues } from "@/lib/step-checks";
 import { emptyProcess } from "@/lib/types";
 
@@ -66,6 +67,10 @@ export default function Home() {
   const [draft, setDraft] = useState(emptyProcess);
   const [chart, setChart] = useState<ChartSource | null>(null);
   const [FlowChartModal, setFlowChartModal] = useState(chartModalComponent);
+  // 顶栏的入口:已登录的人回工作台,没登录的去登录页。
+  // 会话存在 sessionStorage 里,只有客户端读得到,所以挂在 layout effect 上(首帧两端一致是"登录")
+  const [signedIn, setSignedIn] = useState(false);
+  useLayoutEffect(() => setSignedIn(Boolean(getToken())), []);
 
   // 第一次点进或聚焦表单就在后台预取流程图代码块;每个页面只发起一次(取不到也不随每次点击反复请求,
   // 用户点"预览"时自会重试),失败不打扰
@@ -106,12 +111,12 @@ export default function Home() {
           </div>
           <div className="flex-1" />
           <Link
-            href="/admin"
+            href={signedIn ? "/work" : "/login"}
             prefetch={false}
             className="inline-flex h-9 items-center gap-1.5 rounded-full px-3.5 text-sm font-semibold text-[color:var(--tint)] transition hover:bg-[color:var(--tint-soft)]"
           >
-            <ShieldCheck className="h-4 w-4" />
-            管理后台
+            {signedIn ? <LayoutGrid className="h-4 w-4" aria-hidden="true" /> : <LogIn className="h-4 w-4" aria-hidden="true" />}
+            {signedIn ? "工作台" : "登录"}
           </Link>
         </header>
 

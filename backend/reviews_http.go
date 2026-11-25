@@ -23,7 +23,7 @@ func (s *postgresStore) inProjectLock(w http.ResponseWriter, r *http.Request, pr
 		return fn(r.Context(), tx, pr, stages, a, c)
 	})
 	if err != nil {
-		writeErr(w, err)
+		writeErr(w, r, err)
 		return false
 	}
 	return true
@@ -38,7 +38,7 @@ func (s *postgresStore) projectOfReview(w http.ResponseWriter, r *http.Request) 
 		return "", false
 	}
 	if err != nil {
-		writeErr(w, err)
+		writeErr(w, r, err)
 		return "", false
 	}
 	return id, true
@@ -106,7 +106,7 @@ func (s *postgresStore) handleListReviews(w http.ResponseWriter, r *http.Request
 	}
 	list, err := listReviewsTx(r.Context(), s.db, pathID(r))
 	if err != nil {
-		writeErr(w, err)
+		writeErr(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, list)
@@ -119,7 +119,7 @@ func (s *postgresStore) handlePendingReviews(w http.ResponseWriter, r *http.Requ
 	}
 	list, err := myPendingReviews(r.Context(), s, a)
 	if err != nil {
-		writeErr(w, err)
+		writeErr(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, list)

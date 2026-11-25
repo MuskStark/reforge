@@ -16,6 +16,7 @@ import { StepCard } from "@/components/step-card";
 import type { FlowProcess, FlowStep } from "@/lib/types";
 import { emptyProcess, emptyStep, normalizeParty } from "@/lib/types";
 import { adminFetch } from "@/lib/auth";
+import { newRequestId, reportApiFailure } from "@/lib/client-logger";
 
 /** 流程名称输入框的锚点 id */
 const BASE_ANCHOR = "flow-name";
@@ -70,7 +71,7 @@ export function FlowBuilder({
   onChange,
   onSubmitted,
   onPreviewChart,
-  /** 编辑已有流程:提交走 PUT /api/admin/processes/{id}(需管理员或被指派跟进人) */
+  /** 编辑已有流程:保存走 PUT /api/admin/processes/{id}(项目里的 PM / BH / TH、CTO 或管理员);此时不提供重置与图预览 */
   existingId,
 }: {
   value: ReturnType<typeof emptyProcess>;
@@ -80,6 +81,8 @@ export function FlowBuilder({
   existingId?: string;
 }) {
   const { name, description, applicant, steps } = value;
+  // 编辑态:按钮写「保存修改」,也不给「重置」(会把已加载的流程清空)和「一键生成流程图」(编辑弹层里没有预览)
+  const editing = Boolean(existingId);
   const [submitting, setSubmitting] = useState(false);
   /** 点过提交之后:仍缺失的必填控件标红 */
   const [attempted, setAttempted] = useState(false);
@@ -157,17 +160,22 @@ export function FlowBuilder({
           body: JSON.stringify(payload),
         });
       } else {
+        const requestId = newRequestId();
         let res: Response;
         try {
           res = await fetch("/api/processes", {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: { "Content-Type": "application/json", "X-Request-Id": requestId },
             body: JSON.stringify(payload),
           });
         } catch {
+          // 公开的收集表,提交的人多半没有账号;请求没发出去,后端自己记不到,所以报一条浏览器日志
+          reportApiFailure({ method: "POST", path: "/api/processes", status: 0, requestId, message: "提交时没有连上服务器" });
           throw new NetworkError();
         }
         const d = (await res.json().catch(() => null)) as (FlowProcess & { error?: string }) | null;
+        // 回来的不是后端的 JSON(网关、隧道的错误页):同样只有浏览器这边知道
+        if (!d) reportApiFailure({ method: "POST", path: "/api/processes", status: res.status, requestId, message: `服务返回了 ${res.status}` });
         // 后端校验没过、提交太频繁等:原样显示后端给的说明,不要说成网络异常
         if (!res.ok) throw new Error(d?.error ?? `服务返回了 ${res.status}，请稍后重试`);
         if (!d) throw new Error("服务返回了无法识别的内容，请稍后重试");
@@ -372,14 +380,18 @@ export function FlowBuilder({
           )}
         </p>
         <div className="flex flex-wrap items-center gap-2.5">
-          <button type="button" onClick={() => onChange(emptyProcess())} className="btn btn-glass">
-            <RotateCcw className="h-4 w-4" /> 重置
-          </button>
-          <button type="button" onClick={onPreviewChart} className="btn btn-glass">
-            <Waypoints className="h-4 w-4" /> 一键生成流程图
-          </button>
+          {!editing && (
+            <>
+              <button type="button" onClick={() => onChange(emptyProcess())} className="btn btn-glass">
+                <RotateCcw className="h-4 w-4" /> 重置
+              </button>
+              <button type="button" onClick={onPreviewChart} className="btn btn-glass">
+                <Waypoints className="h-4 w-4" /> 一键生成流程图
+              </button>
+            </>
+          )}
           <button type="button" onClick={() => void submit()} className="btn btn-primary text-[17px]">
-            <Save className="h-4 w-4" /> 提交流程
+            <Save className="h-4 w-4" /> {editing ? "保存修改" : "提交流程"}
           </button>
         </div>
       </section>
@@ -389,19 +401,23 @@ export function FlowBuilder({
         className="lg-clear fixed inset-x-4 bottom-[calc(1rem+env(safe-area-inset-bottom))] z-50 flex items-center gap-2.5 p-2.5 sm:hidden"
         style={{ borderRadius: 26 }}
       >
-        <button
-          type="button"
-          onClick={() => onChange(emptyProcess())}
-          aria-label="重置"
-          className="btn btn-glass !h-12 !w-12 shrink-0 !p-0"
-        >
-          <RotateCcw className="h-[18px] w-[18px]" />
-        </button>
-        <button type="button" onClick={onPreviewChart} className="btn btn-glass !h-12 shrink-0">
-          <Waypoints className="h-4 w-4" /> 流程图
-        </button>
+        {!editing && (
+          <>
+            <button
+              type="button"
+              onClick={() => onChange(emptyProcess())}
+              aria-label="重置"
+              className="btn btn-glass !h-12 !w-12 shrink-0 !p-0"
+            >
+              <RotateCcw className="h-[18px] w-[18px]" />
+            </button>
+            <button type="button" onClick={onPreviewChart} className="btn btn-glass !h-12 shrink-0">
+              <Waypoints className="h-4 w-4" /> 流程图
+            </button>
+          </>
+        )}
         <button type="button" onClick={() => void submit()} className="btn btn-primary !h-12 min-w-0 flex-1 text-[16px]">
-          <Save className="h-4 w-4" /> 提交流程
+          <Save className="h-4 w-4" /> {editing ? "保存修改" : "提交流程"}
           {/* 还差的必填数:点提交会列出是哪些 */}
           {missing > 0 && (
             <span className="ml-0.5 rounded-full bg-white/25 px-1.5 font-data text-[12px] font-semibold leading-5">缺 {missing}</span>

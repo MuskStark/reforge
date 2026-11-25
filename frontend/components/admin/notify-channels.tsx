@@ -11,8 +11,10 @@ import { BellRing, Pencil, Plus, Send, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Dialog, DialogActions, DialogHeader, Field } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { PageHead, StateLine } from "@/components/shell/app-shell";
 import { authFetch } from "@/lib/auth";
 import { fmtDateTime } from "@/lib/labels";
+import { ADMIN_SECTION_META } from "@/lib/shell-nav";
 import type { ChannelKind, NotifyChannel, NotifyChannelInput, NotifyChannelList } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -68,7 +70,7 @@ function Switch({ checked, onChange, label }: { checked: boolean; onChange: (v: 
   );
 }
 
-export function NotifyChannels({ onLogout }: { onLogout: () => void }) {
+export function NotifyChannels() {
   const [data, setData] = useState<NotifyChannelList | null>(null);
   const [editing, setEditing] = useState<NotifyChannel | "new" | null>(null);
   const [form, setForm] = useState<FormState | null>(null);
@@ -80,10 +82,11 @@ export function NotifyChannels({ onLogout }: { onLogout: () => void }) {
     try {
       setData(await authFetch<NotifyChannelList>(API, { cache: "no-store" }));
     } catch (e) {
-      if (e instanceof Error && e.message === "UNAUTHORIZED") onLogout();
-      else toast.error("读取失败", { description: "无法获取通知渠道" });
+      // 会话失效由外壳处理
+      if (!(e instanceof Error && e.message === "UNAUTHORIZED")) toast.error("读取失败", { description: "无法获取通知渠道" });
+      setData((prev) => prev ?? { list: [], kinds: [], defaultKinds: [] });
     }
-  }, [onLogout]);
+  }, []);
 
   useEffect(() => {
     void load();
@@ -136,8 +139,8 @@ export function NotifyChannels({ onLogout }: { onLogout: () => void }) {
   };
 
   const fail = (e: unknown, title: string) => {
-    if (e instanceof Error && e.message === "UNAUTHORIZED") onLogout();
-    else toast.error(title, { description: e instanceof Error && e.message !== "UNAUTHORIZED" ? e.message : "请重试" });
+    if (e instanceof Error && e.message === "UNAUTHORIZED") return;
+    toast.error(title, { description: e instanceof Error ? e.message : "请重试" });
   };
 
   const save = async () => {
@@ -227,19 +230,16 @@ export function NotifyChannels({ onLogout }: { onLogout: () => void }) {
 
   return (
     <section>
-      <div className="mb-3.5 flex flex-wrap items-center gap-3">
-        <h2 className="flex items-center gap-2 text-[22px] font-bold tracking-[-0.02em]">
-          通知渠道
-          <span className="badge badge-plain">{list.length}</span>
-        </h2>
-        <p className="text-xs text-[color:var(--ink-2)]">把项目的关键动态转发到群机器人或邮箱，每 15 秒投递一次</p>
-        <button type="button" onClick={openNew} className="btn btn-primary ml-auto !h-10">
-          <Plus className="h-4 w-4" /> 新建渠道
+      <PageHead title={ADMIN_SECTION_META.channels.title} subtitle={ADMIN_SECTION_META.channels.lede}>
+        <button type="button" onClick={openNew} className="btn btn-primary">
+          <Plus className="h-4 w-4" aria-hidden="true" /> 新增渠道
         </button>
-      </div>
+      </PageHead>
 
       <div className="glass-card p-3 sm:p-4">
-        {data && list.length === 0 ? (
+        {!data ? (
+          <StateLine>加载中…</StateLine>
+        ) : list.length === 0 ? (
           <div className="rounded-2xl border border-dashed border-black/10 bg-white/30 px-4 py-8 text-center">
             <BellRing className="mx-auto h-7 w-7 text-[color:var(--ink-3)]" />
             <p className="mt-2 text-[15px] font-semibold text-neutral-900">还没有外部通知渠道</p>
@@ -294,8 +294,8 @@ export function NotifyChannels({ onLogout }: { onLogout: () => void }) {
       </div>
 
       <p className="mt-3 text-xs leading-relaxed text-[color:var(--ink-3)]">
-        同一件事通知了多个人时，群里只发一条；消息以「ReForge 流程再造」开头。新渠道只转发创建之后产生的通知，不回放历史。
-        Webhook 地址与密钥保存后不再显示，修改时留空表示不改。
+        每约 15 秒投递一次。同一件事通知了多个人时，群里只发一条；消息以「ReForge 流程再造」开头。
+        新渠道只转发创建之后产生的通知，不回放历史；Webhook 地址与密钥保存后不再显示，修改时留空表示不改。
       </p>
 
       {form && (

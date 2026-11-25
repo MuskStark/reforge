@@ -85,14 +85,17 @@ func handleAdminUpdateUser(st *postgresStore) http.HandlerFunc {
 		if body.JobRole != nil {
 			job = strings.TrimSpace(*body.JobRole)
 			if !validJobRoles[job] {
-				writeError(w, http.StatusBadRequest, "岗位无效（应为 CTO、项目经理、经办、开发实施或观察者）")
+				writeError(w, http.StatusBadRequest, "岗位无效（应为 GM、CTO、PM、BH 或 TH）")
 				return
 			}
 		}
 		if err := st.UpdateUserProfile(r.Context(), target.ID, name, dept, job); err != nil {
-			writeError(w, http.StatusInternalServerError, "更新失败: "+err.Error())
+			requestLogger(r).Error("更新用户资料失败", "target", target.Username, "err", err)
+			writeError(w, http.StatusInternalServerError, "更新失败，请稍后重试")
 			return
 		}
+		// 岗位与系统角色决定权限,改动一律留痕
+		audit(r, "user.update", "target", target.Username, "display", name, "job", job, "dept", dept)
 		updated, _ := st.GetUserByID(target.ID)
 		writeJSON(w, http.StatusOK, updated)
 	}
@@ -165,9 +168,11 @@ func handleUpdateOwnProfile(st *postgresStore) http.HandlerFunc {
 			dept = trimRunes(*body.Department, 64)
 		}
 		if err := st.UpdateOwnProfile(r.Context(), u.ID, name, dept); err != nil {
-			writeError(w, http.StatusInternalServerError, "保存失败: "+err.Error())
+			requestLogger(r).Error("保存个人信息失败", "err", err)
+			writeError(w, http.StatusInternalServerError, "保存失败，请稍后重试")
 			return
 		}
+		audit(r, "user.profile_update", "display", name, "dept", dept)
 		updated, _ := st.GetUserByID(u.ID)
 		writeJSON(w, http.StatusOK, publicUser(updated))
 	}
@@ -201,6 +206,8 @@ func handleChangePassword(st *postgresStore) http.HandlerFunc {
 		}
 		if bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(body.OldPassword)) != nil {
 			passwordLimiter.hit(rlKey)
+			// 只记"原密码不对",新旧密码都不进日志
+			requestLogger(r).Warn("audit", "action", "auth.password_wrong", "user", u.Username)
 			writeError(w, http.StatusBadRequest, "原密码不正确")
 			return
 		}
@@ -210,15 +217,18 @@ func handleChangePassword(st *postgresStore) http.HandlerFunc {
 		}
 		hash, err := bcrypt.GenerateFromPassword([]byte(body.NewPassword), bcrypt.DefaultCost)
 		if err != nil {
+			requestLogger(r).Error("密码加密失败", "err", err)
 			writeError(w, http.StatusInternalServerError, "密码加密失败")
 			return
 		}
 		if err := st.ChangePassword(r.Context(), u.ID, string(hash)); err != nil {
-			writeError(w, http.StatusInternalServerError, "修改失败: "+err.Error())
+			requestLogger(r).Error("修改密码失败", "err", err)
+			writeError(w, http.StatusInternalServerError, "修改失败，请稍后重试")
 			return
 		}
 		sessions.clearMustChange(token)
 		sessions.revokeOthers(token, u.Username)
+		audit(r, "auth.password_change", "note", "该账号的其他会话已吊销")
 		updated, _ := st.GetUserByID(u.ID)
 		writeJSON(w, http.StatusOK, publicUser(updated))
 	}

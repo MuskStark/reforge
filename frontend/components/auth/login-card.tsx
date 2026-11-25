@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, UserPlus } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { ArrowLeft, Lock, UserRound } from "lucide-react";
 import { toast } from "sonner";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { authFetch, setSession, type SessionUser } from "@/lib/auth";
+import { authFetch, getToken, setSession, takeLoginReason, type SessionUser } from "@/lib/auth";
 
 /** 品牌图形:分叉汇聚的流程节点(与前台同构) */
 export function BrandMark({ className }: { className?: string }) {
@@ -29,18 +30,11 @@ export function BrandMark({ className }: { className?: string }) {
 }
 
 /**
- * 登录 / 首个用户注册卡。工作台、项目、通知与后台共用:
- * 登录成功后回调 onLoggedIn,由各页面决定后续跳转。
+ * 登录卡:只用在 /login 这一个地方(所有页面未登录都去那里)。
+ * 登录或注册成功后一律进工作台——首次登录要先改密码的,进了工作台会立刻弹出改密框。
  */
-export function LoginCard({
-  onLoggedIn,
-  title = "登录",
-  note,
-}: {
-  onLoggedIn: (user: SessionUser, token: string) => void;
-  title?: string;
-  note?: React.ReactNode;
-}) {
+export function LoginCard() {
+  const router = useRouter();
   const [mode, setMode] = useState<"login" | "register">("login");
   const [hasUsers, setHasUsers] = useState(true);
   const [username, setUsername] = useState("");
@@ -57,7 +51,7 @@ export function LoginCard({
         if (!s.hasUsers) setMode("register");
       })
       .catch(() => setHasUsers(true));
-  });
+  }, []);
 
   const submit = async () => {
     if (!username.trim() || !password) {
@@ -81,7 +75,7 @@ export function LoginCard({
       });
       setSession(data.token, data.user);
       if (data.user.mustChangePassword) {
-        // 首次登录:页面随后会弹出不可关闭的改密框
+        // 首次登录:进工作台后弹出不可关闭的改密框
         toast.info("首次登录，请先修改密码");
       } else {
         toast.success(
@@ -92,7 +86,8 @@ export function LoginCard({
             : `欢迎回来，${data.user.displayName || data.user.username}`,
         );
       }
-      onLoggedIn(data.user, data.token);
+      // 登录后的唯一去向:工作台
+      router.replace("/work");
     } catch (e) {
       if (e instanceof Error && e.message !== "UNAUTHORIZED") {
         toast.error(mode === "register" ? "注册失败" : "登录失败", { description: e.message });
@@ -116,7 +111,7 @@ export function LoginCard({
       >
         <BrandMark className="h-8 w-8" />
       </span>
-      <h1 className="text-[22px] font-bold tracking-[-0.02em]">{title}</h1>
+      <h1 className="text-[22px] font-bold tracking-[-0.02em]">登录 ReForge</h1>
       <p className="mt-1 text-[13px] text-[color:var(--ink-2)]">ReForge · 流程再造工程收集表</p>
 
       {!hasUsers && (
@@ -138,24 +133,32 @@ export function LoginCard({
       >
         <div className="space-y-1.5">
           <Label htmlFor="login-user">账号</Label>
-          <Input
-            id="login-user"
-            value={username}
-            autoComplete="username"
-            placeholder="2-32 个字符"
-            onChange={(e) => setUsername(e.target.value)}
-          />
+          <span className="relative block">
+            <UserRound className="pointer-events-none absolute left-3.5 top-1/2 h-[17px] w-[17px] -translate-y-1/2 text-[color:var(--ink-3)]" aria-hidden="true" />
+            <Input
+              id="login-user"
+              value={username}
+              autoComplete="username"
+              placeholder="2-32 个字符"
+              className="!h-[46px] pl-10"
+              onChange={(e) => setUsername(e.target.value)}
+            />
+          </span>
         </div>
         <div className="space-y-1.5">
           <Label htmlFor="login-pass">密码</Label>
-          <Input
-            id="login-pass"
-            type="password"
-            value={password}
-            autoComplete={mode === "register" ? "new-password" : "current-password"}
-            placeholder="至少 6 位"
-            onChange={(e) => setPassword(e.target.value)}
-          />
+          <span className="relative block">
+            <Lock className="pointer-events-none absolute left-3.5 top-1/2 h-[17px] w-[17px] -translate-y-1/2 text-[color:var(--ink-3)]" aria-hidden="true" />
+            <Input
+              id="login-pass"
+              type="password"
+              value={password}
+              autoComplete={mode === "register" ? "new-password" : "current-password"}
+              placeholder="至少 6 位"
+              className="!h-[46px] pl-10"
+              onChange={(e) => setPassword(e.target.value)}
+            />
+          </span>
         </div>
         {mode === "register" && (
           <div className="space-y-1.5">
@@ -166,32 +169,22 @@ export function LoginCard({
               value={confirm}
               autoComplete="new-password"
               placeholder="再次输入密码"
+              className="!h-[46px]"
               onChange={(e) => setConfirm(e.target.value)}
             />
           </div>
         )}
         <button type="submit" disabled={busy} className="btn btn-primary !h-[50px] w-full text-[17px] disabled:opacity-60">
-          {mode === "login" ? (
-            "登 录"
-          ) : (
-            <>
-              <UserPlus className="h-4 w-4" />
-              {hasUsers ? "注册" : "注册并成为管理员"}
-            </>
-          )}
+          {mode === "login" ? "登 录" : "注册并成为管理员"}
         </button>
       </form>
 
       <div className="mt-4 rounded-2xl bg-[color:var(--tint-soft)] px-3.5 py-2.5 text-left shadow-[inset_0_0_0_0.5px_rgba(0,113,227,0.16)]">
-        {note ?? (
-          <p className="text-xs leading-relaxed text-[color:var(--tint-deep)]">
-            {mode === "register" && !hasUsers
-              ? "当前尚无注册用户 —— 第一个注册的用户将自动成为管理员。"
-              : mode === "register" && hasUsers
-                ? "已有管理员。新注册账号为普通用户。"
-                : "公开注册已关闭，账号由管理员在后台创建；登录会话 24 小时有效。"}
-          </p>
-        )}
+        <p className="text-xs leading-relaxed text-[color:var(--tint-deep)]">
+          {mode === "register" && !hasUsers
+            ? "当前尚无注册用户 —— 第一个注册的用户将自动成为管理员，注册后进入工作台。"
+            : "登录后进入工作台：PM 推进流程改造，CTO 评审方案，BH 确认需求与试运行。没有账号请联系管理员开通。"}
+        </p>
       </div>
 
       <div className="mt-5">
@@ -204,5 +197,34 @@ export function LoginCard({
         </Link>
       </div>
     </section>
+  );
+}
+
+/**
+ * 登录页:/login 是全站唯一的登录入口。
+ * 本地还有会话的(比如已经登录的人手输了这个地址):校验一下,还有效就直接进工作台;
+ * 会话是过期断掉的:提示一句再让对方重新登录。
+ */
+export function LoginScreen() {
+  const router = useRouter();
+
+  useLayoutEffect(() => {
+    if (takeLoginReason() === "expired") toast.info("登录已过期，请重新登录");
+    if (!getToken()) return;
+    void authFetch<SessionUser>("/api/auth/me")
+      .then(() => router.replace("/work"))
+      .catch(() => {
+        /* 令牌已失效:留在登录页(401 的处理在 authFetch 里) */
+      });
+  }, [router]);
+
+  return (
+    <main className="dvh-fill relative w-full overflow-x-clip">
+      {/* 环境光场:亮色极光(fixed,为玻璃提供可折射的色彩) */}
+      <div className="ambient-field" aria-hidden="true" />
+      <div className="login-center">
+        <LoginCard />
+      </div>
+    </main>
   );
 }

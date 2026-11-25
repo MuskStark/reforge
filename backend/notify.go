@@ -3,8 +3,10 @@ package main
 import (
 	"context"
 	"database/sql"
-	"log"
+	"fmt"
+	"log/slog"
 	"net/http"
+	"runtime/debug"
 	"time"
 )
 
@@ -40,7 +42,7 @@ func (s *postgresStore) handleNotifications(w http.ResponseWriter, r *http.Reque
 		COALESCE(n.review_id,''), n.title, n.read_at, n.created_at FROM notifications n`+where+
 		` ORDER BY n.created_at DESC LIMIT 100`, a.ID)
 	if err != nil {
-		writeErr(w, err)
+		writeErr(w, r, err)
 		return
 	}
 	defer rows.Close()
@@ -48,13 +50,13 @@ func (s *postgresStore) handleNotifications(w http.ResponseWriter, r *http.Reque
 	for rows.Next() {
 		var n notificationView
 		if err := rows.Scan(&n.ID, &n.Kind, &n.ProjectID, &n.ItemID, &n.ReviewID, &n.Title, &n.ReadAt, &n.CreatedAt); err != nil {
-			writeErr(w, err)
+			writeErr(w, r, err)
 			return
 		}
 		list = append(list, &n)
 	}
 	if err := rows.Err(); err != nil {
-		writeErr(w, err)
+		writeErr(w, r, err)
 		return
 	}
 	var unread int
@@ -84,7 +86,7 @@ func (s *postgresStore) handleReadNotifications(w http.ResponseWriter, r *http.R
 			_, err = s.db.ExecContext(r.Context(), `UPDATE notifications SET read_at = now() WHERE user_id = $1 AND id = $2`, a.ID, body.ID)
 		}
 		if err != nil {
-			writeErr(w, err)
+			writeErr(w, r, err)
 			return
 		}
 	}
@@ -94,6 +96,7 @@ func (s *postgresStore) handleReadNotifications(w http.ResponseWriter, r *http.R
 // ---- 定时调度:逾期、评审积压、简报到期 ----
 
 // startScheduler 每分钟扫描一次。单实例部署;多实例时同一通知有幂等键兜底,不会重复入库。
+// 正常跑完只在 debug 级别留一行;出错和 panic 一定记,panic 带堆栈。
 func startScheduler(st *postgresStore) {
 	go func() {
 		ticker := time.NewTicker(time.Minute)
@@ -102,29 +105,37 @@ func startScheduler(st *postgresStore) {
 			func() {
 				defer func() {
 					if v := recover(); v != nil {
-						log.Printf("[scheduler] panic: %v", v)
+						slog.Error("定时任务 panic", "err", fmt.Sprint(v), "stack", string(debug.Stack()))
 					}
 				}()
+				start := time.Now()
 				if err := runScheduledJobs(context.Background(), st); err != nil {
-					log.Printf("[scheduler] 执行失败: %v", err)
+					slog.Error("定时任务执行失败", "err", err, "dur", time.Since(start))
+					return
 				}
+				slog.Debug("定时任务完成", "dur", time.Since(start))
 			}()
 		}
 	}()
 }
 
-// runScheduledJobs 依次执行各项扫描;每项只发当日一次通知(dedupe_key 带日期)
+// runScheduledJobs 依次执行各项扫描;每项只发当日一次通知(dedupe_key 带日期)。
+// 哪一项失败就在错误里带上它的名字。
 func runScheduledJobs(ctx context.Context, st *postgresStore) error {
-	if err := scanOverdueItems(ctx, st); err != nil {
-		return err
+	for _, job := range []struct {
+		name string
+		run  func(context.Context, *postgresStore) error
+	}{
+		{"逾期工作项", scanOverdueItems},
+		{"逾期阶段", scanOverdueStages},
+		{"评审积压", scanReviewAging},
+		{"简报到期", scanUpdateDue},
+	} {
+		if err := job.run(ctx, st); err != nil {
+			return fmt.Errorf("%s: %w", job.name, err)
+		}
 	}
-	if err := scanOverdueStages(ctx, st); err != nil {
-		return err
-	}
-	if err := scanReviewAging(ctx, st); err != nil {
-		return err
-	}
-	return scanUpdateDue(ctx, st)
+	return nil
 }
 
 func todayKey() string { return time.Now().Format("20060102") }

@@ -183,10 +183,13 @@ export function emptyProcess(): { name: string; description: string; applicant: 
    端到端流程管理(docs/process-management-architecture.md)
    ============================================================ */
 
-/** 全局岗位:CTO / 项目经理 / 经办 / 开发实施 / 观察者 */
+/**
+ * 全局岗位。显示名一律用英文缩写(lib/labels.ts):CTO、PM 项目经理、BH 业务经办、TH 科技经办、GM 总经理。
+ * 存储代码沿用历史取值,所以代码与缩写并非字面对应。
+ */
 export type JobRole = "cto" | "pm" | "handler" | "dev" | "viewer";
 
-/** 项目角色(按项目授予;CTO 是全局岗位,不在此列) */
+/** 项目角色(按项目授予;CTO 是全局岗位,不在此列):PM、BH、TH、GM */
 export type ProjectRole = "pm" | "handler" | "dev" | "viewer";
 
 export interface FlowMetrics {
@@ -302,13 +305,15 @@ export interface HandlerHint {
 export interface ProjectCaps {
   view: boolean;
   manage: boolean;
-  /** 分配项目经理:管理员 */
+  /** 修改流程定义(表单与流程图):管理员、CTO,以及项目里的 PM、BH、TH */
+  editFlow: boolean;
+  /** 分配 PM:管理员 */
   assign: boolean;
-  /** 分配业务侧经办:管理员、项目经理 */
+  /** 分配 BH(业务经办):管理员、PM */
   assignHandler: boolean;
-  /** 分配科技侧经办:管理员、CTO */
+  /** 分配 TH(科技经办):管理员、CTO */
   assignDev: boolean;
-  /** 添加观察者:管理员 */
+  /** 添加 GM:管理员 */
   assignViewer: boolean;
   skip: boolean;
   comment: boolean;

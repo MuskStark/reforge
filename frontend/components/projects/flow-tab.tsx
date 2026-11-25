@@ -7,14 +7,13 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { Pencil, Waypoints } from "lucide-react";
-import { toast } from "sonner";
 import { authFetch } from "@/lib/auth";
 import type { FlowMetrics, ProcessVersion, ProjectView } from "@/lib/types";
 import { fmtDateTime } from "@/lib/labels";
 import { FlowGraph, type ChartSource } from "@/components/flow-graph";
 import { ChartEditorModal } from "@/components/followup/chart-editor";
 import { EditProcessModal } from "@/components/followup/edit-process-modal";
-import type { DetailCtx } from "@/components/projects/project-detail";
+import type { DetailCtx, FlowEditor } from "@/components/projects/project-detail";
 import { cn } from "@/lib/utils";
 
 const KIND_LABEL: Record<string, string> = { as_is: "As-Is", to_be: "To-Be 基线", published: "已发布" };
@@ -37,7 +36,10 @@ const ROWS: MetricRow[] = [
   { key: "countersigns", label: "会签数", hint: "会签步骤个数", lower: null, fmt: (n) => String(n) },
 ];
 
-export function FlowTab({ ctx }: { ctx: DetailCtx }) {
+/**
+ * autoEdit:从页头「修改流程」进来时,标签页一挂载就打开指定的编辑器,用完即清。
+ */
+export function FlowTab({ ctx, autoEdit = null, onAutoEditDone }: { ctx: DetailCtx; autoEdit?: FlowEditor | null; onAutoEditDone?: () => void }) {
   const { project, process } = ctx;
   const [versions, setVersions] = useState<ProcessVersion[]>([]);
   const [current, setCurrent] = useState<FlowMetrics | null>(null);
@@ -78,9 +80,17 @@ export function FlowTab({ ctx }: { ctx: DetailCtx }) {
   };
 
   const asIs = versions.find((v) => v.kind === "as_is") ?? null;
-  const canEdit = project.can.manage && project.status !== "done" && project.status !== "cancelled";
+  // 节点上的经办人最清楚流程实际怎么走:项目里的 PM / BH / TH、CTO 与管理员都能改(服务端逐请求校验),项目结束后锁定
+  const canEdit = project.can.editFlow && project.status !== "done" && project.status !== "cancelled";
   const leftSource: ChartSource | null = view?.steps ? { name: `${KIND_LABEL[view.kind] ?? ""} · v${view.version}`, steps: view.steps } : null;
   const rightSource: ChartSource | null = process ? { name: "当前（To-Be 工作副本）", steps: process.steps } : null;
+
+  useEffect(() => {
+    if (!autoEdit || !canEdit || !process) return;
+    if (autoEdit === "chart") setEditChart(true);
+    else setEditForm(true);
+    onAutoEditDone?.();
+  }, [autoEdit, canEdit, process, onAutoEditDone]);
 
   return (
     <div className="grid gap-4">
@@ -183,7 +193,7 @@ export function FlowTab({ ctx }: { ctx: DetailCtx }) {
         />
         <ChartPane
           title="当前 · To-Be 工作副本"
-          subtitle={canEdit ? "可直接编辑，保存后立即反映在这里" : "由项目经理或 CTO 编辑"}
+          subtitle={canEdit ? "可直接修改，保存后立即反映在这里" : "只读 · 加入项目成员（PM / BH / TH）后可以修改"}
           source={rightSource}
           highlight
         />
@@ -207,7 +217,7 @@ export function FlowTab({ ctx }: { ctx: DetailCtx }) {
               onClose={() => setEditChart(false)}
               onSaved={() => {
                 setEditChart(false);
-                toast.success("流程图已保存", { description: "当前流程定义已更新" });
+                // 成功提示由编辑器自己弹,这里只负责刷新
                 void ctx.refresh().then(load);
               }}
             />

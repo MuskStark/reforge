@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -24,14 +23,15 @@ func conflict(msg string) error   { return &apiError{http.StatusConflict, msg} }
 func notFound(msg string) error   { return &apiError{http.StatusNotFound, msg} }
 func noPermission() error         { return &apiError{http.StatusForbidden, "没有执行此操作的权限"} }
 
-// writeErr 把业务错误翻译成状态码;非业务错误只回一句通用提示,细节进日志
-func writeErr(w http.ResponseWriter, err error) {
+// writeErr 把业务错误翻译成状态码;非业务错误只回一句通用提示,细节进日志。
+// 真实错误带着请求编号记下来,和这次请求的访问日志那一行对得上。
+func writeErr(w http.ResponseWriter, r *http.Request, err error) {
 	var ae *apiError
 	if errors.As(err, &ae) {
 		writeError(w, ae.code, ae.msg)
 		return
 	}
-	log.Printf("[api] 内部错误: %v", err)
+	requestLogger(r).Error("内部错误", "err", err)
 	writeError(w, http.StatusInternalServerError, "服务异常，请稍后重试")
 }
 
