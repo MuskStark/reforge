@@ -1,0 +1,344 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ReForge · Liquid Glass — R3 综合解决方案</title>
+<link rel="stylesheet" href="assets/tokens.css">
+<style>
+  .page { max-width: 1120px; margin: 0 auto; padding: 22px 28px 0; }
+  .pad { padding: 24px; }
+  .grid { display: grid; grid-template-columns: minmax(0, 1fr) 330px; gap: 18px; align-items: start; margin-top: 18px; }
+  @media (max-width: 980px) { .grid { grid-template-columns: 1fr; } }
+
+  /* 三类节点配色(全系列统一):线下 = 绿 · 系统不互通 = 靛 · 无法实现移动端 = 琥珀 */
+  .off { background: var(--green-soft); color: var(--green-deep); }
+  .sys { background: var(--indigo-soft); color: var(--indigo-deep); }
+  .mob { background: var(--amber-soft); color: var(--amber-deep); }
+
+  /* 横向生命周期轨(本系列签名元素) */
+  .life { display: flex; align-items: flex-start; padding: 16px 18px 14px; margin-top: 18px; }
+  .life-node { display: flex; flex-direction: column; align-items: center; width: 122px; flex-shrink: 0; }
+  .life-node .lb { margin-top: 7px; min-height: 30px; font: 600 12px/1.25 var(--font); color: var(--ink-2); text-align: center; }
+  .life-node .dt { font: 400 10.5px/1.3 var(--font); color: var(--ink-3); margin-top: 2px; text-align: center; }
+  .life-node.now .lb { color: var(--tint-deep); }
+  .life-seg { flex: 1; height: 2.5px; margin-top: 16px; border-radius: 2px; min-width: 14px;
+    background: linear-gradient(90deg, rgba(52,199,89,0.55), rgba(10,132,255,0.4)); }
+  .life-seg.todo { background: linear-gradient(90deg, rgba(120,120,128,0.2), rgba(120,120,128,0.12)); }
+  .life-node .rail-bead { width: 32px; height: 32px; font-size: 13px; }
+  .life-node .rail-bead.done { color: var(--green-deep); box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.98), inset 0 0 0 0.5px rgba(255,255,255,0.7),
+    inset 0 -6px 10px -6px rgba(52,199,89,0.5), 0 0 14px -2px rgba(52,199,89,0.35), 0 4px 10px -4px rgba(23,42,80,0.2); }
+  .life-node .rail-bead.now { color: #fff; background: linear-gradient(180deg, var(--tint-hi), var(--tint));
+    box-shadow: 0 0 0 4px rgba(0,113,227,0.16), 0 4px 12px -4px rgba(0,113,227,0.6); }
+
+  .sec-t { font: 600 15px/1.3 var(--font); color: var(--ink); display: flex; align-items: center; gap: 8px; }
+
+  /* 文档头 */
+  .doc-head { display: flex; align-items: flex-start; gap: 14px; flex-wrap: wrap; }
+  .doc-head h2 { font: 700 22px/1.3 var(--font); letter-spacing: -0.02em; max-width: 24em; margin-top: 5px; }
+  .doc-head .no { font: var(--t-caption-bold); color: var(--tint-deep); letter-spacing: 0.1em; }
+  .doc-badges { display: flex; gap: 8px; margin-top: 11px; flex-wrap: wrap; }
+
+  /* 章节 */
+  .sec-num { width: 26px; height: 26px; border-radius: 8px; display: grid; place-items: center;
+    font: 700 13px/1 var(--font); background: var(--tint-soft); color: var(--tint-deep); flex-shrink: 0; }
+  .doc-sec { margin-top: 22px; }
+  .lede-line { font: 400 13px/1.7 var(--font); color: var(--ink-2); margin-top: 10px; }
+  .lede-line b { color: var(--ink); font-weight: 600; }
+
+  /* 分优先级方案明细 */
+  .detail { margin-top: 12px; }
+  .dh { display: flex; align-items: center; gap: 9px; padding: 12px 16px 0; flex-wrap: wrap; }
+  .dh b { font: 600 14px/1.3 var(--font); }
+  .dh .scope { font: 400 11.5px/1 var(--font); color: var(--ink-2); }
+  .dh .badge { margin-left: auto; }
+  .ord { height: 21px; padding: 0 9px; border-radius: 980px; font: 700 11px/21px var(--font); letter-spacing: .03em; white-space: nowrap; }
+  .detail .grid2 { display: grid; grid-template-columns: 52px 1fr; gap: 6px 12px; padding: 10px 16px 12px; }
+  .detail .grid2 .k { font: 600 11px/1.9 var(--font); letter-spacing: 0.06em; color: var(--ink-2); }
+  .detail .grid2 .k.why { color: var(--red-deep); }
+  .detail .grid2 .k.plan { color: var(--tint-deep); }
+  .detail .grid2 .k.fx { color: var(--green-deep); }
+  .detail .grid2 p { font: 400 13px/1.6 var(--font); color: var(--ink-2); }
+  .detail .grid2 p b { color: var(--ink); font-weight: 600; }
+  .owner { display: flex; gap: 6px; flex-wrap: wrap; padding: 0 16px 14px; }
+
+  /* 前后对比 */
+  .compare { display: grid; grid-template-columns: 1fr auto 1fr; gap: 14px; align-items: stretch; margin-top: 12px; }
+  @media (max-width: 720px) { .compare { grid-template-columns: 1fr; } }
+  .cmp { padding: 14px 16px; }
+  .cmp .t { font: 600 12px/1 var(--font); color: var(--ink-2); margin-bottom: 10px; letter-spacing: 0.04em; }
+  .cmp .rows { display: grid; gap: 8px; }
+  .cmp .r { display: flex; align-items: baseline; gap: 8px; font: 400 13px/1.4 var(--font); color: var(--ink-2); }
+  .cmp .r b { min-width: 44px; font: 700 17px/1 var(--font); font-variant-numeric: tabular-nums; }
+  .cmp.after { background: linear-gradient(180deg, rgba(237,250,240,0.6), rgba(255,255,255,0.4));
+    box-shadow: inset 0 0 0 0.5px rgba(52,199,89,0.2), inset 0 1px 0 rgba(255,255,255,0.9); }
+  .cmp.after .t { color: var(--green-deep); }
+  .cmp.after .r b { color: var(--green-deep); }
+  .cmp-arrow { display: grid; place-items: center; color: var(--tint); font-size: 22px; }
+
+  .avatar { width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; font: 600 13px/1 var(--font); flex-shrink: 0; }
+
+  /* 右侧流转轨(竖向) */
+  .vflow { margin-top: 14px; }
+  .vf-item { display: flex; gap: 12px; }
+  .vf-rail { display: flex; flex-direction: column; align-items: center; width: 34px; flex-shrink: 0; }
+  .vf-dot { width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; font: 700 12px/1 var(--font); z-index: 1; }
+  .vf-dot.done { background: var(--green-soft); color: var(--green-deep); box-shadow: inset 0 0 0 1px rgba(52,199,89,0.4); }
+  .vf-dot.now { background: linear-gradient(180deg,var(--tint-hi),var(--tint)); color: #fff;
+    box-shadow: 0 0 0 4px rgba(0,113,227,0.16), 0 4px 10px -4px rgba(0,113,227,0.6); }
+  .vf-dot.todo { background: var(--fill); color: var(--ink-3); }
+  .vf-line { width: 2.5px; flex: 1; min-height: 18px; background: linear-gradient(180deg, rgba(52,199,89,0.5), rgba(52,199,89,0.2)); }
+  .vf-line.t { background: linear-gradient(180deg, rgba(120,120,128,0.25), rgba(120,120,128,0.1)); }
+  .vf-body { padding: 3px 0 16px; min-width: 0; flex: 1; }
+  .vf-body b { font: 600 13.5px/1.3 var(--font); color: var(--ink); display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .vf-body p { font: 400 12px/1.5 var(--font); color: var(--ink-2); margin-top: 3px; }
+
+  /* 送审要点:技术点清单(与 R4 一一对应) */
+  .tp { margin-top: 12px; border-radius: var(--r-inner); background: rgba(255,255,255,0.5); overflow: hidden;
+    box-shadow: inset 0 0 0 0.5px rgba(255,255,255,0.7), inset 0 0 0 0.5px rgba(0,0,0,0.035); }
+  .tp-g { display: flex; align-items: center; gap: 8px; padding: 9px 12px 7px; font: 600 12.5px/1.2 var(--font); }
+  .tp-g:first-child { padding-top: 11px; }
+  .tp-g span:last-child { font: 400 11px/1 var(--font); color: var(--ink-3); }
+  .tp-r { display: flex; align-items: center; gap: 8px; padding: 7px 12px; font: 400 12.5px/1.4 var(--font); color: var(--ink-2); }
+  .tp-r + .tp-r, .tp-g + .tp-r { box-shadow: inset 0 0.5px 0 var(--sep); }
+  .tp-r > span:first-child { flex: 1; min-width: 0; }
+  .tp-r .badge { height: 20px; font-size: 10.5px; flex-shrink: 0; }
+  .note { margin-top: 12px; font: 400 11.5px/1.55 var(--font); color: var(--ink-2); }
+
+  .pagefoot { text-align: center; padding: 26px 0 44px; }
+</style>
+</head>
+<body>
+<div class="wallpaper" aria-hidden="true">
+  <div class="orb orb-1"></div><div class="orb orb-2"></div>
+  <div class="orb orb-3"></div><div class="orb orb-4"></div>
+  <div class="orb orb-5"></div><div class="orb orb-6"></div>
+</div>
+
+<div class="stage">
+  <div class="page">
+
+    <header class="topbar lg-clear">
+      <button class="nav-action" style="margin-left:-4px">
+        <svg class="ic" style="font-size:15px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 6l-6 6 6 6"/></svg>
+        承接工作台
+      </button>
+      <div class="spacer"></div>
+      <span class="footnote num">SL-2026-0007 · v1.2 · 待提审</span>
+    </header>
+
+    <!-- 生命周期轨 -->
+    <div class="life lg-card" aria-label="需求承接生命周期">
+      <div class="life-node">
+        <span class="rail-bead done">✓</span>
+        <span class="lb">收集完成</span><span class="dt">11-24</span>
+      </div>
+      <div class="life-seg"></div>
+      <div class="life-node">
+        <span class="rail-bead done">✓</span>
+        <span class="lb">PMO 初级分析</span><span class="dt">11-24</span>
+      </div>
+      <div class="life-seg"></div>
+      <div class="life-node">
+        <span class="rail-bead done">✓</span>
+        <span class="lb">指派 PM 承接</span><span class="dt">11-24</span>
+      </div>
+      <div class="life-seg"></div>
+      <div class="life-node">
+        <span class="rail-bead done">✓</span>
+        <span class="lb">PM 按优先级推进</span><span class="dt">11-25 全部完成</span>
+      </div>
+      <div class="life-seg"></div>
+      <div class="life-node now">
+        <span class="rail-bead now">5</span>
+        <span class="lb">CTO 技术可行性评估</span><span class="dt">方案已就绪</span>
+      </div>
+      <div class="life-seg todo"></div>
+      <div class="life-node">
+        <span class="rail-bead">6</span>
+        <span class="lb">PMO 终审</span><span class="dt">—</span>
+      </div>
+    </div>
+
+    <div class="grid">
+      <!-- 左:方案文档 -->
+      <article class="lg-card pad">
+        <div class="doc-head">
+          <div style="flex:1;min-width:260px">
+            <span class="no">SL-2026-0007 · 综合解决方案</span>
+            <h2>员工差旅报销流程线上化、互通与移动化方案</h2>
+            <div class="doc-badges">
+              <span class="badge blue"><span class="dot"></span>三条推进线方案齐备 · 待提审</span>
+              <span class="badge plain">v1.2 · 11-25 更新</span>
+              <span class="badge plain">依据 PR-2026-0007</span>
+            </div>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px">
+            <span class="avatar" style="width:28px;height:28px;font-size:11px;background:linear-gradient(180deg,#b8ccff,#9db4ff);color:#21407a">陈</span>
+            <span class="avatar" style="width:28px;height:28px;font-size:11px;background:linear-gradient(180deg,#f4c6d9,#eaa9c6);color:#7c2148">林</span>
+            <span style="font:400 12px/1.4 var(--font);color:var(--ink-2)">撰写<br>陈昊 · 林悦</span>
+          </div>
+        </div>
+
+        <!-- S1 目标与范围 -->
+        <section class="doc-sec">
+          <div class="sec-t"><span class="sec-num">1</span>目标与范围</div>
+          <p class="lede-line">
+            围绕自动诊断出的三类节点，按解决顺序逐一消除：<b>线下节点 3 → 0</b>、<b>系统不互通节点 3 → 0</b>、<b>无法实现移动端节点 4 → 0</b>。
+            最终 12 个节点全部线上办理、全部支持移动端，跨系统衔接无断点。
+          </p>
+        </section>
+
+        <!-- S2 分优先级方案明细 -->
+        <section class="doc-sec">
+          <div class="sec-t"><span class="sec-num">2</span>分优先级方案明细</div>
+
+          <div class="detail subcard">
+            <div class="dh">
+              <span class="ord off">第一优先</span><b>线下节点转线上</b><span class="scope">3 个节点</span>
+              <span class="badge ok"><span class="dot"></span>方案完成</span>
+            </div>
+            <div class="grid2">
+              <span class="k">现状</span><p>发票粘贴与签字、部门预算审核、纸质凭证归档 3 个节点线下办理</p>
+              <span class="k why">原因</span><p>财务要求核对发票原件；预算岗用纸质台账；档案室只收纸质凭证</p>
+              <span class="k plan">方案</span><p><b>发票影像上传 + 电子签名</b>替代粘贴签字；预算校验并入费控；凭证转电子会计档案，纸质原件按规定留存</p>
+              <span class="k fx">效果</span><p>线下节点 <b>3 → 0</b>，单据不再跨部门传递</p>
+            </div>
+            <div class="owner">
+              <span class="badge plain">负责人 陈昊</span><span class="badge plain">产出 节点线上化方案 ×3</span>
+            </div>
+          </div>
+
+          <div class="detail subcard">
+            <div class="dh">
+              <span class="ord sys">第二优先</span><b>系统不互通</b><span class="scope">3 个节点 · 另含 ① 新增的 1 处衔接</span>
+              <span class="badge indigo">需 CTO 评估接口可行性</span>
+            </div>
+            <div class="grid2">
+              <span class="k">现状</span><p>行程预订、借款申请、付款结果回写 3 个节点与上一步系统不互通，靠邮件 + Excel 搬运</p>
+              <span class="k why">原因</span><p>商旅平台只提供对账文件、没有实时接口；财务系统与费控分属两家厂商</p>
+              <span class="k plan">方案</span><p>三处逐一对接：<b>OA → 商旅平台</b>（单点登录 + 审批结果推送）、<b>商旅平台 → 费控</b>（消费数据回写）、<b>财务系统 → 费控</b>（付款状态回写）；① 新增的预算审核 → 财务复核衔接一并打通</p>
+              <span class="k fx">效果</span><p>系统不互通节点 <b>3 → 0</b>，人工搬运 0 处</p>
+            </div>
+            <div class="owner">
+              <span class="badge plain">负责人 陈昊</span><span class="badge plain">产出 对接方案 ×4</span>
+            </div>
+          </div>
+
+          <div class="detail subcard">
+            <div class="dh">
+              <span class="ord mob">第三优先</span><b>线上节点移动化</b><span class="scope">7 个节点（原 4 个 + ① 新增 3 个）</span>
+              <span class="badge indigo">需 CTO 评估移动端可行性</span>
+            </div>
+            <div class="grid2">
+              <span class="k">现状</span><p>行程预订、借款申请、报销单填写、财务复核 4 个线上节点无法实现移动端</p>
+              <span class="k why">原因</span><p>商旅平台、财务系统没有移动端；费控的移动端组件未采购</p>
+              <span class="k plan">方案</span><p>费控采购移动端组件（覆盖借款申请、报销单填写及 ① 新增的 3 个节点）；行程预订、财务复核以移动待办页承接</p>
+              <span class="k fx">效果</span><p>无法实现移动端节点 <b>4 → 0</b>，移动可办 <b>5/9 → 12/12</b></p>
+            </div>
+            <div class="owner">
+              <span class="badge plain">负责人 林悦</span><span class="badge plain">产出 移动化方案 ×7</span>
+            </div>
+          </div>
+        </section>
+
+        <!-- S3 前后对比 -->
+        <section class="doc-sec">
+          <div class="sec-t"><span class="sec-num">3</span>改造前后对比</div>
+          <div class="compare">
+            <div class="cmp subcard">
+              <div class="t">改造前</div>
+              <div class="rows">
+                <div class="r"><b class="off" style="border-radius:9px;padding:0 6px">3</b>线下节点</div>
+                <div class="r"><b class="sys" style="border-radius:9px;padding:0 6px">3</b>系统不互通节点</div>
+                <div class="r"><b class="mob" style="border-radius:9px;padding:0 6px">4</b>无法实现移动端节点</div>
+                <div class="r"><b style="color:var(--ink)">5/9</b>线上节点移动可办</div>
+              </div>
+            </div>
+            <div class="cmp-arrow">→</div>
+            <div class="cmp after subcard">
+              <div class="t">改造后（目标）</div>
+              <div class="rows">
+                <div class="r"><b>0</b>线下节点</div>
+                <div class="r"><b>0</b>系统不互通节点</div>
+                <div class="r"><b>0</b>无法实现移动端节点</div>
+                <div class="r"><b>12/12</b>节点全部线上且移动可办</div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- 提交条 -->
+        <div style="display:flex;gap:10px;margin-top:22px;border-top:0.5px solid var(--sep);padding-top:18px;align-items:center">
+          <p style="font:400 12px/1.5 var(--font);color:var(--ink-2);flex:1">
+            提交后进入 CTO 技术可行性评估，评估通过转 PMO 终审。
+          </p>
+          <button class="btn btn-primary" style="height:44px">
+            <svg class="ic" style="font-size:15px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15.5V5M8 9l4-4 4 4M5 19h14"/></svg>
+            提交 CTO 评估
+          </button>
+        </div>
+      </article>
+
+      <!-- 右:流转与送审要点 -->
+      <div style="display:grid;gap:18px">
+        <section class="lg-card pad">
+          <div class="sec-t">
+            <svg class="ic" style="font-size:17px;color:var(--tint)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+            方案流转
+          </div>
+          <div class="vflow">
+            <div class="vf-item">
+              <div class="vf-rail"><span class="vf-dot done">✓</span><span class="vf-line"></span></div>
+              <div class="vf-body"><b>PM 撰写（×2）</b><p>陈昊 · 林悦，三条推进线汇总成文</p></div>
+            </div>
+            <div class="vf-item">
+              <div class="vf-rail"><span class="vf-dot done">✓</span><span class="vf-line"></span></div>
+              <div class="vf-body"><b>PM 交叉自查</b><p>三类节点无遗漏，原因与方案逐一对应</p></div>
+            </div>
+            <div class="vf-item">
+              <div class="vf-rail"><span class="vf-dot now">3</span><span class="vf-line t"></span></div>
+              <div class="vf-body"><b>CTO 技术可行性评估 <span class="badge blue" style="height:19px;font-size:10px">下一步</span></b><p>何俊 · 逐个技术点评估能否实现、前提与风险</p></div>
+            </div>
+            <div class="vf-item">
+              <div class="vf-rail"><span class="vf-dot todo">4</span></div>
+              <div class="vf-body"><b style="color:var(--ink-3)">PMO 终审</b><p style="color:var(--ink-3)">周琳 · 整体流程 + 方案，通过归档或退回</p></div>
+            </div>
+          </div>
+        </section>
+
+        <section class="lg-card pad" style="background:linear-gradient(180deg,rgba(240,240,255,0.45),rgba(255,255,255,0.4));box-shadow:inset 0 0 0 0.5px rgba(88,86,214,0.22),inset 0 1px 0 rgba(255,255,255,0.95),0 24px 56px -24px rgba(23,42,80,0.26)">
+          <div class="sec-t">
+            <svg class="ic" style="font-size:17px;color:var(--indigo)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1"/></svg>
+            送审要点
+            <span class="badge indigo" style="margin-left:auto">9 个技术点</span>
+          </div>
+
+          <!-- 与 R4「技术点清单」一一对应 -->
+          <div class="tp">
+            <div class="tp-g"><span class="ord off">第一优先</span><b>线下节点转线上</b><span>3 项</span></div>
+            <div class="tp-r"><span>发票影像采集与查验</span><span class="badge plain">待评估</span></div>
+            <div class="tp-r"><span>报销单电子签名</span><span class="badge plain">待评估</span></div>
+            <div class="tp-r"><span>电子会计档案归档</span><span class="badge plain">待评估</span></div>
+
+            <div class="tp-g"><span class="ord sys">第二优先</span><b>系统不互通</b><span>3 项</span></div>
+            <div class="tp-r"><span>OA → 商旅平台：<br>单点登录 + 审批结果推送</span><span class="badge plain">待评估</span></div>
+            <div class="tp-r"><span>商旅平台 → 费控：消费数据回写</span><span class="badge plain">待评估</span></div>
+            <div class="tp-r"><span>财务系统 → 费控：付款状态回写</span><span class="badge plain">待评估</span></div>
+
+            <div class="tp-g"><span class="ord mob">第三优先</span><b>线上节点移动化</b><span>3 项</span></div>
+            <div class="tp-r"><span>费控移动端组件</span><span class="badge plain">待评估</span></div>
+            <div class="tp-r"><span>商旅平台移动预订</span><span class="badge plain">待评估</span></div>
+            <div class="tp-r"><span>财务复核移动化</span><span class="badge plain">待评估</span></div>
+          </div>
+          <p class="note">CTO 逐项评估能否实现、前提与风险；业务取舍仍由 PM 负责。</p>
+        </section>
+      </div>
+    </div>
+
+    <p class="pagefoot caption">概念稿 · R3 综合解决方案(PM 输出) — 需求承接与综合方案 · Liquid Glass</p>
+  </div>
+</div>
+</body>
+</html>

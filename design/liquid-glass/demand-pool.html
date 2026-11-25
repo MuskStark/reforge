@@ -1,0 +1,461 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ReForge · Liquid Glass — R1 需求池 · 流程诊断与 PMO 初析</title>
+<link rel="stylesheet" href="assets/tokens.css">
+<style>
+  .page { max-width: 1120px; margin: 0 auto; padding: 22px 28px 0; }
+  .pad { padding: 22px; }
+  .grid { display: grid; grid-template-columns: minmax(0, 1fr) 470px; gap: 18px; align-items: stretch; margin-top: 18px; }
+  @media (max-width: 980px) { .grid { grid-template-columns: 1fr; } }
+
+  /* 三类节点配色(全系列统一):线下 = 绿(沿用图例「绿 = 线下」)· 系统不互通 = 靛 · 无法实现移动端 = 琥珀 */
+  .off { background: var(--green-soft); color: var(--green-deep); }
+  .sys { background: var(--indigo-soft); color: var(--indigo-deep); }
+  .mob { background: var(--amber-soft); color: var(--amber-deep); }
+
+  /* 大标题 + 右侧需求池状态 */
+  .hero-row { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; flex-wrap: wrap; margin-top: 22px; }
+  .hero-row .large-title { max-width: 660px; }
+  .queue { padding: 14px 18px 13px; display: grid; gap: 10px; }
+  .queue .q-t { font: 600 11px/1 var(--font); color: var(--ink-3); letter-spacing: .08em; }
+  .queue .q-r { display: flex; gap: 18px; }
+  .queue .q-r span { display: grid; gap: 5px; font: 400 12px/1 var(--font); color: var(--ink-2); white-space: nowrap; }
+  .queue .q-r b { font: 700 21px/1 var(--font); color: var(--ink); font-variant-numeric: tabular-nums; }
+  .queue .q-r span.on b { color: var(--tint); }
+
+  /* 横向生命周期轨(本系列签名元素) */
+  .life { display: flex; align-items: flex-start; padding: 16px 18px 14px; margin-top: 18px; }
+  .life-node { display: flex; flex-direction: column; align-items: center; width: 122px; flex-shrink: 0; }
+  .life-node .lb { margin-top: 7px; min-height: 30px; font: 600 12px/1.25 var(--font); color: var(--ink-2); text-align: center; }
+  .life-node .dt { font: 400 10.5px/1.3 var(--font); color: var(--ink-3); margin-top: 2px; text-align: center; }
+  .life-node.now .lb { color: var(--tint-deep); }
+  .life-seg { flex: 1; height: 2.5px; margin-top: 16px; border-radius: 2px; min-width: 14px;
+    background: linear-gradient(90deg, rgba(52,199,89,0.55), rgba(10,132,255,0.4)); }
+  .life-seg.todo { background: linear-gradient(90deg, rgba(120,120,128,0.2), rgba(120,120,128,0.12)); }
+  .life-node .rail-bead { width: 32px; height: 32px; font-size: 13px; }
+  .life-node .rail-bead.done { color: var(--green-deep); box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.98), inset 0 0 0 0.5px rgba(255,255,255,0.7),
+    inset 0 -6px 10px -6px rgba(52,199,89,0.5), 0 0 14px -2px rgba(52,199,89,0.35), 0 4px 10px -4px rgba(23,42,80,0.2); }
+  .life-node .rail-bead.now { color: #fff; background: linear-gradient(180deg, var(--tint-hi), var(--tint));
+    box-shadow: 0 0 0 4px rgba(0,113,227,0.16), 0 4px 12px -4px rgba(0,113,227,0.6); }
+
+  /* 全池诊断:全部已收集流程的三类节点合计 */
+  .poolsum { margin-top: 14px; padding: 16px 18px 18px; }
+  .ps-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+  .ps-head b { font: 600 15px/1.3 var(--font); }
+  .ps-head span { font: 400 12px/1.3 var(--font); color: var(--ink-3); }
+  .ps-tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 12px; }
+  @media (max-width: 720px) { .ps-tiles { grid-template-columns: 1fr; } }
+  .ps-tile { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 13px 16px 13px 14px;
+    border-radius: 14px; background: rgba(255,255,255,0.55);
+    box-shadow: inset 0 0 0 0.5px rgba(255,255,255,0.7), inset 0 0 0 0.5px rgba(0,0,0,0.035); }
+  .ps-tile.b-off, .drow.b-off { border-left: 3px solid var(--green); }
+  .ps-tile.b-sys, .drow.b-sys { border-left: 3px solid var(--indigo); }
+  .ps-tile.b-mob, .drow.b-mob { border-left: 3px solid var(--amber); }
+  .ps-tile .l { display: grid; gap: 6px; justify-items: start; }
+  .ps-tile .l b { font: 600 15px/1.2 var(--font); }
+  .ps-tile .r { display: grid; gap: 4px; text-align: right; }
+  .ps-tile .cnt { font: 700 28px/1 var(--font); font-variant-numeric: tabular-nums; }
+  .ps-tile .cnt small { font: 500 12px/1 var(--font); color: var(--ink-2); margin-left: 3px; }
+  .ps-tile .sub { font: 400 11.5px/1.2 var(--font); color: var(--ink-3); white-space: nowrap; }
+
+  .ord { height: 21px; padding: 0 9px; border-radius: 980px; font: 700 11px/21px var(--font); letter-spacing: .03em; white-space: nowrap; }
+
+  .sec-t { font: 600 15px/1.3 var(--font); color: var(--ink); display: flex; align-items: center; gap: 8px; }
+  .inner { border-radius: var(--r-inner); background: rgba(255,255,255,0.55);
+    box-shadow: inset 0 0 0 0.5px rgba(255,255,255,0.7), inset 0 0 0 0.5px rgba(0,0,0,0.035); }
+
+  /* 需求池卡片 */
+  .pool { display: grid; gap: 12px; margin-top: 14px; }
+  .pcard { padding: 15px 18px 14px; display: grid; gap: 9px; border-radius: 20px; }
+  .pcard.sel { outline: 1.5px solid rgba(0,113,227,0.5); outline-offset: -1.5px;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.98), inset 0 0 0 0.5px rgba(255,255,255,0.65),
+      0 0 0 4px rgba(0,113,227,0.1), 0 24px 56px -24px rgba(0,113,227,0.35); }
+  .pcard .h { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .pcard .h b { font: 600 16px/1.3 var(--font); }
+  .pcard .h .org { font: 400 12px/1.3 var(--font); color: var(--ink-2); }
+  .pcard .h .badge { margin-left: auto; }
+  .facts { display: flex; flex-wrap: wrap; gap: 7px; }
+  .fact { display: inline-flex; align-items: center; height: 24px; padding: 0 10px; border-radius: 980px;
+    font: var(--t-caption-bold); white-space: nowrap; }
+  .fact.zero { background: rgba(120,120,128,0.12); color: var(--ink-3); }
+  /* 构成条:三段按解决顺序从左到右,长度 = 节点数占比 */
+  .mix { display: flex; gap: 2px; height: 5px; border-radius: 3px; overflow: hidden; background: rgba(120,120,128,0.1); }
+  .mix i { display: block; height: 100%; }
+  .mix i.off { background: var(--green); }
+  .mix i.sys { background: var(--indigo); }
+  .mix i.mob { background: var(--amber); }
+  .pcard .foot { display: flex; align-items: center; gap: 10px; font: 400 11.5px/1.3 var(--font); color: var(--ink-3); }
+
+  .avatar { width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; font: 600 13px/1 var(--font); flex-shrink: 0; }
+  .avatars { display: inline-flex; margin-left: auto; }
+  .avatars .avatar { width: 22px; height: 22px; font-size: 10px; box-shadow: 0 0 0 1.5px rgba(255,255,255,0.9); }
+  .avatars .avatar + .avatar { margin-left: -6px; }
+
+  /* 节点胶囊:序号圆点按三类配色 */
+  .node { display: inline-flex; align-items: center; gap: 6px; height: 27px; padding: 0 10px 0 4px; border-radius: 980px;
+    background: rgba(255,255,255,0.82); box-shadow: inset 0 0 0 0.5px rgba(0,0,0,0.07), 0 1px 3px -1px rgba(23,42,80,0.12);
+    font: 500 12.5px/1 var(--font); color: var(--ink); white-space: nowrap; }
+  .node .n { width: 19px; height: 19px; border-radius: 50%; display: grid; place-items: center;
+    font: 700 10.5px/1 var(--font); font-variant-numeric: tabular-nums; }
+  .node .ar { color: var(--ink-3); font-style: normal; }
+
+  /* 单流程自动诊断 */
+  .obj { display: flex; align-items: baseline; gap: 10px; margin-top: 12px; }
+  .obj b { font: 600 18px/1.3 var(--font); }
+  .obj span { font: 400 12.5px/1.3 var(--font); color: var(--ink-3); }
+  .diag { display: grid; gap: 10px; margin-top: 13px; }
+  .drow { padding: 12px 15px 13px; display: grid; gap: 10px; }
+  .dhead { display: flex; align-items: center; gap: 9px; }
+  .dhead b { font: 600 15px/1.2 var(--font); }
+  .dcnt { margin-left: auto; font: 700 24px/1 var(--font); font-variant-numeric: tabular-nums; }
+  .dcnt small { font: 500 12px/1 var(--font); color: var(--ink-2); margin-left: 3px; }
+  .nodes { display: flex; flex-wrap: wrap; gap: 7px; }
+
+  /* 统计口径 */
+  .rule-t { margin-top: 16px; font: 600 11px/1 var(--font); color: var(--ink-3); letter-spacing: .08em; }
+  .rules { display: grid; gap: 6px; margin-top: 9px; }
+  .rule { display: flex; align-items: baseline; gap: 8px; font: 400 12.5px/1.5 var(--font); color: var(--ink-2); }
+  .rule b { color: var(--ink); font-weight: 600; }
+  .rdot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; align-self: center; }
+  .rdot.off { background: var(--green); }
+  .rdot.sys { background: var(--indigo); }
+  .rdot.mob { background: var(--amber); }
+  .note { margin-top: 12px; font: 400 12px/1.55 var(--font); color: var(--ink-3); }
+
+  /* 通栏:PMO 初级分析与指派 */
+  .pmocard { margin-top: 18px; }
+  .pmocard .two { display: grid; grid-template-columns: minmax(0, 1fr) 470px; gap: 26px; margin-top: 2px; align-items: start; }
+  @media (max-width: 900px) { .pmocard .two { grid-template-columns: 1fr; } }
+  .chk { display: flex; align-items: center; gap: 10px; margin-top: 14px; padding: 11px 14px; font: 400 12.5px/1.45 var(--font); color: var(--ink-2); }
+  .chk b { color: var(--ink); font-weight: 600; white-space: nowrap; }
+  .chk .badge { margin-left: auto; }
+  .meta-row { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 12px; }
+  .meta { display: inline-flex; align-items: center; gap: 7px; padding: 7px 12px; font: 400 13px/1 var(--font); color: var(--ink-2); }
+  .meta b { color: var(--ink); font-weight: 600; }
+  .conclusion { margin-top: 12px; font: 400 13px/1.65 var(--font); color: var(--ink-2); }
+  .sub-t { display: flex; align-items: center; gap: 8px; margin-top: 14px; font: 600 15px/1.3 var(--font); }
+  .sub-t .badge { margin-left: auto; }
+
+  .assign-row { display: flex; align-items: center; gap: 10px; padding: 10px 14px; }
+  .assign-row + .assign-row { box-shadow: inset 0 0.5px 0 var(--sep); }
+  .assign-row .who { flex: 1; min-width: 0; }
+  .assign-row .who b { font: 600 14px/1.3 var(--font); display: block; }
+  .assign-row .who span { font: 400 11.5px/1.3 var(--font); color: var(--ink-2); }
+  .assign-row .badge { vertical-align: 1px; }
+
+  .act { display: flex; align-items: center; gap: 14px; margin-top: 18px; border-top: 0.5px solid var(--sep); padding-top: 16px; }
+  .act p { flex: 1; font: 400 12px/1.5 var(--font); color: var(--ink-2); }
+
+  .pagefoot { text-align: center; padding: 26px 0 44px; }
+</style>
+</head>
+<body>
+<div class="wallpaper" aria-hidden="true">
+  <div class="orb orb-1"></div><div class="orb orb-2"></div>
+  <div class="orb orb-3"></div><div class="orb orb-4"></div>
+  <div class="orb orb-5"></div><div class="orb orb-6"></div>
+</div>
+
+<div class="stage">
+  <div class="page">
+
+    <header class="topbar lg-clear">
+      <div class="brand">
+        <span class="mark">
+          <svg class="ic" style="font-size:16px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="5" cy="6" r="2.4"/><circle cx="5" cy="18" r="2.4"/><circle cx="19" cy="12" r="2.4"/><path d="M7.3 6.9 16.7 11.1M7.3 17.1 16.7 12.9"/></svg>
+        </span>
+        ReForge
+      </div>
+      <div class="spacer"></div>
+      <span class="footnote">PMO · 项目管理办公室视图</span>
+      <span class="avatar lg-chip" style="width:30px;height:30px;font-size:12px;background:linear-gradient(180deg,#f7d9b0,#eeb87e);color:#7a4c00">周</span>
+    </header>
+
+    <div class="hero-row">
+      <section class="large-title">
+        <div class="kicker">R1 · 需求承接闭环 1/5</div>
+        <h1>需求池 · 流程诊断与初级分析</h1>
+        <p class="lede">流程收集完成后，系统按收集数据自动统计每条流程的线下节点、系统不互通节点、无法实现移动端节点各有多少；PMO 据此完成初级分析，按「线下转线上 → 系统互通 → 移动化」的解决顺序指派一名或多名 PM 承接。</p>
+      </section>
+      <div class="queue lg-card">
+        <div class="q-t">需求池 · 4 条</div>
+        <div class="q-r">
+          <span class="on">待初析<b>1</b></span>
+          <span class="on">初析中<b>1</b></span>
+          <span>待指派<b>1</b></span>
+          <span>推进中<b>1</b></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 生命周期轨 -->
+    <div class="life lg-card" aria-label="需求承接生命周期">
+      <div class="life-node">
+        <span class="rail-bead done">✓</span>
+        <span class="lb">收集完成</span><span class="dt">11-24</span>
+      </div>
+      <div class="life-seg"></div>
+      <div class="life-node now">
+        <span class="rail-bead now">2</span>
+        <span class="lb">PMO 初级分析</span><span class="dt">进行中</span>
+      </div>
+      <div class="life-seg todo"></div>
+      <div class="life-node">
+        <span class="rail-bead">3</span>
+        <span class="lb">指派 PM 承接</span><span class="dt">1 名或多名</span>
+      </div>
+      <div class="life-seg todo"></div>
+      <div class="life-node">
+        <span class="rail-bead">4</span>
+        <span class="lb">PM 按优先级推进</span><span class="dt">线下转线上优先</span>
+      </div>
+      <div class="life-seg todo"></div>
+      <div class="life-node">
+        <span class="rail-bead">5</span>
+        <span class="lb">CTO 技术可行性评估</span><span class="dt">技术可行性</span>
+      </div>
+      <div class="life-seg todo"></div>
+      <div class="life-node">
+        <span class="rail-bead">6</span>
+        <span class="lb">PMO 终审</span><span class="dt">整体流程 + 方案</span>
+      </div>
+    </div>
+
+    <!-- 全池诊断 -->
+    <section class="poolsum lg-card" aria-label="全池诊断">
+      <div class="ps-head">
+        <b>全池诊断</b>
+        <span class="num">已收集 4 条流程 · 42 个节点 · 以下数量由收集数据自动统计</span>
+      </div>
+      <div class="ps-tiles">
+        <div class="ps-tile b-off">
+          <div class="l"><span class="ord off">第一优先</span><b>线下节点</b></div>
+          <div class="r"><span class="cnt">14<small>个</small></span><span class="sub">涉及 4 条流程</span></div>
+        </div>
+        <div class="ps-tile b-sys">
+          <div class="l"><span class="ord sys">第二优先</span><b>系统不互通节点</b></div>
+          <div class="r"><span class="cnt">6<small>个</small></span><span class="sub">涉及 3 条流程</span></div>
+        </div>
+        <div class="ps-tile b-mob">
+          <div class="l"><span class="ord mob">第三优先</span><b>无法实现移动端节点</b></div>
+          <div class="r"><span class="cnt">13<small>个</small></span><span class="sub">涉及 4 条流程</span></div>
+        </div>
+      </div>
+    </section>
+
+    <div class="grid">
+      <!-- 左列:需求池 -->
+      <section class="lg-card pad">
+        <div class="sec-t">
+          <svg class="ic" style="font-size:17px;color:var(--tint)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6.5h16M4 12h16M4 17.5h10"/></svg>
+          收集完成的流程
+          <span class="badge plain" style="margin-left:auto">按解决顺序列出节点数</span>
+        </div>
+
+        <div class="pool">
+          <article class="pcard lg-card sel">
+            <div class="h">
+              <b>员工差旅报销流程</b>
+              <span class="org">信息中心 申报 · PR-2026-0007</span>
+              <span class="badge blue"><span class="dot"></span>初析中</span>
+            </div>
+            <div class="facts">
+              <span class="fact off">线下节点 3</span>
+              <span class="fact sys">系统不互通 3</span>
+              <span class="fact mob">无法实现移动端 4</span>
+            </div>
+            <div class="mix"><i class="off" style="width:30%"></i><i class="sys" style="width:30%"></i><i class="mob" style="width:40%"></i></div>
+            <div class="foot"><span class="num">12 个节点 · 收集于 11-24</span></div>
+          </article>
+
+          <article class="pcard lg-card">
+            <div class="h">
+              <b>供应商准入审批流程</b>
+              <span class="org">采购部 申报 · PR-2026-0008</span>
+              <span class="badge amber"><span class="dot"></span>待初析</span>
+            </div>
+            <div class="facts">
+              <span class="fact off">线下节点 4</span>
+              <span class="fact sys">系统不互通 1</span>
+              <span class="fact mob">无法实现移动端 3</span>
+            </div>
+            <div class="mix"><i class="off" style="width:50%"></i><i class="sys" style="width:12.5%"></i><i class="mob" style="width:37.5%"></i></div>
+            <div class="foot"><span class="num">9 个节点 · 收集于 11-23</span></div>
+          </article>
+
+          <article class="pcard lg-card">
+            <div class="h">
+              <b>合同用印审批流程</b>
+              <span class="org">法务部 申报 · PR-2026-0006</span>
+              <span class="badge indigo">已初析 · 指派中</span>
+            </div>
+            <div class="facts">
+              <span class="fact off">线下节点 2</span>
+              <span class="fact zero">系统不互通 0</span>
+              <span class="fact mob">无法实现移动端 2</span>
+            </div>
+            <div class="mix"><i class="off" style="width:50%"></i><i class="mob" style="width:50%"></i></div>
+            <div class="foot">
+              <span class="num">7 个节点 · 初析通过 11-22</span>
+              <span class="avatars">
+                <span class="avatar" style="background:linear-gradient(180deg,#b8ccff,#9db4ff);color:#21407a">陈</span>
+                <span class="avatar" style="background:linear-gradient(180deg,#f4c6d9,#eaa9c6);color:#7c2148">林</span>
+              </span>
+            </div>
+          </article>
+
+          <article class="pcard lg-card">
+            <div class="h">
+              <b>固定资产盘点流程</b>
+              <span class="org">行政部 申报 · PR-2026-0005</span>
+              <span class="badge ok"><span class="dot"></span>PM 推进中</span>
+            </div>
+            <div class="facts">
+              <span class="fact off">线下节点 5</span>
+              <span class="fact sys">系统不互通 2</span>
+              <span class="fact mob">无法实现移动端 4</span>
+            </div>
+            <div class="mix"><i class="off" style="width:45.5%"></i><i class="sys" style="width:18.2%"></i><i class="mob" style="width:36.3%"></i></div>
+            <div class="foot">
+              <span class="num">14 个节点 · 承接于 11-18</span>
+              <span class="avatars">
+                <span class="avatar" style="background:linear-gradient(180deg,#b8ccff,#9db4ff);color:#21407a">陈</span>
+                <span class="avatar" style="background:linear-gradient(180deg,#c9def7,#a9c8ea);color:#1e4c74">赵</span>
+                <span class="avatar" style="background:linear-gradient(180deg,#d3e8cd,#b2d5a8);color:#2d5e26">王</span>
+              </span>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <!-- 右列:单流程自动诊断 -->
+      <section class="lg-card pad">
+        <div class="sec-t">
+          <svg class="ic" style="font-size:17px;color:var(--tint)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4 4M11 8.5v2.5l1.8 1.2"/></svg>
+          自动诊断
+          <span class="badge plain" style="margin-left:auto">收集数据自动统计</span>
+        </div>
+        <div class="obj"><b>员工差旅报销流程</b><span class="num">12 个节点 · 11-24 收集</span></div>
+
+        <div class="diag">
+          <div class="drow b-off inner">
+            <div class="dhead">
+              <span class="ord off">第一优先</span><b>线下节点</b>
+              <span class="dcnt">3<small>个</small></span>
+            </div>
+            <div class="nodes">
+              <span class="node"><i class="n off">7</i>发票粘贴与签字</span>
+              <span class="node"><i class="n off">8</i>部门预算审核</span>
+              <span class="node"><i class="n off">12</i>纸质凭证归档</span>
+            </div>
+          </div>
+
+          <div class="drow b-sys inner">
+            <div class="dhead">
+              <span class="ord sys">第二优先</span><b>系统不互通节点</b>
+              <span class="dcnt">3<small>个</small></span>
+            </div>
+            <div class="nodes">
+              <span class="node"><i class="n sys">3</i>OA<i class="ar">→</i><i class="n sys">4</i>商旅平台</span>
+              <span class="node"><i class="n sys">4</i>商旅平台<i class="ar">→</i><i class="n sys">5</i>费控</span>
+              <span class="node"><i class="n sys">10</i>财务系统<i class="ar">→</i><i class="n sys">11</i>费控</span>
+            </div>
+          </div>
+
+          <div class="drow b-mob inner">
+            <div class="dhead">
+              <span class="ord mob">第三优先</span><b>无法实现移动端节点</b>
+              <span class="dcnt">4<small>个</small></span>
+            </div>
+            <div class="nodes">
+              <span class="node"><i class="n mob">4</i>行程预订</span>
+              <span class="node"><i class="n mob">5</i>借款申请</span>
+              <span class="node"><i class="n mob">6</i>报销单填写</span>
+              <span class="node"><i class="n mob">9</i>财务复核</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 统计口径:数字怎么来的 -->
+        <div class="rule-t">统计口径 · 均为收集表必填项</div>
+        <div class="rules">
+          <div class="rule"><span class="rdot off"></span><span><b>线下节点</b>　办理方式为「线下办理」的步骤，会签按内部子步骤计</span></div>
+          <div class="rule"><span class="rdot sys"></span><span><b>系统不互通节点</b>　与上一步系统不同，且标注「数据不互通」</span></div>
+          <div class="rule"><span class="rdot mob"></span><span><b>无法实现移动端节点</b>　线上办理且「不支持移动端」</span></div>
+        </div>
+        <p class="note">流程提交即出数；同一节点可能同时计入两类。</p>
+      </section>
+    </div>
+
+    <!-- 通栏:PMO 初级分析与指派 -->
+    <section class="lg-card pad pmocard">
+      <div class="sec-t">
+        <svg class="ic" style="font-size:17px;color:var(--indigo)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4h6v3.5a3 3 0 0 1-6 0z"/><path d="M12 10.5V14M8.5 14h7M7 20h10"/></svg>
+        初级分析与指派
+        <span class="badge indigo" style="margin-left:auto">PMO 周琳</span>
+      </div>
+
+      <div class="two">
+        <div>
+          <!-- 流程完整性:PMO 人工核对的整体把关项,与自动诊断并列 -->
+          <div class="chk inner">
+            <b>流程完整性</b>
+            <span>结构完整 · 缺退回路径 1 处（行程预订被拒后如何回到上一审批）</span>
+            <span class="badge warn">待补全</span>
+          </div>
+
+          <div class="meta-row">
+            <span class="meta lg-chip">改造价值 <b>高</b></span>
+            <span class="meta lg-chip">复杂度 <b>中</b></span>
+            <span class="meta lg-chip">优先级 <b>高</b></span>
+          </div>
+          <p class="conclusion">
+            12 个节点里 3 个线下、3 个与上一步系统不互通、4 个无法实现移动端，问题集中在发票处理和三套系统的交接处。
+            按「线下转线上 → 系统互通 → 移动化」整体承接，建议指派 2 名 PM 分线推进。
+          </p>
+        </div>
+
+        <div>
+          <div class="sub-t">
+            <svg class="ic" style="font-size:17px;color:var(--tint)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8.5" r="3.2"/><path d="M3.5 19.5c1-3 3-4.5 5.5-4.5s4.5 1.5 5.5 4.5"/><circle cx="16.8" cy="9.5" r="2.6"/><path d="M15.5 15.2c2.3.2 4 1.5 4.9 4.3"/></svg>
+            指派 PM 承接
+            <span class="badge blue">已选 2 名</span>
+          </div>
+
+          <div class="group" style="margin-top:11px">
+            <div class="assign-row">
+              <span class="avatar" style="width:30px;height:30px;font-size:12px;background:linear-gradient(180deg,#b8ccff,#9db4ff);color:#21407a">陈</span>
+              <span class="who"><b>陈昊 <span class="badge blue" style="height:18px;font-size:10px">主负责</span></b><span>流程与信息中心 · 牵头整体推进</span></span>
+              <button class="icon-btn" aria-label="移除"><svg class="ic" style="font-size:13px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+            </div>
+            <div class="assign-row">
+              <span class="avatar" style="width:30px;height:30px;font-size:12px;background:linear-gradient(180deg,#f4c6d9,#eaa9c6);color:#7c2148">林</span>
+              <span class="who"><b>林悦 <span class="badge plain" style="height:18px;font-size:10px">协同</span></b><span>财务条线 · 熟悉费控与财务系统</span></span>
+              <button class="icon-btn" aria-label="移除"><svg class="ic" style="font-size:13px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+            </div>
+            <div class="assign-row" style="color:var(--tint);font:600 13px/1 var(--font);cursor:pointer">
+              <svg class="ic" style="font-size:14px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 8.5v7M8.5 12h7"/></svg>
+              从 PM 名册添加
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="act">
+        <p>一名或多名 PM 承接后，PM 负责整体推进，可自行指派多名 BH、申请 CTO 协助。</p>
+        <button class="btn btn-primary" style="height:46px;padding:0 26px">
+          <svg class="ic" style="font-size:15px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12.5l5 5L20 6.5"/></svg>
+          完成初级分析 · 指派 2 名 PM
+        </button>
+      </div>
+    </section>
+
+    <p class="pagefoot caption">概念稿 · R1 需求池(自动诊断 + PMO 初析与指派) — 需求承接与综合方案 · Liquid Glass</p>
+  </div>
+</div>
+</body>
+</html>

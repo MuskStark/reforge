@@ -1,0 +1,261 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ReForge · Liquid Glass — R4 CTO 技术可行性评估</title>
+<link rel="stylesheet" href="assets/tokens.css">
+<style>
+  .page { max-width: 1120px; margin: 0 auto; padding: 22px 28px 0; }
+  .pad { padding: 22px; }
+  .grid { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 18px; align-items: start; margin-top: 18px; }
+  @media (max-width: 980px) { .grid { grid-template-columns: 1fr; } }
+
+  /* 三类节点配色(全系列统一):线下 = 绿 · 系统不互通 = 靛 · 无法实现移动端 = 琥珀 */
+  .off { background: var(--green-soft); color: var(--green-deep); }
+  .sys { background: var(--indigo-soft); color: var(--indigo-deep); }
+  .mob { background: var(--amber-soft); color: var(--amber-deep); }
+
+  /* 横向生命周期轨(本系列签名元素) */
+  .life { display: flex; align-items: flex-start; padding: 16px 18px 14px; margin-top: 18px; }
+  .life-node { display: flex; flex-direction: column; align-items: center; width: 122px; flex-shrink: 0; }
+  .life-node .lb { margin-top: 7px; min-height: 30px; font: 600 12px/1.25 var(--font); color: var(--ink-2); text-align: center; }
+  .life-node .dt { font: 400 10.5px/1.3 var(--font); color: var(--ink-3); margin-top: 2px; text-align: center; }
+  .life-node.now .lb { color: var(--tint-deep); }
+  .life-seg { flex: 1; height: 2.5px; margin-top: 16px; border-radius: 2px; min-width: 14px;
+    background: linear-gradient(90deg, rgba(52,199,89,0.55), rgba(10,132,255,0.4)); }
+  .life-seg.todo { background: linear-gradient(90deg, rgba(120,120,128,0.2), rgba(120,120,128,0.12)); }
+  .life-node .rail-bead { width: 32px; height: 32px; font-size: 13px; }
+  .life-node .rail-bead.done { color: var(--green-deep); box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.98), inset 0 0 0 0.5px rgba(255,255,255,0.7),
+    inset 0 -6px 10px -6px rgba(52,199,89,0.5), 0 0 14px -2px rgba(52,199,89,0.35), 0 4px 10px -4px rgba(23,42,80,0.2); }
+  .life-node .rail-bead.now { color: #fff; background: linear-gradient(180deg, var(--tint-hi), var(--tint));
+    box-shadow: 0 0 0 4px rgba(0,113,227,0.16), 0 4px 12px -4px rgba(0,113,227,0.6); }
+
+  .sec-t { font: 600 15px/1.3 var(--font); color: var(--ink); display: flex; align-items: center; gap: 8px; }
+  .title-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 20px 2px 0; }
+  .title-row h2 { font: 700 24px/1.2 var(--font); letter-spacing: -0.02em; }
+  .ord { height: 21px; padding: 0 9px; border-radius: 980px; font: 700 11px/21px var(--font); letter-spacing: .03em; white-space: nowrap; }
+
+  /* 评估口径说明条 */
+  .scope { display: flex; gap: 12px; align-items: flex-start; padding: 13px 16px; margin-top: 14px;
+    background: linear-gradient(180deg, rgba(240,240,255,0.5), rgba(255,255,255,0.4));
+    box-shadow: inset 0 0 0 0.5px rgba(88,86,214,0.2), inset 0 1px 0 rgba(255,255,255,0.9);
+    border-radius: var(--r-inner); }
+  .scope p { font: 400 13px/1.6 var(--font); color: var(--ink-2); }
+  .scope p b { color: var(--ink); font-weight: 600; }
+
+  /* 分组与技术点 */
+  .ghead { display: flex; align-items: center; gap: 9px; padding: 12px 16px 9px; flex-wrap: wrap; }
+  .ghead b { font: 600 13.5px/1.2 var(--font); }
+  .ghead span { font: 400 11.5px/1 var(--font); color: var(--ink-3); }
+  .ritem { padding: 11px 16px 12px; }
+  .ritem + .ritem, .ghead + .ritem { box-shadow: inset 0 0.5px 0 var(--sep); }
+  .ritem .h { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
+  .ritem .h b { font: 600 14px/1.3 var(--font); }
+  .ritem .h .badge { margin-left: auto; }
+  .ritem p { font: 400 12.5px/1.55 var(--font); color: var(--ink-2); margin-top: 5px; }
+  .ritem p b { color: var(--ink); font-weight: 600; }
+
+  .avatar { width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; font: 600 13px/1 var(--font); flex-shrink: 0; }
+
+  /* 结论汇总 */
+  .vtiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 13px; }
+  .vt { padding: 12px 6px 11px; border-radius: 14px; display: grid; gap: 5px; justify-items: center; text-align: center; }
+  .vt b { font: 700 26px/1 var(--font); font-variant-numeric: tabular-nums; }
+  .vt span { font: 600 11px/1.25 var(--font); }
+  .vt.ok { background: var(--green-soft); color: var(--green-deep); }
+  .vt.cond { background: var(--amber-soft); color: var(--amber-deep); }
+  .vt.no { background: var(--red-soft); color: var(--red-deep); }
+  .overall { display: flex; align-items: center; gap: 8px; margin-top: 12px; font: 400 12.5px/1.4 var(--font); color: var(--ink-2); flex-wrap: wrap; }
+  .overall b { color: var(--ink); font-weight: 600; }
+
+  .pagefoot { text-align: center; padding: 26px 0 44px; }
+</style>
+</head>
+<body>
+<div class="wallpaper" aria-hidden="true">
+  <div class="orb orb-1"></div><div class="orb orb-2"></div>
+  <div class="orb orb-3"></div><div class="orb orb-4"></div>
+  <div class="orb orb-5"></div><div class="orb orb-6"></div>
+</div>
+
+<div class="stage">
+  <div class="page">
+
+    <header class="topbar lg-clear">
+      <button class="nav-action" style="margin-left:-4px">
+        <svg class="ic" style="font-size:15px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 6l-6 6 6 6"/></svg>
+        综合方案 SL-2026-0007
+      </button>
+      <div class="spacer"></div>
+      <span class="footnote">评估人 CTO · 何俊</span>
+      <span class="avatar lg-chip" style="width:30px;height:30px;font-size:12px;background:linear-gradient(180deg,#d4cff7,#b3acee);color:#31279e">何</span>
+    </header>
+
+    <!-- 标题 -->
+    <div class="title-row">
+      <h2>技术可行性评估</h2>
+      <span class="badge blue" style="height:26px"><span class="dot"></span>评估中</span>
+      <span class="badge plain" style="height:26px">员工差旅报销流程 · 方案 v1.2</span>
+    </div>
+
+    <!-- 生命周期轨 -->
+    <div class="life lg-card" aria-label="需求承接生命周期">
+      <div class="life-node">
+        <span class="rail-bead done">✓</span>
+        <span class="lb">收集完成</span><span class="dt">11-24</span>
+      </div>
+      <div class="life-seg"></div>
+      <div class="life-node">
+        <span class="rail-bead done">✓</span>
+        <span class="lb">PMO 初级分析</span><span class="dt">11-24</span>
+      </div>
+      <div class="life-seg"></div>
+      <div class="life-node">
+        <span class="rail-bead done">✓</span>
+        <span class="lb">指派 PM 承接</span><span class="dt">11-24</span>
+      </div>
+      <div class="life-seg"></div>
+      <div class="life-node">
+        <span class="rail-bead done">✓</span>
+        <span class="lb">PM 按优先级推进</span><span class="dt">11-25 完成</span>
+      </div>
+      <div class="life-seg"></div>
+      <div class="life-node now">
+        <span class="rail-bead now">5</span>
+        <span class="lb">CTO 技术可行性评估</span><span class="dt">评估中 · 9 项</span>
+      </div>
+      <div class="life-seg todo"></div>
+      <div class="life-node">
+        <span class="rail-bead">6</span>
+        <span class="lb">PMO 终审</span><span class="dt">—</span>
+      </div>
+    </div>
+
+    <div class="grid">
+      <!-- 左:技术点清单 -->
+      <section class="lg-card pad">
+        <div class="sec-t">
+          <svg class="ic" style="font-size:17px;color:var(--tint)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5 4 7.8v8.4l8 4.3 8-4.3V7.8z"/><path d="M12 3.5v8.6M4 7.8l8 4.3 8-4.3M12 12.1v8.4"/></svg>
+          技术点清单 · 按解决顺序
+          <span class="badge plain" style="margin-left:auto">来自方案「分优先级方案明细」</span>
+        </div>
+
+        <div class="scope">
+          <svg class="ic" style="font-size:18px;color:var(--indigo);flex-shrink:0;margin-top:2px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="5" width="12" height="14.5" rx="2.6"/><path d="M10.5 7.5h3M12 16.8v.2"/></svg>
+          <p>评估口径：只看<b>技术可行性</b>——能否实现、怎么实现、前提和风险是什么；业务取舍由 PM 负责，最终由 PMO 终审。</p>
+        </div>
+
+        <div class="group" style="margin-top:14px">
+          <!-- ① 线下节点转线上 -->
+          <div class="ghead">
+            <span class="ord off">第一优先</span><b>线下节点转线上</b><span>3 项</span>
+          </div>
+          <div class="ritem">
+            <div class="h"><b>发票影像采集与查验</b><span class="badge ok"><span class="dot"></span>可行</span></div>
+            <p>文字识别 + 税务发票查验接口都成熟；上线前用 200 张样本实测识别准确率。</p>
+          </div>
+          <div class="ritem">
+            <div class="h"><b>报销单电子签名</b><span class="badge amber"><span class="dot"></span>有条件可行</span></div>
+            <p>需接入第三方电子签章服务，按年付费；签名版式要与财务档案要求一致。</p>
+          </div>
+          <div class="ritem">
+            <div class="h"><b>电子会计档案归档</b><span class="badge amber"><span class="dot"></span>有条件可行</span></div>
+            <p>全电发票可纯电子归档；纸质发票仍须留存原件，方案里要写明。</p>
+          </div>
+
+          <!-- ② 系统不互通 -->
+          <div class="ghead">
+            <span class="ord sys">第二优先</span><b>系统不互通</b><span>3 项</span>
+          </div>
+          <div class="ritem">
+            <div class="h"><b>OA → 商旅平台：单点登录 + 审批结果推送</b><span class="badge ok"><span class="dot"></span>可行</span></div>
+            <p>商旅平台提供开放接口和单点登录。</p>
+          </div>
+          <div class="ritem">
+            <div class="h"><b>商旅平台 → 费控：消费数据实时回写</b><span class="badge warn"><span class="dot"></span>不可行 · 已给替代方案</span></div>
+            <p>商旅平台没有实时接口，只提供对账文件。<b>替代：改为次日定时同步</b>，当日到账的需求无法满足。</p>
+          </div>
+          <div class="ritem">
+            <div class="h"><b>财务系统 → 费控：付款状态回写</b><span class="badge ok"><span class="dot"></span>可行</span></div>
+            <p>财务系统可以推送付款结果。</p>
+          </div>
+
+          <!-- ③ 线上节点移动化 -->
+          <div class="ghead">
+            <span class="ord mob">第三优先</span><b>线上节点移动化</b><span>3 项</span>
+          </div>
+          <div class="ritem">
+            <div class="h"><b>费控移动端组件</b><span class="badge ok"><span class="dot"></span>可行</span></div>
+            <p>厂商有现成组件，覆盖 5 个节点，需采购许可。</p>
+          </div>
+          <div class="ritem">
+            <div class="h"><b>商旅平台移动预订</b><span class="badge warn"><span class="dot"></span>不可行 · 已给替代方案</span></div>
+            <p>商旅平台没有移动端，也不开放表单。<b>替代：移动端只提交预订需求</b>，由平台自动出票。</p>
+          </div>
+          <div class="ritem">
+            <div class="h"><b>财务复核移动化</b><span class="badge amber"><span class="dot"></span>有条件可行</span></div>
+            <p>财务系统没有移动端，可用移动待办页承接通过 / 驳回；复杂复核仍在电脑端。</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- 右:评估结论 -->
+      <div style="display:grid;gap:18px">
+        <section class="lg-card pad">
+          <div class="sec-t">
+            <svg class="ic" style="font-size:17px;color:var(--indigo)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M8 4.5h8.5a2 2 0 0 1 2 2v13a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2v-13a2 2 0 0 1 2-2z"/><path d="M9.5 9h5M9.5 12.5h5"/></svg>
+            评估结论
+            <span class="badge indigo" style="margin-left:auto">CTO 何俊</span>
+          </div>
+
+          <div class="vtiles">
+            <div class="vt ok"><b>4</b><span>可行</span></div>
+            <div class="vt cond"><b>3</b><span>有条件可行</span></div>
+            <div class="vt no"><b>2</b><span>不可行<br>已给替代方案</span></div>
+          </div>
+          <div class="overall"><b>总体技术可行</b><span class="num">· 11-26 · 9 项已全部评估</span></div>
+
+          <div class="seg" style="margin-top:14px">
+            <button>通过</button>
+            <button class="on">有条件通过</button>
+            <button>退回修改</button>
+          </div>
+
+          <div style="margin-top:13px">
+            <div class="field-label">条件与风险 <span class="opt">随方案进入 PMO 终审</span></div>
+            <div class="field" style="height:auto;min-height:96px;padding:11px 14px;font:400 13px/1.6 var(--font);color:var(--ink)">
+              电子签章服务、费控移动端许可需列入预算；纸质发票原件仍须留存。消费数据回写、商旅移动预订两项请 PM 按替代方案修订，修订后直接送 PMO 终审。
+            </div>
+          </div>
+
+          <div style="display:flex;gap:10px;margin-top:14px">
+            <button class="btn btn-glass" style="flex:1;height:42px">退回修改</button>
+            <button class="btn btn-primary" style="flex:1.8;height:42px">
+              <svg class="ic" style="font-size:14px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12.5l5 5L20 6.5"/></svg>
+              有条件通过 · 转 PMO 终审
+            </button>
+          </div>
+        </section>
+
+        <section class="lg-card pad">
+          <div class="sec-t">
+            <svg class="ic" style="font-size:17px;color:var(--ink-2)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 8v4.5M12 15.8v.2"/></svg>
+            评估规则
+          </div>
+          <div style="display:grid;gap:9px;margin-top:12px;font:400 12.5px/1.6 var(--font);color:var(--ink-2)">
+            <p>· CTO 只对<b style="color:var(--ink)">技术可行性</b>负责，不替代 PM 对业务方案的取舍；</p>
+            <p>· 每个技术点必须给出结论：可行 / 有条件可行（写明条件）/ 不可行（必须给出替代方案）；</p>
+            <p>· 按解决顺序评估：<b style="color:var(--ink)">① 线下转线上 → ② 系统互通 → ③ 移动化</b>；</p>
+            <p>· 不可行项由 PM 按替代方案修订，连同条件清单一并进入 <b style="color:var(--ink)">PMO 终审</b>。</p>
+          </div>
+        </section>
+      </div>
+    </div>
+
+    <p class="pagefoot caption">概念稿 · R4 CTO 技术可行性评估 — 需求承接与综合方案 · Liquid Glass</p>
+  </div>
+</div>
+</body>
+</html>
