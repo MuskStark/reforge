@@ -57,7 +57,7 @@ export function guideFor(
   if (intakeAction) {
     const detail =
       intakeAction === "提交技术可行性评估"
-        ? "原因与解决方案已齐备；提交后 CTO 逐个技术点评估，通过后还要经 PMO 终审"
+        ? "按「线下转线上 → 系统互通 → 移动化」补齐原因与解决方案；还缺什么，承接页的提交卡会一次列明"
         : intakeAction === "评估技术可行性"
           ? "逐个技术点给出可行 / 有条件可行 / 不可行的结论；附条件要写明条件，不可行给替代方案"
           : intakeAction === "终审"
