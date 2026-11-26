@@ -681,7 +681,9 @@ func TestProjectLifecycle(t *testing.T) {
 	e.must(h1, "POST", "/api/reviews/"+r5+"/decide", map[string]any{"decision": "approve"})
 	e.must(h2, "POST", "/api/reviews/"+r5+"/decide", map[string]any{"decision": "approve"})
 	got(t, e.project(pm, pid), "currentStage", float64(6))
-	e.fail(pm, "POST", "/api/projects/"+pid+"/status", map[string]any{"status": "done"}, 400, "验收上线") // G6 未过不能完成
+	// 完成必须经 PMO 核准:PM 申请也要等验收阶段通过;PMO 直接标记同样受闸门约束
+	e.fail(pm, "POST", "/api/projects/"+pid+"/status", map[string]any{"status": "done"}, 400, "验收上线") // PM 申请,G6 未过
+	e.fail(pmo, "POST", "/api/projects/"+pid+"/status", map[string]any{"status": "done"}, 400, "验收上线") // PMO 直接标,G6 未过
 	e.completeRequired(pm, pid, 6)
 	r6, rv := e.submit(pm, pid, "申请验收")
 	got(t, rv, "mode", "all")
@@ -694,9 +696,29 @@ func TestProjectLifecycle(t *testing.T) {
 	if len(versions) != 4 || dig(versions[3], "kind") != "published" {
 		t.Fatalf("G6 通过后应有已发布版本(含回退重做留下的两个 To-Be): %+v", versions)
 	}
+	// ---- 完成核准流:PM 申请 → PMO 待办里出现 → 退回 → 重新申请 → 核准 → 才算完成 ----
 	proj = e.must(pm, "POST", "/api/projects/"+pid+"/status", map[string]any{"status": "done", "note": "复盘完成"})
+	got(t, proj, "status", "active") // 还没完成:进入待核准
+	got(t, proj, "completionStatus", "pending")
+	got(t, proj, "completionRequestedByName", "李经理")
+	if !hasKind(e.must(pmo, "GET", "/api/notifications", nil)["list"], "completion_requested") {
+		t.Fatal("PMO 应收到完成申请通知")
+	}
+	// 退回:项目回到推进中,申请清空
+	proj = e.must(pmo, "POST", "/api/projects/"+pid+"/completion", map[string]any{"decision": "reject", "note": "再跑一个周期"})
+	got(t, proj, "status", "active")
+	got(t, proj, "completionStatus", "")
+	// 重新申请,这次核准
+	e.must(pm, "POST", "/api/projects/"+pid+"/status", map[string]any{"status": "done", "note": "复盘完成"})
+	proj = e.must(pmo, "POST", "/api/projects/"+pid+"/completion", map[string]any{"decision": "approve"})
 	got(t, proj, "status", "done")
+	got(t, proj, "completionStatus", "approved")
 	got(t, proj, "pendingOn", "")
+	if !hasKind(e.must(pm, "GET", "/api/notifications", nil)["list"], "completion_approved") {
+		t.Fatal("PM 应收到核准完成的通知")
+	}
+	// 没有待核准时核准/退回都是冲突
+	e.fail(pmo, "POST", "/api/projects/"+pid+"/completion", map[string]any{"decision": "approve"}, 409, "没有待核准")
 	e.fail(pm, "PATCH", "/api/projects/"+pid, map[string]any{"value": "低"}, 400, "已结束") // 已完成,不能再改
 	e.fail(pm, "POST", "/api/projects/"+pid+"/updates", map[string]any{"progress": "x", "health": "on_track"}, 400, "进行中")
 
@@ -801,7 +823,8 @@ func TestProjectLifecycle(t *testing.T) {
 	}
 	for _, k := range []string{"project_created", "member_added", "review_submitted", "review_voted", "review_approved",
 		"review_rejected", "review_withdrawn", "stage_rewound", "stage_skipped", "item_created", "item_updated",
-		"item_status", "item_split", "item_deleted", "comment_added", "project_update", "project_status"} {
+		"item_status", "item_split", "item_deleted", "comment_added", "project_update",
+		"completion_requested", "completion_rejected", "completion_approved"} {
 		if kinds[k] == 0 {
 			t.Errorf("时间线缺少事件 %s: %v", k, kinds)
 		}

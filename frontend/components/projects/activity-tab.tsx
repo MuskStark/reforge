@@ -82,6 +82,13 @@ export function eventLine(e: ProjectEvent): { title: string; body?: string; tone
       return { title: `PMO 终审：${FINAL_LABEL[s(d.decision) as FinalDecision] ?? s(d.decision)}`, body: s(d.note), tone: d.decision === "passed" ? "ok" : "amber" };
     case "intake_final_returned":
       return { title: "PMO 终审：退回整改", body: s(d.note), tone: "warn" };
+    // 完成核准:申请 → PMO 通过/退回
+    case "completion_requested":
+      return { title: "申请标记项目完成，待 PMO 核准", body: s(d.note), tone: "info" };
+    case "completion_approved":
+      return { title: "PMO 核准：项目完成", body: s(d.note), tone: "ok" };
+    case "completion_rejected":
+      return { title: "PMO 退回完成申请，项目继续推进", body: s(d.note), tone: "warn" };
     case "intake_line_assigned":
       return { title: `把「${s(d.lineTitle)}」交给 ${s(d.user)} 负责`, tone: "info" };
     case "cto_support_requested":

@@ -42,6 +42,7 @@ var (
 		"intake_triaged": "初级分析", "intake_solution_updated": "更新承接方案", "intake_line_assigned": "指定推进线负责人",
 		"intake_point_added": "新增技术点", "intake_point_updated": "修改技术点", "intake_point_deleted": "删除技术点",
 		"intake_assessed": "评估技术点", "intake_final_passed": "PMO 终审通过", "intake_final_returned": "PMO 终审退回",
+		"completion_requested": "申请标记完成", "completion_approved": "PMO 核准完成", "completion_rejected": "PMO 退回完成申请",
 		"cto_support_requested": "申请 CTO 协助", "cto_support_withdrawn": "撤回 CTO 协助申请",
 		"cto_support_joined": "CTO 加入协助", "cto_support_released": "CTO 协助结束",
 		"legacy_analyzed": "完成分析（旧跟进）", "legacy_assigned": "指派跟进人（旧跟进）", "legacy_status": "变更跟进状态（旧跟进）",

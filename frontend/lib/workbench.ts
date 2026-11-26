@@ -17,6 +17,8 @@ export interface WorkbenchModel {
   review: PendingReview[];
   assign: ProjectView[];
   final: ProjectView[];
+  /** 待我核准完成:PM 发起了完成申请,等 PMO 通过/退回 */
+  completeReq: ProjectView[];
   advance: ProjectView[];
   tasks: WorkItem[];
   /** 需要关注:有风险 / 逾期 / 阻塞的在途项目 */
@@ -66,6 +68,9 @@ export function computeWorkbench(me: { id: string; role: string; jobRole: string
   const isPMO = me.role === "admin" || me.jobRole === "viewer";
   const assign = isPMO ? active.filter((p) => p.can.assign && needsMyTriage(p, me)) : [];
   const final = isPMO ? active.filter((p) => needsMyFinal(p, me)) : [];
+  // 完成核准:PM 申请标记完成后,到这里通过/退回
+  const completeReq = active.filter((p) => p.completionStatus === "pending" && p.can.assign)
+    .sort((a, b) => (a.completionRequestedAt ?? "").localeCompare(b.completionRequestedAt ?? ""));
 
   const advance =
     me.jobRole === "pm"
@@ -117,13 +122,14 @@ export function computeWorkbench(me: { id: string; role: string; jobRole: string
     review: orderedReviews,
     assign: orderedAssign,
     final: orderedFinal,
+    completeReq,
     advance: orderedAdvance,
     tasks: openTasks,
     risky,
     mine,
     submitted,
     oversee,
-    total: orderedReviews.length + orderedAssign.length + orderedFinal.length + orderedAdvance.length + openTasks.length,
+    total: orderedReviews.length + orderedAssign.length + orderedFinal.length + orderedAdvance.length + openTasks.length + completeReq.length,
     urgent,
   };
 }

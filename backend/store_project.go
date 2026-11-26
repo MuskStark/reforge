@@ -189,16 +189,18 @@ CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications (user_id, rea
 const projectCols = `pr.id, pr.process_id, pr.name, pr.status, pr.current_stage, pr.priority,
 	pr.value, pr.complexity, pr.analysis, pr.health, COALESCE(pr.due_date::text, ''),
 	pr.started_at, pr.completed_at, pr.version, pr.created_by, pr.created_at, pr.updated_at, pr.template,
-	pr.lead_pm_id, pr.triage_done_at, pr.triage_by, pr.final_status, pr.final_review_id, pr.cto_support, pr.intake_passed_at`
+	pr.lead_pm_id, pr.triage_done_at, pr.triage_by, pr.final_status, pr.final_review_id, pr.cto_support, pr.intake_passed_at,
+	pr.completion_status, pr.completion_requested_at, pr.completion_requested_by, pr.completion_note`
 
 func scanProject(sc scanner) (*Project, error) {
 	var pr Project
 	var analysis, tpl, support []byte
-	var started, completed, triaged, intakePassed sql.NullTime
+	var started, completed, triaged, intakePassed, completionAt sql.NullTime
 	if err := sc.Scan(&pr.ID, &pr.ProcessID, &pr.Name, &pr.Status, &pr.CurrentStage, &pr.Priority,
 		&pr.Value, &pr.Complexity, &analysis, &pr.Health, &pr.DueDate,
 		&started, &completed, &pr.Version, &pr.CreatedBy, &pr.CreatedAt, &pr.UpdatedAt, &tpl,
-		&pr.LeadPmID, &triaged, &pr.TriageBy, &pr.FinalStatus, &pr.FinalReviewID, &support, &intakePassed); err != nil {
+		&pr.LeadPmID, &triaged, &pr.TriageBy, &pr.FinalStatus, &pr.FinalReviewID, &support, &intakePassed,
+		&pr.CompletionStatus, &completionAt, &pr.CompletionRequestedBy, &pr.CompletionNote); err != nil {
 		return nil, err
 	}
 	pr.Analysis = rawOrNull(analysis)
@@ -214,6 +216,7 @@ func scanProject(sc scanner) (*Project, error) {
 	}
 	pr.TriageDoneAt = nullTimePtr(triaged)
 	pr.IntakePassedAt = nullTimePtr(intakePassed)
+	pr.CompletionRequestedAt = nullTimePtr(completionAt)
 	return &pr, nil
 }
 
@@ -909,6 +912,23 @@ func (b *projectBundle) view(pr *Project, users []*User, c caps) *ProjectView {
 		}
 	}
 	v.LeadPmID, v.LeadPmName = leadPmOf(pr, v.Members)
+	// 完成申请的发起人显示名:用户目录能解析就用,否则在成员里找(发起人通常是项目的 PM)
+	if pr.CompletionRequestedBy != "" {
+		for _, u := range users {
+			if u.ID == pr.CompletionRequestedBy {
+				v.CompletionRequestedByName = displayName(u)
+				break
+			}
+		}
+		if v.CompletionRequestedByName == "" {
+			for _, m := range v.Members {
+				if m.UserID == pr.CompletionRequestedBy {
+					v.CompletionRequestedByName = displayNameOr(m.DisplayName, m.Username)
+					break
+				}
+			}
+		}
+	}
 	// 需求承接摘要:第一个阶段是承接阶段的项目才有
 	if st, ok := pr.intakeStage(); ok {
 		v.Intake = intakeSummaryOf(pr, st, stages[st.Seq], v.HasPM, b.asis[pr.ID], p)
@@ -931,10 +951,14 @@ func (b *projectBundle) view(pr *Project, users []*User, c caps) *ProjectView {
 	return v
 }
 
-// pendingOnOf 推导"待谁处理":pmo(待初级分析、指派或终审) | admin(待指派) | pm | cto | handler | ""。tpl 是项目的模板快照
+// pendingOnOf 推导"待谁处理":pmo(待初级分析、指派、终审或核准完成) | admin(待指派) | pm | cto | handler | ""。tpl 是项目的模板快照
 func pendingOnOf(tpl []StageTemplate, pr *Project, cur ProjectStage, hasPM bool) string {
 	if pr.Status != ProjActive {
 		return ""
+	}
+	// 完成申请待 PMO 核准;终审与核准同属 PMO 的把关动作
+	if pr.CompletionStatus == CompletionPending {
+		return PendingPMO
 	}
 	// 需求承接:技术可行性评估已通过,等 PMO 终审
 	if pr.FinalStatus == FinalPending {

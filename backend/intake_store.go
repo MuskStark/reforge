@@ -20,6 +20,12 @@ ALTER TABLE projects ADD COLUMN IF NOT EXISTS final_status    TEXT NOT NULL DEFA
 ALTER TABLE projects ADD COLUMN IF NOT EXISTS final_review_id TEXT NOT NULL DEFAULT '';
 ALTER TABLE projects ADD COLUMN IF NOT EXISTS cto_support     JSONB NOT NULL DEFAULT '{}';
 ALTER TABLE projects ADD COLUMN IF NOT EXISTS intake_passed_at TIMESTAMPTZ;   -- PMO 终审通过、承接完成的时间;为空说明没走完过承接
+-- 完成核准:PM(或 CTO)申请标记完成 → 在 PMO 处形成待办 → PMO 核准通过才真正标记完成。
+-- completion_status: '' | pending(待 PMO 核准) | approved(已核准并完成)
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS completion_status         TEXT NOT NULL DEFAULT '';
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS completion_requested_at   TIMESTAMPTZ;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS completion_requested_by   TEXT NOT NULL DEFAULT '';
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS completion_note           TEXT NOT NULL DEFAULT '';
 
 CREATE TABLE IF NOT EXISTS intake_reviews (
   project_id        TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,

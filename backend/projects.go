@@ -16,6 +16,8 @@ func registerProjectRoutes(mux *http.ServeMux, st *postgresStore) {
 	mux.HandleFunc("GET /api/projects/{id}", st.handleGetProject)
 	mux.HandleFunc("PATCH /api/projects/{id}", st.handlePatchProject)
 	mux.HandleFunc("POST /api/projects/{id}/status", st.handleProjectStatus)
+	// 完成核准:PMO 对完成申请的通过/退回(申请由 POST status {status:"done"} 发起)
+	mux.HandleFunc("POST /api/projects/{id}/completion", st.handleCompletionDecision)
 	mux.HandleFunc("PUT /api/projects/{id}/members", st.handleMembers)
 	mux.HandleFunc("POST /api/projects/{id}/stages/{seq}/enter", st.handleStageEnter)
 	mux.HandleFunc("POST /api/projects/{id}/stages/{seq}/skip", st.handleStageSkip)
@@ -310,10 +312,12 @@ func (s *postgresStore) handleProjectStatus(w http.ResponseWriter, r *http.Reque
 		if err != nil {
 			return err
 		}
-		if body.Status == ProjCancelled && !c.skip() {
-			return noPermission()
-		}
-		if body.Status != ProjCancelled && !c.manage() {
+		// 状态权限分档:取消 = 管理员/CTO(skip);搁置/恢复 = manage;完成走核准流,见下方 done 分支
+		if body.Status == ProjCancelled {
+			if !c.skip() {
+				return noPermission()
+			}
+		} else if body.Status != ProjDone && !c.manage() {
 			return noPermission()
 		}
 		if pr.Status == body.Status {
@@ -336,29 +340,80 @@ func (s *postgresStore) handleProjectStatus(w http.ResponseWriter, r *http.Reque
 			if pr.Status != ProjActive {
 				return badRequest("只有进行中的项目可以标记完成")
 			}
-			// 验收阶段(模板里带 accept 标识的阶段,见 template.go)通过后才算完成;管理员与 CTO 可越过
-			if accept, ok := pr.acceptStage(); ok && !c.Admin && !c.CTO {
+			// 验收阶段(模板里带 accept 标识的阶段,见 template.go)通过后才能申请/标记完成
+			accept, hasAccept := pr.acceptStage()
+			if hasAccept && !c.Admin {
 				st, has := stageStatusOf(stages, accept.Seq)
 				if !has || (st.Status != StageApproved && st.Status != StageSkipped) {
 					return badRequest("「" + accept.Name + "」通过后才能标记项目完成")
 				}
 			}
+			// 完成必须经 PMO 核准:PMO 与管理员直接标记;其他能推进的人(PM/CTO)发起申请,
+			// 在 PMO 处形成待办,核准后才真正完成
+			if !c.assign() {
+				if pr.CompletionStatus == CompletionPending {
+					return conflict("完成申请已在待 PMO 核准,请耐心等待")
+				}
+				now := time.Now()
+				if _, err := tx.ExecContext(r.Context(), `UPDATE projects SET completion_status = 'pending',
+					completion_requested_at = $2, completion_requested_by = $3, completion_note = $4, updated_at = now(), version = version + 1
+					WHERE id = $1`, pr.ID, now, a.ID, body.Note); err != nil {
+					return err
+				}
+				if err := addEventTx(r.Context(), tx, pr.ID, "project", "", a, "completion_requested", map[string]any{
+					"note": body.Note, "acceptStage": acceptNameOf(hasAccept, accept),
+				}); err != nil {
+					return err
+				}
+				// 知会 PMO(管理员兜底):完成申请来了
+				message := "「" + pr.Name + "」申请标记完成，待你核准"
+				if pmos, err := usersWithJobTx(r.Context(), tx, RoleViewer); err == nil {
+					_ = notifyManyTx(r.Context(), tx, userIDs(pmos), "completion_requested", pr.ID, "", "", message,
+						"completion_requested:"+pr.ID+":"+now.Format("20060102150405"))
+				}
+				if admins, err := usersWithRoleTx(r.Context(), tx, "admin"); err == nil {
+					_ = notifyManyTx(r.Context(), tx, userIDs(admins), "completion_requested", pr.ID, "", "", message,
+						"completion_requested:"+pr.ID+":"+now.Format("20060102150405"))
+				}
+				audit(r, "completion.request", "project", pr.ID, "note", body.Note)
+				return nil
+			}
+			// PMO/管理员直接完成:顺手落核准信息
+			now := time.Now()
+			if _, err := tx.ExecContext(r.Context(), `UPDATE projects SET status = $2,
+				completed_at = CASE WHEN $2 = 'done' THEN COALESCE(completed_at, $3) ELSE NULL END,
+				completion_status = CASE WHEN $2 = 'done' THEN 'approved' ELSE completion_status END,
+				updated_at = now(), version = version + 1 WHERE id = $1`,
+				pr.ID, body.Status, now); err != nil {
+				return err
+			}
 		default:
 			return badRequest("项目状态不合法")
 		}
+		if body.Status == ProjDone {
+			// 完成动作(核准流的终点)单独记一条事件,带 PMO 核准语义
+			if err := addEventTx(r.Context(), tx, pr.ID, "project", "", a, "completion_approved", map[string]any{
+				"note": body.Note, "direct": pr.CompletionStatus != CompletionPending,
+			}); err != nil {
+				return err
+			}
+		}
 		now := time.Now()
-		if _, err := tx.ExecContext(r.Context(), `UPDATE projects SET status = $2,
-			completed_at = CASE WHEN $2 = 'done' THEN COALESCE(completed_at, $3) ELSE NULL END WHERE id = $1`,
-			pr.ID, body.Status, now); err != nil {
-			return err
+		if body.Status != ProjDone {
+			if _, err := tx.ExecContext(r.Context(), `UPDATE projects SET status = $2,
+				completed_at = CASE WHEN $2 = 'done' THEN COALESCE(completed_at, $3) ELSE NULL END WHERE id = $1`,
+				pr.ID, body.Status, now); err != nil {
+				return err
+			}
 		}
 		if body.Status == ProjCancelled {
-			// 取消项目时,仍在等待的评审一并作废;等 PMO 终审的标记也一并清掉
+			// 取消项目时,仍在等待的评审一并作废;等 PMO 终审与待核准的完成申请也一并清掉
 			if _, err := tx.ExecContext(r.Context(), `UPDATE gate_reviews SET status = 'withdrawn', decided_at = now()
 				WHERE project_id = $1 AND status = 'pending'`, pr.ID); err != nil {
 				return err
 			}
-			if _, err := tx.ExecContext(r.Context(), `UPDATE projects SET final_status = '', final_review_id = '' WHERE id = $1`, pr.ID); err != nil {
+			if _, err := tx.ExecContext(r.Context(), `UPDATE projects SET final_status = '', final_review_id = '',
+				completion_status = '', completion_requested_at = NULL, completion_requested_by = '', completion_note = '' WHERE id = $1`, pr.ID); err != nil {
 				return err
 			}
 		}
@@ -374,6 +429,115 @@ func (s *postgresStore) handleProjectStatus(w http.ResponseWriter, r *http.Reque
 		label := map[string]string{ProjOnHold: "已搁置", ProjActive: "已恢复", ProjCancelled: "已取消", ProjDone: "已完成"}[body.Status]
 		return notifyManyTx(r.Context(), tx, members, "project_status", pr.ID, "", "",
 			"「"+pr.Name+"」"+label, "project_status:"+pr.ID+":"+body.Status+":"+now.Format("20060102150405"))
+	})
+	if err != nil {
+		writeErr(w, r, err)
+		return
+	}
+	s.writeProject(w, r, a, pathID(r))
+}
+
+// acceptNameOf 验收阶段名;没有验收阶段时给空串
+func acceptNameOf(has bool, t StageTemplate) string {
+	if !has {
+		return ""
+	}
+	return t.Name
+}
+
+// handleCompletionDecision POST /api/projects/{id}/completion —— PMO 核准完成申请:
+// approve = 标记项目完成;reject = 退回申请,项目继续推进。仅 PMO 与管理员。
+func (s *postgresStore) handleCompletionDecision(w http.ResponseWriter, r *http.Request) {
+	a, ok := currentActor(w, r, s)
+	if !ok {
+		return
+	}
+	var body struct {
+		Decision string `json:"decision"` // approve | reject
+		Note     string `json:"note"`
+	}
+	if err := decodeJSON(w, r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, "请求数据格式不正确")
+		return
+	}
+	body.Note = trimRunes(body.Note, 500)
+	if body.Decision != "approve" && body.Decision != "reject" {
+		writeError(w, http.StatusBadRequest, "decision 应为 approve 或 reject")
+		return
+	}
+	err := s.withProjectLock(r.Context(), pathID(r), func(tx *sql.Tx, pr *Project, stages []ProjectStage) error {
+		c, err := loadCaps(r.Context(), tx, pr.ID, a)
+		if err != nil {
+			return err
+		}
+		if !c.assign() {
+			return noPermission()
+		}
+		if pr.CompletionStatus != CompletionPending {
+			return conflict("这个项目没有待核准的完成申请")
+		}
+		requester := pr.CompletionRequestedBy
+		switch body.Decision {
+		case "approve":
+			if pr.Status != ProjActive {
+				return badRequest("只有进行中的项目可以标记完成")
+			}
+			// 闸门在申请时已把过;核准时再验一次,防申请后阶段被回退重做
+			accept, hasAccept := pr.acceptStage()
+			if hasAccept && !c.Admin {
+				st, has := stageStatusOf(stages, accept.Seq)
+				if !has || (st.Status != StageApproved && st.Status != StageSkipped) {
+					return badRequest("「" + accept.Name + "」通过后才能标记项目完成;请先退回申请")
+				}
+			}
+			now := time.Now()
+			if _, err := tx.ExecContext(r.Context(), `UPDATE projects SET status = 'done',
+				completed_at = COALESCE(completed_at, $2), completion_status = 'approved',
+				updated_at = now(), version = version + 1 WHERE id = $1`, pr.ID, now); err != nil {
+				return err
+			}
+			if err := addEventTx(r.Context(), tx, pr.ID, "project", "", a, "completion_approved", map[string]any{
+				"note": body.Note,
+			}); err != nil {
+				return err
+			}
+			audit(r, "completion.approve", "project", pr.ID)
+		case "reject":
+			if _, err := tx.ExecContext(r.Context(), `UPDATE projects SET completion_status = '',
+				completion_requested_at = NULL, completion_requested_by = '', completion_note = '',
+				updated_at = now(), version = version + 1 WHERE id = $1`, pr.ID); err != nil {
+				return err
+			}
+			if err := addEventTx(r.Context(), tx, pr.ID, "project", "", a, "completion_rejected", map[string]any{
+				"note": body.Note,
+			}); err != nil {
+				return err
+			}
+			audit(r, "completion.reject", "project", pr.ID, "note", body.Note)
+		}
+		// 结果通知成员(含发起人);退回时单独再知会发起人
+		members, err := memberUserIDsTx(r.Context(), tx, pr.ID)
+		if err != nil {
+			return err
+		}
+		now := time.Now()
+		label, kind := "已核准完成", "completion_approved"
+		if body.Decision == "reject" {
+			label, kind = "的完成申请被 PMO 退回", "completion_rejected"
+		}
+		message := "「" + pr.Name + "」" + label
+		if body.Note != "" {
+			message += "：" + body.Note
+		}
+		if err := notifyManyTx(r.Context(), tx, members, kind, pr.ID, "", "", message,
+			kind+":"+pr.ID+":"+now.Format("20060102150405")); err != nil {
+			return err
+		}
+		if body.Decision == "reject" && requester != "" && requester != a.ID {
+			return notifyManyTx(r.Context(), tx, []string{requester}, kind, pr.ID, "", "", message,
+				kind+":req:"+pr.ID+":"+now.Format("20060102150405"))
+		}
+		return nil
 	})
 	if err != nil {
 		writeErr(w, r, err)

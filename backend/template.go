@@ -24,7 +24,7 @@ type StageTemplate struct {
 // 两个带语义的阶段标识(标识不可改,名称与规则都可以改)
 const (
 	keyDesign = "design" // 该阶段通过时留存 To-Be 基线
-	keyAccept = "accept" // 该阶段通过时留存已发布版本;通过后才可标记项目完成
+	keyAccept = "accept" // 该阶段通过时留存已发布版本;通过后才可申请/标记项目完成(完成需 PMO 核准)
 )
 
 // builtinTemplates 内置的七阶段模板:首次启动写入 stage_templates 表作为初始配置,表为空时也以它兜底

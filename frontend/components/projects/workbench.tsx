@@ -2,7 +2,7 @@
 
 /**
  * 工作台(登录后的首页):只回答"我现在要做什么"。
- * 主列是一张按动作分组的清单——待我评审 / 待我初析与指派 / 待我终审 / 等我推进 / 我的任务,不同的人看到不同的组;
+ * 主列是一张按动作分组的清单——待我评审 / 待我初析与指派 / 待我终审 / 待我核准完成 / 等我推进 / 我的任务,不同的人看到不同的组;
  * 右栏是我提交的需求(有才显示)、我的项目与需要关注的。有内容才成卡,空的收成一行,各组全空显示「都处理完了」。
  * 分组的口径与侧栏上的待办数字共用 lib/workbench.ts。
  */
@@ -230,6 +230,34 @@ function WorkbenchBody({ me }: { me: SessionUser }) {
           </span>
           <Link href={intakeHref(p)} prefetch={false} className="btn-tint">
             去终审
+          </Link>
+        </div>
+      ),
+    }),
+    group<ProjectView>({
+      key: "completeReq",
+      icon: ClipboardCheck,
+      tone: "green",
+      title: "待我核准完成",
+      empty: "没有等你核准的完成申请",
+      items: model.completeReq,
+      keyOf: (p) => p.id,
+      // PMO 岗位与管理员:PM 申请标记完成,核准后才算完成
+      applies: isAdmin || isPMO,
+      render: (p) => (
+        <div className="act-row">
+          <Link href={`/projects/${p.id}?tab=overview`} prefetch={false} className="act-main">
+            <span className="act-title">{p.name}</span>
+            <span className="act-meta">
+              {p.completionRequestedByName ? `${p.completionRequestedByName} 申请完成 · ` : ""}
+              {p.completionRequestedAt ? `申请于 ${fmtDate(p.completionRequestedAt)}` : "等待核准"}
+            </span>
+          </Link>
+          <span className="act-tags">
+            <span className="badge badge-green !h-[20px] !px-2 text-[11px]">完成核准</span>
+          </span>
+          <Link href={`/projects/${p.id}?tab=overview`} prefetch={false} className="btn-tint">
+            去核准
           </Link>
         </div>
       ),

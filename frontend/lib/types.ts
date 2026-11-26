@@ -239,6 +239,15 @@ export interface Project {
   triageDoneAt: string | null;
   /** "" | pending:技术可行性评估已通过,正在等 PMO 终审 */
   finalStatus: string;
+  /** ---- 完成核准:申请后在 PMO 处形成待办,核准通过才标记完成 ---- */
+  /** "" | pending | approved */
+  completionStatus: string;
+  /** 发起完成申请的时间 */
+  completionRequestedAt: string | null;
+  /** 发起人的用户 ID */
+  completionRequestedBy: string;
+  /** 申请时附的说明 */
+  completionNote: string;
 }
 
 /** 申请 CTO 协助的现状 */
@@ -360,6 +369,8 @@ export interface ProjectView extends Project {
   countersignN: number;
   hasPm: boolean;
   leadPmName: string;
+  /** 完成申请发起人的显示名(能解析到才带) */
+  completionRequestedByName?: string;
   stages: StageView[];
   members: MemberView[];
   /** 当前阶段最新一轮评审(无则 null) */

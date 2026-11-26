@@ -60,6 +60,12 @@ const (
 // FinalPending projects.final_status 的取值:CTO 评估已通过,正在等 PMO 终审
 const FinalPending = "pending"
 
+// projects.completion_status 的取值:完成核准——申请后在 PMO 处形成待办,核准通过才标记完成
+const (
+	CompletionPending  = "pending"  // 待 PMO 核准
+	CompletionApproved = "approved" // 已核准并标记完成
+)
+
 // PendingPMO "待谁处理"里 PMO 的代码(与岗位、成员角色的代码无关,只在 pendingOn 里出现)
 const PendingPMO = "pmo"
 

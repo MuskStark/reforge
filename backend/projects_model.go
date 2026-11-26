@@ -103,6 +103,12 @@ type Project struct {
 	CtoSupport     json.RawMessage `json:"ctoSupport"`   // 申请 CTO 协助的现状(CtoSupport)
 	IntakePassedAt *time.Time      `json:"-"`            // PMO 终审通过、承接完成的时间;为空 = 这个项目没走完过承接(见 intakeLegacy)
 
+	// ---- 完成核准:申请后到 PMO 处形成待办,核准通过才真正标记完成 ----
+	CompletionStatus       string     `json:"completionStatus"`       // "" | pending | approved
+	CompletionRequestedAt  *time.Time `json:"completionRequestedAt"`  // 发起申请的时间
+	CompletionRequestedBy  string     `json:"completionRequestedBy"`  // 发起人(users.id)
+	CompletionNote         string     `json:"completionNote"`         // 申请时附的说明(复盘/收尾情况)
+
 	tpl []StageTemplate // 立项时的阶段模板快照(scanProject 解析;对外经 Stages 输出)
 }
 
@@ -299,6 +305,8 @@ type ProjectView struct {
 	Stats        ItemStats     `json:"stats"`
 	HandlerHints []HandlerHint `json:"handlerHints"`
 	Metrics      FlowMetrics   `json:"metrics"`
+	// 完成申请的发起人显示名(能解析到才带;列表场景可能为空,前端可用成员名单兜底)
+	CompletionRequestedByName string `json:"completionRequestedByName,omitempty"`
 	// 需求承接的摘要(所处环节与三类节点数);项目的第一个阶段不是承接阶段时为 nil
 	Intake *IntakeSummary  `json:"intake"`
 	Can    map[string]bool `json:"can"`

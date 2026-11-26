@@ -329,7 +329,9 @@ function ProjectDetailBody({ id, me }: { id: string; me: SessionUser }) {
               statusAsk === "on_hold"
                 ? "搁置后流程暂停推进，成员会收到通知；可随时恢复。"
                 : statusAsk === "done"
-                  ? `标记为已完成：${acceptStage?.name ?? "验收阶段"}已通过、复盘结束。`
+                  ? project.can.assign
+                    ? `核准项目完成：${acceptStage?.name ?? "验收阶段"}已通过、复盘结束。完成后成员会收到通知。`
+                    : `提交完成申请：由 PMO 核准后项目才会标记完成，成员会收到核准结果的通知。`
                   : "取消后项目不再推进，仍在等待的评审一并作废。"
             }
             onClose={() => setStatusAsk(null)}
@@ -351,7 +353,7 @@ function ProjectDetailBody({ id, me }: { id: string; me: SessionUser }) {
               onClick={() => void changeStatus()}
               className={cn("btn", statusAsk === "done" || statusAsk === "active" ? "btn-primary" : "btn-glass")}
             >
-              {{ on_hold: "搁置", active: "恢复", done: "标记完成", cancelled: "确认取消" }[statusAsk]}
+              {{ on_hold: "搁置", active: "恢复", done: project.can.assign ? "标记完成" : "提交申请", cancelled: "确认取消" }[statusAsk]}
             </button>
           </DialogActions>
         </Dialog>
@@ -426,7 +428,7 @@ function ExportMenu({ id, name }: { id: string; name: string }) {
 /* ---------------- 概览 ---------------- */
 
 function OverviewTab({ ctx, onStatus }: { ctx: DetailCtx; onStatus: (s: "on_hold" | "active" | "done" | "cancelled") => void }) {
-  const { project, items, comments, users, process, patchProject } = ctx;
+  const { project, items, comments, users, process, patchProject, refresh } = ctx;
   const cur = project.stages[project.currentStage - 1];
   const required = items.filter((i) => i.required && i.stageSeq === cur.seq);
   const doneRequired = required.filter((i) => i.status === "done").length;
@@ -441,6 +443,30 @@ function OverviewTab({ ctx, onStatus }: { ctx: DetailCtx; onStatus: (s: "on_hold
   const ctos = users.filter((u) => u.jobRole === "cto");
   const acceptStage = acceptStageOf(project);
   const acceptPassed = acceptStage?.status === "approved" || acceptStage?.status === "skipped";
+
+  // 完成核准:PMO 通过/退回 PM 发起的完成申请(服务端逐请求校验,这里只是入口)
+  const [completionBusy, setCompletionBusy] = useState(false);
+  const [rejectOpen, setRejectOpen] = useState(false);
+  const [rejectNote, setRejectNote] = useState("");
+  const decideCompletion = async (decision: "approve" | "reject", note: string) => {
+    setCompletionBusy(true);
+    try {
+      const p = await authFetch<ProjectView>(`/api/projects/${project.id}/completion`, {
+        method: "POST",
+        body: JSON.stringify({ decision, note }),
+      });
+      void refresh();
+      setRejectOpen(false);
+      setRejectNote("");
+      toast.success(decision === "approve" ? "已核准完成" : "已退回申请", {
+        description: decision === "approve" ? `「${project.name}」已标记为完成` : "项目继续推进，发起人已收到通知",
+      });
+    } catch (e) {
+      if (!(e instanceof Error && e.message === "UNAUTHORIZED")) toast.error("操作失败", { description: e instanceof Error ? e.message : "请重试" });
+    } finally {
+      setCompletionBusy(false);
+    }
+  };
 
   const stageBody = useMemo(() => {
     if (!cur) return null;
@@ -794,32 +820,79 @@ function OverviewTab({ ctx, onStatus }: { ctx: DetailCtx; onStatus: (s: "on_hold
               {project.status === "done" && "可在「流程」里查看 As-Is 与已发布版本的对比。"}
             </p>
           ) : (
-            <div className="mt-3 flex flex-wrap gap-2">
-              {project.status === "active" && project.can.manage && (
-                <button type="button" onClick={() => onStatus("on_hold")} className="btn btn-glass !h-9 !px-3.5 text-[13px]">
-                  搁置
-                </button>
+            <>
+              {/* 完成核准:申请后到 PMO 处形成待办;PMO 在这里通过/退回,申请人在这里看进度 */}
+              {project.completionStatus === "pending" && (
+                <div className="mt-3 rounded-2xl bg-[color:var(--amber-soft)] p-3.5 shadow-[inset_0_0_0_0.5px_rgba(245,158,11,0.25)]">
+                  <p className="text-[13px] font-semibold text-[color:var(--amber-deep)]">
+                    完成申请待 PMO 核准
+                    {project.completionRequestedAt && <span className="ml-1.5 font-normal text-[color:var(--ink-2)]">{fmtDateTime(project.completionRequestedAt)}{project.completionRequestedByName ? ` · ${project.completionRequestedByName}` : ""}</span>}
+                  </p>
+                  {project.completionNote && <p className="mt-1 text-xs leading-relaxed text-[color:var(--ink-2)]">申请说明：{project.completionNote}</p>}
+                  {project.can.assign && (
+                    <div className="mt-2.5 flex flex-wrap gap-2">
+                      <button type="button" disabled={completionBusy} onClick={() => void decideCompletion("approve", "")} className="btn btn-primary !h-8 !px-3 text-[12px]">
+                        核准完成
+                      </button>
+                      <button type="button" disabled={completionBusy} onClick={() => setRejectOpen(true)} className="btn btn-glass !h-8 !px-3 text-[12px]">
+                        退回
+                      </button>
+                    </div>
+                  )}
+                </div>
               )}
-              {project.status === "on_hold" && project.can.manage && (
-                <button type="button" onClick={() => onStatus("active")} className="btn btn-primary !h-9 !px-3.5 text-[13px]">
-                  恢复推进
-                </button>
-              )}
-              {project.status === "active" && project.can.manage && (acceptPassed || project.can.isAdmin || project.can.isCTO) && (
-                <button type="button" onClick={() => onStatus("done")} className="btn btn-glass !h-9 !px-3.5 text-[13px]">
-                  标记完成
-                </button>
-              )}
-              {project.can.skip && (
-                <button type="button" onClick={() => onStatus("cancelled")} className="btn btn-glass !h-9 !px-3.5 text-[13px] text-[color:var(--red-deep)]">
-                  取消项目
-                </button>
-              )}
-            </div>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {project.status === "active" && project.can.manage && (
+                  <button type="button" onClick={() => onStatus("on_hold")} className="btn btn-glass !h-9 !px-3.5 text-[13px]">
+                    搁置
+                  </button>
+                )}
+                {project.status === "on_hold" && project.can.manage && (
+                  <button type="button" onClick={() => onStatus("active")} className="btn btn-primary !h-9 !px-3.5 text-[13px]">
+                    恢复推进
+                  </button>
+                )}
+                {project.status === "active" && project.completionStatus !== "pending" && project.can.assign && (acceptPassed || project.can.isAdmin) && (
+                  <button type="button" onClick={() => onStatus("done")} className="btn btn-glass !h-9 !px-3.5 text-[13px]" title="PMO 直接标记完成">
+                    标记完成
+                  </button>
+                )}
+                {project.status === "active" && project.completionStatus !== "pending" && project.can.manage && !project.can.assign && acceptPassed && (
+                  <button type="button" onClick={() => onStatus("done")} className="btn btn-glass !h-9 !px-3.5 text-[13px]" title="提交完成申请，由 PMO 核准">
+                    申请完成
+                  </button>
+                )}
+                {project.can.skip && (
+                  <button type="button" onClick={() => onStatus("cancelled")} className="btn btn-glass !h-9 !px-3.5 text-[13px] text-[color:var(--red-deep)]">
+                    取消项目
+                  </button>
+                )}
+              </div>
+            </>
           )}
           <p className="mt-3 text-xs leading-relaxed text-[color:var(--ink-3)]">创建于 {fmtDateTime(project.createdAt)} · 申报人提交后自动立项</p>
         </section>
       </aside>
+
+      {/* 退回完成申请:附上原因,发起人与成员都会收到通知 */}
+      {rejectOpen && (
+        <Dialog onClose={() => setRejectOpen(false)} labelledBy="reject-title">
+          <DialogHeader id="reject-title" title="退回完成申请" subtitle="退回后项目继续推进，发起人与成员会收到通知。" onClose={() => setRejectOpen(false)} />
+          <div className="mt-4">
+            <Field label="退回原因" hint="选填">
+              <Textarea value={rejectNote} onChange={(e) => setRejectNote(e.target.value)} placeholder="例如：运营指标还差一个周期的数据，下月初再报" />
+            </Field>
+          </div>
+          <DialogActions>
+            <button type="button" onClick={() => setRejectOpen(false)} className="btn btn-glass">
+              取消
+            </button>
+            <button type="button" disabled={completionBusy} onClick={() => void decideCompletion("reject", rejectNote.trim())} className="btn btn-primary">
+              确认退回
+            </button>
+          </DialogActions>
+        </Dialog>
+      )}
     </div>
   );
 }
