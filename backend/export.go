@@ -59,7 +59,8 @@ func label(m map[string]string, key string) string {
 // ---- 项目清单 CSV ----
 
 func (s *postgresStore) handleExportProjectsCSV(w http.ResponseWriter, r *http.Request) {
-	if _, ok := currentActor(w, r, s); !ok {
+	a, ok := currentActor(w, r, s)
+	if !ok {
 		return
 	}
 	where, args := "", []any{}
@@ -83,6 +84,15 @@ func (s *postgresStore) handleExportProjectsCSV(w http.ResponseWriter, r *http.R
 			return
 		}
 		where, args = `WHERE pr.status = $1`, []any{st}
+	}
+	// 导出范围与查看范围一致:无岗位的纯提交人只能导出自己提交的项目
+	if a.isJobless() {
+		if where == "" {
+			where, args = `WHERE pr.created_by = $1`, []any{a.ID}
+		} else {
+			where += fmt.Sprintf(" AND pr.created_by = $%d", len(args)+1)
+			args = append(args, a.ID)
+		}
 	}
 	projects, err := listProjects(r.Context(), s.db, where, args...)
 	if err != nil {
@@ -187,7 +197,8 @@ type projectExport struct {
 }
 
 func (s *postgresStore) handleExportProject(w http.ResponseWriter, r *http.Request) {
-	if _, ok := currentActor(w, r, s); !ok {
+	a, ok := currentActor(w, r, s)
+	if !ok {
 		return
 	}
 	id := pathID(r)
@@ -196,7 +207,7 @@ func (s *postgresStore) handleExportProject(w http.ResponseWriter, r *http.Reque
 		writeErr(w, r, err)
 		return
 	}
-	if pr == nil {
+	if pr == nil || !joblessSees(a, pr) {
 		writeError(w, http.StatusNotFound, "项目不存在")
 		return
 	}

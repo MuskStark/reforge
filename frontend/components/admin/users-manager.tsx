@@ -9,7 +9,7 @@ import { DataTable, type DataColumn, type DataRow } from "@/components/ui/data-t
 import { SearchBox } from "@/components/ui/search-box";
 import { PageHead, StateLine } from "@/components/shell/app-shell";
 import { authFetch, getUser } from "@/lib/auth";
-import { JOB_ROLE_FULL, JOB_ROLE_LABEL, JOB_ROLE_OPTIONS } from "@/lib/labels";
+import { JOB_ROLE_FULL, JOB_ROLE_OPTIONS, jobRoleName } from "@/lib/labels";
 import { ADMIN_SECTION_META } from "@/lib/shell-nav";
 import type { JobRole } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -20,7 +20,7 @@ interface RegisteredUser {
   role: "admin" | "member";
   displayName: string;
   department: string;
-  jobRole: JobRole;
+  jobRole: JobRole | "";
   /** 管理员设定的初始密码还没换:用户首次登录后必须先改密码 */
   mustChangePassword: boolean;
   createdAt: string;
@@ -36,10 +36,11 @@ const COLUMNS: DataColumn[] = [
 ];
 const ACTIONS = 5;
 
-const emptyDraft = () => ({ username: "", password: "", role: "member" as "member" | "admin", displayName: "", department: "", jobRole: "handler" as JobRole });
+// 新账号默认无岗位(纯提交人);要参与项目再授予岗位
+const emptyDraft = () => ({ username: "", password: "", role: "member" as "member" | "admin", displayName: "", department: "", jobRole: "" as JobRole | "" });
 
-/** 岗位徽章:CTO 紫红、PM 蓝、BH 绿、TH 琥珀、PMO 灰 */
-function jobBadge(job: JobRole): string {
+/** 岗位徽章:CTO 紫红、PM 蓝、BH 绿、TH 琥珀、PMO 灰、无岗位素色 */
+function jobBadge(job: JobRole | ""): string {
   return cn(
     "badge !h-[22px] text-[11px]",
     job === "cto" && "badge-warn",
@@ -62,7 +63,7 @@ export function UsersManager() {
   const [creating, setCreating] = useState(false);
   const [draft, setDraft] = useState(emptyDraft);
   const [editing, setEditing] = useState<RegisteredUser | null>(null);
-  const [editForm, setEditForm] = useState({ displayName: "", department: "", jobRole: "handler" as JobRole });
+  const [editForm, setEditForm] = useState({ displayName: "", department: "", jobRole: "" as JobRole | "" });
   const [busy, setBusy] = useState(false);
   // 当前登录的人:列表里标出来,而且不能删自己
   const self = useMemo(() => (typeof window === "undefined" ? null : getUser()), []);
@@ -110,7 +111,7 @@ export function UsersManager() {
         }),
       });
       setUsers((prev) => [...(prev ?? []), u]);
-      toast.success("已创建", { description: `「${u.displayName}」· ${JOB_ROLE_LABEL[u.jobRole]}，首次登录后须先修改密码` });
+      toast.success("已创建", { description: `「${u.displayName}」· ${jobRoleName(u.jobRole)}，首次登录后须先修改密码` });
       setDraft(emptyDraft());
       setCreating(false);
     } catch (e) {
@@ -142,7 +143,7 @@ export function UsersManager() {
         }),
       });
       setUsers((prev) => (prev ?? []).map((x) => (x.id === u.id ? u : x)));
-      toast.success("已保存", { description: `「${u.displayName}」· ${JOB_ROLE_LABEL[u.jobRole]}` });
+      toast.success("已保存", { description: `「${u.displayName}」· ${jobRoleName(u.jobRole)}` });
       setEditing(null);
     } catch (e) {
       fail(e, "保存失败");
@@ -199,11 +200,11 @@ export function UsersManager() {
         </span>,
         u.jobRole ? (
           <span key="job" className={jobBadge(u.jobRole)} title={JOB_ROLE_FULL[u.jobRole]}>
-            {JOB_ROLE_LABEL[u.jobRole]}
+            {jobRoleName(u.jobRole)}
           </span>
         ) : (
-          <span key="job" className="text-[color:var(--ink-3)]">
-            未设置
+          <span key="job" className={jobBadge("")} title="纯提交人：只能提交收集表、查看自己提交的需求进度">
+            无岗位
           </span>
         ),
         u.role === "admin" ? (

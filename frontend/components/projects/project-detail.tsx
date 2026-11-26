@@ -14,6 +14,7 @@ import { Braces, ChevronDown, ClipboardList, Download, Eye, FileSignature, FileT
 import { toast } from "sonner";
 import { authFetch, authFetchBlob, saveBlob, type SessionUser } from "@/lib/auth";
 import type { FlowProcess, ProjectComment, ProjectView, UserDir, WorkItem } from "@/lib/types";
+import { canEditSubmission } from "@/lib/workbench";
 import { acceptStageOf, fmtDateTime, HEALTH_LABEL, healthClass, MODE_LABEL, OVERALL, PRIORITY_LABEL, priorityClass, STATUS_LABEL, statusClass } from "@/lib/labels";
 import { OVERALL_MODE_LABEL, countersignMode } from "@/lib/step-checks";
 import { AppShell, PageHead, StateLine } from "@/components/shell/app-shell";
@@ -187,9 +188,10 @@ function ProjectDetailBody({ id, me }: { id: string; me: SessionUser }) {
     (cur.reviewerRole === "cto" ? project.can.reviewCTO : cur.reviewerRole === "handler" ? project.can.reviewHandler : project.can.manage);
   const openItems = items.filter((i) => i.status !== "done" && i.status !== "cancelled").length;
   const acceptStage = acceptStageOf(project);
-  // 流程定义改的是 To-Be 工作副本:项目里的 PM / BH / TH、CTO 与管理员都能改,项目结束后锁定
+  // 流程定义改的是 To-Be 工作副本:项目里的 PM / BH / TH、CTO 与管理员都能改,项目结束后锁定;
+  // 提交人另有改单窗口——自己提交的需求还没被处理(等初级分析)时可自行修改
   const ended = project.status === "done" || project.status === "cancelled";
-  const canEditFlow = project.can.editFlow && !ended && !!process;
+  const canEditFlow = (project.can.editFlow || canEditSubmission(me.id, project)) && !ended && !!process;
   // 项目正停在承接阶段:这一段的指派、提交、评估、终审都在「承接」标签里,页头按钮直接带过去
   const atIntake = inIntakeStage(project);
   // 「承接」标签只对第一个阶段是承接阶段的项目存在;地址栏写了 tab=intake 而项目没有承接阶段时回落到概览

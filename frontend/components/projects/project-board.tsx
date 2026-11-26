@@ -29,19 +29,22 @@ function ProjectBoardBody({ me }: { me: SessionUser }) {
   const [projects, setProjects] = useState<ProjectView[] | null>(null);
   const [users, setUsers] = useState<UserDir[]>([]);
   const [overview, setOverview] = useState<Overview | null>(null);
-  const [scope, setScope] = useState<"all" | "mine">("all");
+  const [scope, setScope] = useState<"all" | "mine" | "submitted">("all");
   const [pending, setPending] = useState<PendingFilter>("");
   const [query, setQuery] = useState("");
   const [view, setView] = useState<"board" | "list">("board");
   const [assignOf, setAssignOf] = useState<ProjectView | null>(null);
   const [exporting, setExporting] = useState(false);
 
+  // 无岗位的纯提交人:后端只回他自己提交的项目;用户目录与大屏接口对他关闭,不要去拉
+  const jobless = me.role !== "admin" && !me.jobRole;
+
   const load = useCallback(async () => {
     try {
       const [ps, us, ov] = await Promise.all([
         authFetch<ProjectView[]>("/api/projects", { cache: "no-store" }),
-        authFetch<UserDir[]>("/api/users", { cache: "no-store" }),
-        authFetch<Overview>("/api/overview", { cache: "no-store" }),
+        jobless ? Promise.resolve([] as UserDir[]) : authFetch<UserDir[]>("/api/users", { cache: "no-store" }),
+        jobless ? Promise.resolve(null) : authFetch<Overview>("/api/overview", { cache: "no-store" }),
       ]);
       setProjects(ps);
       setUsers(us ?? []);
@@ -49,17 +52,23 @@ function ProjectBoardBody({ me }: { me: SessionUser }) {
     } catch {
       /* 会话失效由外壳处理 */
     }
-  }, []);
+  }, [jobless]);
 
   useEffect(() => {
     void load();
   }, [load]);
 
+  // 从工作台「我提交的需求 · 查看全部」过来时直接落在对应的筛选上
+  useEffect(() => {
+    const v = new URLSearchParams(window.location.search).get("scope");
+    if (v === "mine" || v === "submitted") setScope(v);
+  }, []);
+
   const shown = useMemo(() => {
     const myId = me?.id ?? "";
     const q = query.trim().toLowerCase();
     return (projects ?? [])
-      .filter((p) => scope === "all" || p.members.some((m) => m.userId === myId))
+      .filter((p) => scope === "all" || (scope === "mine" ? p.members.some((m) => m.userId === myId) : p.createdBy === myId))
       .filter((p) => !pending || p.pendingOn === pending)
       .filter((p) => !q || (p.name + " " + p.applicant).toLowerCase().includes(q));
   }, [projects, scope, pending, query, me?.id]);
@@ -134,8 +143,8 @@ function ProjectBoardBody({ me }: { me: SessionUser }) {
         )}
       </PageHead>
 
-      {/* 全池诊断:三条推进线按解决顺序排列 */}
-      {pool.projects > 0 && (
+      {/* 全池诊断:三条推进线按解决顺序排列(纯提交人看不到全池,不展示) */}
+      {!jobless && pool.projects > 0 && (
         <section className="glass-card mb-4 p-4" aria-label="全池诊断">
           <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
             <h2 className="text-[15px] font-semibold text-neutral-900">全池诊断</h2>
@@ -194,20 +203,23 @@ function ProjectBoardBody({ me }: { me: SessionUser }) {
         </div>
       )}
 
-      {/* 工具条 */}
+      {/* 工具条。纯提交人只有自己提交的需求,不显示范围筛选 */}
       <div className="mb-4 flex flex-wrap items-center gap-2.5">
-        <div className="seg seg-mini">
-          {(
-            [
-              ["all", "全部"],
-              ["mine", "我参与的"],
-            ] as const
-          ).map(([v, label]) => (
-            <button key={v} type="button" onClick={() => setScope(v)} className={scope === v ? "on" : undefined}>
-              {label}
-            </button>
-          ))}
-        </div>
+        {!jobless && (
+          <div className="seg seg-mini">
+            {(
+              [
+                ["all", "全部"],
+                ["mine", "我参与的"],
+                ["submitted", "我提交的"],
+              ] as const
+            ).map(([v, label]) => (
+              <button key={v} type="button" onClick={() => setScope(v)} className={scope === v ? "on" : undefined}>
+                {label}
+              </button>
+            ))}
+          </div>
+        )}
         <select
           value={pending}
           onChange={(e) => setPending(e.target.value as PendingFilter)}

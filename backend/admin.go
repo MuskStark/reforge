@@ -20,13 +20,23 @@ func adminCredentials() (user, pass string) {
 	return user, pass
 }
 
-// registerAdminRoutes 挂载管理端路由（全部要求管理员会话）
-func registerAdminRoutes(mux *http.ServeMux, st store) {
+// registerAdminRoutes 挂载管理端路由（全部要求管理员会话）。
+// 流程查看对登录用户开放,但无岗位的纯提交人只见自己的提交
+func registerAdminRoutes(mux *http.ServeMux, st *postgresStore) {
 	mux.HandleFunc("GET /api/admin/processes", func(w http.ResponseWriter, r *http.Request) {
-		if currentUser(w, r) == nil { // 登录即可查看(数据查看权限)
+		a, ok := currentActor(w, r, st) // 登录即可查看(数据查看权限)
+		if !ok {
 			return
 		}
-		list, err := st.List()
+		var (
+			list []*Process
+			err  error
+		)
+		if a.isJobless() {
+			list, err = st.ListForSubmitter(a.ID)
+		} else {
+			list, err = st.List()
+		}
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "读取失败: "+err.Error())
 			return
@@ -35,8 +45,20 @@ func registerAdminRoutes(mux *http.ServeMux, st store) {
 	})
 
 	mux.HandleFunc("GET /api/admin/processes/{id}", func(w http.ResponseWriter, r *http.Request) {
-		if currentUser(w, r) == nil { // 登录即可查看
+		a, ok := currentActor(w, r, st) // 登录即可查看
+		if !ok {
 			return
+		}
+		if a.isJobless() {
+			by, err := submitterOfProcess(r.Context(), st.db, r.PathValue("id"))
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "读取失败: "+err.Error())
+				return
+			}
+			if by != a.ID {
+				writeError(w, http.StatusNotFound, "流程不存在")
+				return
+			}
 		}
 		p, err := st.Get(r.PathValue("id"))
 		if err != nil {

@@ -18,6 +18,16 @@ func (a *actor) isAdmin() bool { return a.SysRole == "admin" }
 func (a *actor) isCTO() bool   { return a.JobRole == RoleCTO }
 func (a *actor) isPMO() bool   { return a.JobRole == RoleViewer }
 
+// isJobless 无岗位的纯提交人:只能提交收集表、看自己提交的需求进度(管理员不受此限,
+// 其 jobRole 可能为空但拥有全局可见性)。各读取端点按此收口。
+func (a *actor) isJobless() bool { return a.JobRole == RoleNone && !a.isAdmin() }
+
+// joblessSees 无岗位的纯提交人能否看到这个项目:只有自己提交的;有岗位或管理员一律可见。
+// 各项目级读取端点(详情/时间线/承接/导出)在返回前统一过这道闸
+func joblessSees(a *actor, pr *Project) bool {
+	return !a.isJobless() || pr.CreatedBy == a.ID
+}
+
 // name 时间线上显示的名字
 func (a *actor) name() string {
 	if a.DisplayName != "" {

@@ -32,6 +32,9 @@ const (
 	RoleHandler = "handler" // BH
 	RoleDev     = "dev"     // TH
 	RoleViewer  = "viewer"  // PMO
+	// RoleNone 无岗位:纯提交人——只能填收集表、看自己提交的需求进度,
+	// 未被处理时可改自己的提交;要参与项目须先授予岗位
+	RoleNone = ""
 )
 
 // 评审单状态与评审人表决

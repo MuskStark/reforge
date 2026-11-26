@@ -72,7 +72,13 @@ type overview struct {
 }
 
 func (s *postgresStore) handleOverview(w http.ResponseWriter, r *http.Request) {
-	if _, ok := currentActor(w, r, s); !ok {
+	a, ok := currentActor(w, r, s)
+	if !ok {
+		return
+	}
+	// 大屏是全局统计,无岗位的纯提交人不可见(前端导航也已隐藏,这里兜底)
+	if a.isJobless() {
+		writeError(w, http.StatusForbidden, "数据大屏仅对有岗位的用户开放")
 		return
 	}
 	ov, err := s.buildOverview(r.Context(), r.URL.Query().Get("full") == "1")

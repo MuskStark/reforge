@@ -586,14 +586,15 @@ func (s *postgresStore) withTx(ctx context.Context, fn func(tx *sql.Tx) error) e
 
 // CreateProjectForProcess 流程提交后自动立项(新提交流程进入阶段 1,等待指派项目经理)。
 // 立项时把当前生效的阶段模板快照进项目,之后后台再改模板也不影响这个项目。
-func (s *postgresStore) CreateProjectForProcess(ctx context.Context, p *Process) (string, error) {
+// a 是提交人:写进 projects.created_by(工作台「我提交的」以此过滤)与立项事件的时间线。
+func (s *postgresStore) CreateProjectForProcess(ctx context.Context, p *Process, a *actor) (string, error) {
 	var id string
 	err := s.withTx(ctx, func(tx *sql.Tx) error {
 		tpl, err := loadStageTemplates(ctx, tx)
 		if err != nil {
 			return err
 		}
-		id, err = createProjectTx(ctx, tx, p, nil, nil, tpl)
+		id, err = createProjectTx(ctx, tx, p, a, nil, tpl)
 		return err
 	})
 	return id, err
@@ -1024,4 +1025,16 @@ func projectIDForProcess(ctx context.Context, q runner, processID string) (strin
 		return "", nil
 	}
 	return id, err
+}
+
+// submitterOfProcess 流程对应项目的提交人(无项目或历史数据未记录时为空串);
+// 无岗位用户的流程可见性按此判定
+func submitterOfProcess(ctx context.Context, q runner, processID string) (string, error) {
+	var by string
+	err := q.QueryRowContext(ctx, `SELECT COALESCE(pr.created_by, '') FROM projects pr WHERE pr.process_id = $1
+		ORDER BY (pr.status IN ('active','on_hold')) DESC, pr.created_at DESC LIMIT 1`, processID).Scan(&by)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	return by, err
 }

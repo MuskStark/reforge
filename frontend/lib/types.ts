@@ -228,6 +228,8 @@ export interface Project {
   completedAt: string | null;
   /** 乐观并发版本号(每次项目级写操作 +1) */
   version: number;
+  /** 提交人的用户 ID;匿名时代提交的存量项目为空串(工作台「我提交的」按此过滤) */
+  createdBy: string;
   createdAt: string;
   updatedAt: string;
   /** ---- 需求承接 ---- */

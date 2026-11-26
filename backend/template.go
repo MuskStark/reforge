@@ -249,7 +249,7 @@ func cleanTitleList(in []string, label string) ([]string, error) {
 }
 
 var (
-	validJobRoles     = map[string]bool{RoleCTO: true, RolePM: true, RoleHandler: true, RoleDev: true, RoleViewer: true}
+	validJobRoles     = map[string]bool{RoleNone: true, RoleCTO: true, RolePM: true, RoleHandler: true, RoleDev: true, RoleViewer: true}
 	validProjectRoles = map[string]bool{RolePM: true, RoleHandler: true, RoleDev: true, RoleViewer: true}
 	validItemTypes    = map[string]bool{ItemTask: true, ItemDeliverable: true, ItemIssue: true, ItemRisk: true, ItemChange: true}
 	validItemStatuses = map[string]bool{
@@ -286,7 +286,7 @@ func levelLabel(s string) string {
 	}
 }
 
-// jobRoleLabel 岗位的显示名(一律英文缩写):CTO、PM 项目经理、BH 业务经办、TH 科技经办、PMO 项目管理办公室。
+// jobRoleLabel 岗位的显示名(一律英文缩写):CTO、PM 项目经理、BH 业务经办、TH 科技经办、PMO 项目管理办公室、无岗位。
 // 岗位代码沿用历史取值不改(库里已有数据),与显示名并非字面对应。
 func jobRoleLabel(r string) string {
 	switch r {
@@ -300,6 +300,8 @@ func jobRoleLabel(r string) string {
 		return "TH"
 	case RoleViewer:
 		return "PMO"
+	case RoleNone:
+		return "无岗位"
 	}
-	return "BH"
+	return "无岗位"
 }

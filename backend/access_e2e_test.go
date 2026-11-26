@@ -9,10 +9,10 @@ import (
 // 端到端:流程的权限分配(管理员全部 / PMO 指派 PM / CTO 查看全部并分配 TH / PM 分配 BH)、流程定义的修改权限,
 // 与用户自助(修改个人信息、修改密码、首次登录强制改密码)。走真实路由表与真实 PostgreSQL。
 
-// submitProject 匿名提交一条流程,返回自动立项的项目 ID
+// submitProject 提交一条流程(收集表仅登录可填),返回自动立项的项目 ID
 func (e *env) submitProject(adminToken, name string) string {
 	e.t.Helper()
-	if code, _ := e.req("", "POST", "/api/processes", processPayload(name)); code != 201 {
+	if code, _ := e.req(adminToken, "POST", "/api/processes", processPayload(name)); code != 201 {
 		e.t.Fatalf("提交流程期望 201,得到 %d", code)
 	}
 	_, projects := e.list(adminToken, "/api/projects")

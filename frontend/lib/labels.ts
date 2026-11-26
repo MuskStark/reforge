@@ -41,14 +41,18 @@ export const JOB_ROLE_FULL: Record<JobRole, string> = {
   viewer: "项目管理办公室",
 };
 
-/** 缩写是名称,中文全称放在说明的开头 */
-export const JOB_ROLE_OPTIONS: { value: JobRole; label: string; hint: string }[] = [
+/** 缩写是名称,中文全称放在说明的开头。空岗位(纯提交人)是建号的默认值 */
+export const JOB_ROLE_OPTIONS: { value: JobRole | ""; label: string; hint: string }[] = [
+  { value: "", label: "无岗位", hint: "纯提交人：填写收集表、查看自己提交的需求进度，需求开始处理前可自行修改；不能看别人的项目与数据大屏。要参与项目须先授予岗位" },
   { value: "viewer", label: "PMO", hint: "项目管理办公室：对每条新流程做初级分析、指派 PM、终审；查看全部项目与数据大屏" },
   { value: "cto", label: "CTO", hint: "评估技术可行性，评审方案 / 上线 / 验收，全局生效；分配项目里的 TH" },
   { value: "pm", label: "PM", hint: "项目经理：承接需求、负责一个流程从立项到上线的推进；分配项目里的 BH" },
   { value: "handler", label: "BH", hint: "业务经办：确认需求、执行试运行、办理业务" },
   { value: "dev", label: "TH", hint: "科技经办：承接系统改造任务" },
 ];
+
+/** 岗位缩写;空岗位(纯提交人)显示「无岗位」 */
+export const jobRoleName = (r: JobRole | "" | null | undefined) => (r ? JOB_ROLE_LABEL[r] : "无岗位");
 
 /** 项目里的成员角色:BH 是业务侧,TH 是科技侧 */
 export const PROJECT_ROLE_LABEL: Record<ProjectRole, string> = {

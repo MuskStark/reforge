@@ -13,7 +13,7 @@ import (
 // readyForIntake 提交一条差旅流程,由 PMO 完成初级分析并指派 PM,返回项目 ID。此后项目处于「PM 推进」。
 func (e *env) readyForIntake(admin, pmo, pm, pmID, name string) string {
 	e.t.Helper()
-	if code, _ := e.req("", "POST", "/api/processes", travelPayload(name)); code != 201 {
+	if code, _ := e.req(admin, "POST", "/api/processes", travelPayload(name)); code != 201 {
 		e.t.Fatalf("提交流程期望 201,得到 %d", code)
 	}
 	pid := e.projectByName(admin, name)
@@ -485,7 +485,7 @@ func TestIntakeDisabledWithoutIntakeStage(t *testing.T) {
 	tpl := e.mustArray(admin, "GET", "/api/admin/stage-templates", nil)
 	e.mustArray(admin, "PUT", "/api/admin/stage-templates", map[string]any{"templates": tpl[1:]})
 
-	e.must("", "POST", "/api/processes", processPayload("直奔需求确认"))
+	e.must(admin, "POST", "/api/processes", processPayload("直奔需求确认"))
 	pid := e.projectByName(admin, "直奔需求确认")
 	base := "/api/projects/" + pid
 	proj := e.project(admin, pid)
@@ -614,7 +614,7 @@ func TestIntakeFinalAgingSkipAndCancel(t *testing.T) {
 func TestIntakeLegacyProject(t *testing.T) {
 	e := newTestEnv(t)
 	admin := e.must("", "POST", "/api/auth/register", map[string]any{"username": "rootadmin", "password": "pass1234"})["token"].(string)
-	e.must("", "POST", "/api/processes", travelPayload("早就立项的流程"))
+	e.must(admin, "POST", "/api/processes", travelPayload("早就立项的流程"))
 	pid := e.projectByName(admin, "早就立项的流程")
 	base := "/api/projects/" + pid
 	got(t, e.project(admin, pid), "intake", "legacy", false) // 还停在承接阶段:等 PMO 初级分析

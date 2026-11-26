@@ -71,7 +71,9 @@ function MeBody({ me }: { me: SessionUser }) {
   useEffect(() => {
     if (!window.matchMedia("(max-width: 767px)").matches) router.replace("/work");
   }, [router]);
-  const roleLabel = me.role === "admin" ? "管理员" : me.jobRole ? JOB_ROLE_LABEL[me.jobRole] : "成员";
+  const roleLabel = me.role === "admin" ? "管理员" : me.jobRole ? JOB_ROLE_LABEL[me.jobRole] : "无岗位";
+  // 无岗位的纯提交人看不到全局大屏
+  const showMonitor = me.role === "admin" || Boolean(me.jobRole);
 
   return (
     <>
@@ -94,7 +96,7 @@ function MeBody({ me }: { me: SessionUser }) {
 
       <p className="me-group-label">工作空间</p>
       <section className="glass-card me-list">
-        <Row icon={<Presentation />} label="数据大屏" sub="全公司流程的运行情况" href="/monitor" />
+        {showMonitor && <Row icon={<Presentation />} label="数据大屏" sub="全公司流程的运行情况" href="/monitor" />}
         <Row icon={<Plus />} tone="green" label="提交流程" sub="申报一条需要再造的流程" href="/" />
       </section>
 

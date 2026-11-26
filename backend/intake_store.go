@@ -108,14 +108,15 @@ func asIsStepsTx(ctx context.Context, q runner, projectID string) ([]Step, bool,
 	return steps, true, nil
 }
 
-// asIsStepsOf 一组项目各自的 As-Is 步骤(批量读取,按版本号取最早的一个)
+// asIsStepsOf 一组项目各自的 As-Is 步骤(批量读取,按版本号取最新的一个:
+// 承接开始前提交人/管理员改过流程的话,基线会被刷新成新的 as_is 版本)
 func asIsStepsOf(ctx context.Context, q runner, projectIDs []string) (map[string][]Step, error) {
 	out := map[string][]Step{}
 	if len(projectIDs) == 0 {
 		return out, nil
 	}
 	rows, err := q.QueryContext(ctx, `SELECT DISTINCT ON (project_id) project_id, steps FROM process_versions
-		WHERE project_id = ANY($1) AND kind = 'as_is' ORDER BY project_id, version ASC`, projectIDs)
+		WHERE project_id = ANY($1) AND kind = 'as_is' ORDER BY project_id, version DESC`, projectIDs)
 	if err != nil {
 		return nil, err
 	}

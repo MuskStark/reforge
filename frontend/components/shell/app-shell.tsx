@@ -313,7 +313,9 @@ export function AppShell({
   }
 
   const name = me.displayName || me.username;
-  const roleLabel = me.role === "admin" ? "管理员" : me.jobRole ? JOB_ROLE_LABEL[me.jobRole] : "成员";
+  const roleLabel = me.role === "admin" ? "管理员" : me.jobRole ? JOB_ROLE_LABEL[me.jobRole] : "无岗位";
+  // 无岗位的纯提交人:不看全局大屏(侧栏与移动 Tab 共用这组导航)
+  const workNav = me.role !== "admin" && !me.jobRole ? WORK_NAV.filter((i) => i.id !== "monitor") : WORK_NAV;
 
   const sidebar = (
     <aside className="app-sidebar">
@@ -327,7 +329,7 @@ export function AppShell({
       <div ref={scrollRef} className={cn("sb-scroll", navClipped && "is-overflow")}>
         <p className="sb-group-label">工作空间</p>
         <nav className="sb-nav" aria-label="工作空间">
-          {WORK_NAV.map((item) => (
+          {workNav.map((item) => (
             <NavItem
               key={item.id}
               item={item}
@@ -493,5 +495,5 @@ export function StateLine({ children }: { children: React.ReactNode }) {
 
 export function roleName(user: SessionUser | null): string {
   if (!user) return "";
-  return user.role === "admin" ? "管理员" : user.jobRole ? JOB_ROLE_LABEL[user.jobRole] : "成员";
+  return user.role === "admin" ? "管理员" : user.jobRole ? JOB_ROLE_LABEL[user.jobRole] : "无岗位";
 }

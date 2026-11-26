@@ -83,8 +83,12 @@ func (s *postgresStore) handleListProjects(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	where, args := "", []any{}
-	// "我参与的":按项目成员过滤;管理员与 CTO 本来就看全部
-	if r.URL.Query().Get("view") == "mine" && !a.isAdmin() && !a.isCTO() {
+	if a.isJobless() {
+		// 无岗位的纯提交人:只看到自己提交的需求
+		where = `WHERE pr.created_by = $1`
+		args = append(args, a.ID)
+	} else if r.URL.Query().Get("view") == "mine" && !a.isAdmin() && !a.isCTO() {
+		// "我参与的":按项目成员过滤;管理员与 CTO 本来就看全部
 		where = `WHERE EXISTS (SELECT 1 FROM project_members m WHERE m.project_id = pr.id AND m.user_id = $1)`
 		args = append(args, a.ID)
 	}
@@ -135,7 +139,7 @@ func (s *postgresStore) handleGetProject(w http.ResponseWriter, r *http.Request)
 		writeErr(w, r, err)
 		return
 	}
-	if pr == nil {
+	if pr == nil || !joblessSees(a, pr) {
 		writeError(w, http.StatusNotFound, "项目不存在")
 		return
 	}
@@ -644,8 +648,21 @@ func (s *postgresStore) handleStageSkip(w http.ResponseWriter, r *http.Request) 
 }
 
 func (s *postgresStore) handleProjectEvents(w http.ResponseWriter, r *http.Request) {
-	if _, ok := currentActor(w, r, s); !ok {
+	a, ok := currentActor(w, r, s)
+	if !ok {
 		return
+	}
+	// 无岗位的纯提交人只能看自己项目的时间线
+	if a.isJobless() {
+		pr, err := getProject(r.Context(), s.db, pathID(r), false)
+		if err != nil {
+			writeErr(w, r, err)
+			return
+		}
+		if pr == nil || !joblessSees(a, pr) {
+			writeError(w, http.StatusNotFound, "项目不存在")
+			return
+		}
 	}
 	rows, err := s.db.QueryContext(r.Context(), `SELECT id, project_id, scope, target_id, actor_id, actor_name, kind, detail, created_at
 		FROM events WHERE project_id = $1 ORDER BY created_at DESC, id DESC LIMIT 300`, pathID(r))

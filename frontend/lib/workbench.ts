@@ -23,6 +23,8 @@ export interface WorkbenchModel {
   risky: ProjectView[];
   /** 右栏的项目:管理员与 CTO 看全部在途,其他人看自己参与(负责的排前) */
   mine: ProjectView[];
+  /** 我提交的需求:按项目 created_by(收集表提交时写入)过滤,含已结束的——提交人关心整条流程走到哪了 */
+  submitted: ProjectView[];
   /** 管理员 / CTO:看全局 */
   oversee: boolean;
   /** 四类合计 */
@@ -33,6 +35,11 @@ export interface WorkbenchModel {
 
 /** 这个项目是不是"我"负责(PM)的 */
 export const iAmPM = (userId: string, p: ProjectView) => p.can.isPM || p.members.some((m) => m.userId === userId && m.role === "pm");
+
+/** 提交人的改单窗口:自己提交的需求还没被处理(承接环节停在"等待初级分析"、项目在进行中)时可以自行修改。
+ * 判据只用现成字段,与服务端 followup.go 的 submitterMayEdit 同口径;窗口关闭后入口随之消失。 */
+export const canEditSubmission = (userId: string, p: ProjectView) =>
+  p.createdBy === userId && p.status === "active" && p.intake?.phase === "triage";
 
 export const isRisky = (p: ProjectView) =>
   p.status === "active" && (p.health !== "on_track" || p.stats.overdue > 0 || p.stats.blocked > 0);
@@ -95,6 +102,11 @@ export function computeWorkbench(me: { id: string; role: string; jobRole: string
         .filter((p) => p.status !== "cancelled" && ofMine(p))
         .sort((a, b) => Number(iAmPM(myId, b)) - Number(iAmPM(myId, a)) || b.updatedAt.localeCompare(a.updatedAt));
 
+  // 我提交的需求:最近有动静的排前面
+  const submitted = projects
+    .filter((p) => p.createdBy === myId)
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+
   const urgent =
     orderedReviews.filter((r) => r.waitingDays >= 3).length +
     openTasks.filter((t) => dueInfo(t.dueDate)?.overdue).length +
@@ -109,6 +121,7 @@ export function computeWorkbench(me: { id: string; role: string; jobRole: string
     tasks: openTasks,
     risky,
     mine,
+    submitted,
     oversee,
     total: orderedReviews.length + orderedAssign.length + orderedFinal.length + orderedAdvance.length + openTasks.length,
     urgent,

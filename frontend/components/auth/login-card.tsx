@@ -29,9 +29,17 @@ export function BrandMark({ className }: { className?: string }) {
   );
 }
 
+/** 登录后的去向:?next= 指定的站内路径(如从收集表门卡过来带着 next=/),缺省回工作台。
+ * 只接受站内路径且不以 // 开头,防止借登录页跳到外部站点。 */
+function nextPath(): string {
+  const v = new URLSearchParams(window.location.search).get("next") ?? "";
+  return v.startsWith("/") && !v.startsWith("//") ? v : "/work";
+}
+
 /**
  * 登录卡:只用在 /login 这一个地方(所有页面未登录都去那里)。
- * 登录或注册成功后一律进工作台——首次登录要先改密码的,进了工作台会立刻弹出改密框。
+ * 登录或注册成功后进工作台;带着 ?next= 进来的(收集表门卡送来的)回到指定页——
+ * 首次登录要先改密码的,进了工作台会立刻弹出改密框。
  */
 export function LoginCard() {
   const router = useRouter();
@@ -86,8 +94,8 @@ export function LoginCard() {
             : `欢迎回来，${data.user.displayName || data.user.username}`,
         );
       }
-      // 登录后的唯一去向:工作台
-      router.replace("/work");
+      // 登录后的去向:默认工作台;从收集表门卡过来的回到表单
+      router.replace(nextPath());
     } catch (e) {
       if (e instanceof Error && e.message !== "UNAUTHORIZED") {
         toast.error(mode === "register" ? "注册失败" : "登录失败", { description: e.message });
@@ -211,8 +219,9 @@ export function LoginScreen() {
   useLayoutEffect(() => {
     if (takeLoginReason() === "expired") toast.info("登录已过期，请重新登录");
     if (!getToken()) return;
+    const back = nextPath();
     void authFetch<SessionUser>("/api/auth/me")
-      .then(() => router.replace("/work"))
+      .then(() => router.replace(back))
       .catch(() => {
         /* 令牌已失效:留在登录页(401 的处理在 authFetch 里) */
       });

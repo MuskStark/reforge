@@ -1,13 +1,13 @@
 "use client";
 
-import { Suspense, lazy, useCallback, useLayoutEffect, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useLayoutEffect, useState } from "react";
 import Link from "next/link";
 import { LayoutGrid, LogIn } from "lucide-react";
 import { toast } from "sonner";
 import { FlowBuilder } from "@/components/flow-builder";
 import { FlowChartLoadBoundary } from "@/components/flow-chart-load-boundary";
 import type { ChartSource } from "@/components/flow-chart";
-import { getToken } from "@/lib/auth";
+import { authFetch, getToken, getUser, type SessionUser } from "@/lib/auth";
 import { stepIssues } from "@/lib/step-checks";
 import { emptyProcess } from "@/lib/types";
 
@@ -68,9 +68,41 @@ export default function Home() {
   const [chart, setChart] = useState<ChartSource | null>(null);
   const [FlowChartModal, setFlowChartModal] = useState(chartModalComponent);
   // 顶栏的入口:已登录的人回工作台,没登录的去登录页。
-  // 会话存在 sessionStorage 里,只有客户端读得到,所以挂在 layout effect 上(首帧两端一致是"登录")
+  // 收集表仅登录可填:没有会话就出示登录门卡。会话存在 sessionStorage 里,只有客户端读得到,
+  // 所以挂在 layout effect 上(首帧两端一致是"未登录";有令牌的人在绘制前就换成表单,不会闪门卡)
   const [signedIn, setSignedIn] = useState(false);
-  useLayoutEffect(() => setSignedIn(Boolean(getToken())), []);
+  const [me, setMe] = useState<SessionUser | null>(null);
+  useLayoutEffect(() => {
+    const has = Boolean(getToken());
+    setSignedIn(has);
+    if (has) setMe(getUser());
+  }, []);
+
+  // 本地令牌还要向后端确认没过期;过期则翻回门卡重新登录(authFetch 已顺手清掉本地会话)
+  useEffect(() => {
+    if (!signedIn) return;
+    let alive = true;
+    authFetch<SessionUser>("/api/auth/me", { cache: "no-store" })
+      .then((u) => {
+        if (alive) setMe(u);
+      })
+      .catch(() => {
+        if (alive) {
+          setSignedIn(false);
+          setMe(null);
+          toast.info("登录已过期，请重新登录");
+        }
+      });
+    return () => {
+      alive = false;
+    };
+  }, [signedIn]);
+
+  // 申报人默认填提交账号的显示名(留空才补,不覆盖手动改动)
+  useEffect(() => {
+    if (!me) return;
+    setDraft((d) => (d.applicant.trim() ? d : { ...d, applicant: me.displayName || me.username }));
+  }, [me]);
 
   // 第一次点进或聚焦表单就在后台预取流程图代码块;每个页面只发起一次(取不到也不随每次点击反复请求,
   // 用户点"预览"时自会重试),失败不打扰
@@ -134,30 +166,56 @@ export default function Home() {
               完成后一键生成流程图,提交至管理后台统一查看。
             </p>
           </div>
-          {/* 统计玻璃小牌 */}
-          <div className="flex shrink-0 gap-2">
-            <span className="lg-chip inline-flex items-baseline gap-1.5 px-3.5 py-1.5 text-[13px] text-[color:var(--ink-2)]">
-              步骤 <b className="font-data text-[17px] font-semibold leading-none text-neutral-900">{draft.steps.length}</b>
-            </span>
-            <span className="lg-chip inline-flex items-baseline gap-1.5 px-3.5 py-1.5 text-[13px] text-[color:var(--ink-2)]">
-              会签 <b className="font-data text-[17px] font-semibold leading-none text-[color:var(--amber-deep)]">{countersignCount}</b>
-            </span>
-            <span className="lg-chip hidden items-baseline gap-1.5 px-3.5 py-1.5 text-[13px] text-[color:var(--ink-2)] sm:inline-flex">
-              就绪 <b className="font-data text-[17px] font-semibold leading-none text-[color:var(--tint-deep)]">{readyCount}/{draft.steps.length}</b>
-            </span>
-          </div>
+          {/* 统计玻璃小牌(门卡态没有表单内容,不展示) */}
+          {signedIn && (
+            <div className="flex shrink-0 gap-2">
+              <span className="lg-chip inline-flex items-baseline gap-1.5 px-3.5 py-1.5 text-[13px] text-[color:var(--ink-2)]">
+                步骤 <b className="font-data text-[17px] font-semibold leading-none text-neutral-900">{draft.steps.length}</b>
+              </span>
+              <span className="lg-chip inline-flex items-baseline gap-1.5 px-3.5 py-1.5 text-[13px] text-[color:var(--ink-2)]">
+                会签 <b className="font-data text-[17px] font-semibold leading-none text-[color:var(--amber-deep)]">{countersignCount}</b>
+              </span>
+              <span className="lg-chip hidden items-baseline gap-1.5 px-3.5 py-1.5 text-[13px] text-[color:var(--ink-2)] sm:inline-flex">
+                就绪 <b className="font-data text-[17px] font-semibold leading-none text-[color:var(--tint-deep)]">{readyCount}/{draft.steps.length}</b>
+              </span>
+            </div>
+          )}
         </section>
 
-        <FlowBuilder
-          value={draft}
-          onChange={setDraft}
-          onSubmitted={() => {
-            toast.success("已提交", {
-              description: "流程已进入后台，管理员审核后可见",
-            });
-          }}
-          onPreviewChart={openChart}
-        />
+        {!signedIn ? (
+          /* 登录门:收集表仅登录可填。登录后带着 next=/ 回到这一页继续 */
+          <section className="glass-card mx-auto w-full max-w-[440px] p-8 text-center sm:p-10">
+            <span
+              className="mx-auto mb-4 grid h-14 w-14 place-items-center rounded-[16px] text-white"
+              style={{
+                background: "linear-gradient(180deg, #2b95ff, #0071e3)",
+                boxShadow:
+                  "inset 0 1px 0 rgba(255,255,255,0.4), inset 0 -10px 18px -12px rgba(0,45,110,0.5), 0 10px 26px -10px rgba(0,113,227,0.65)",
+              }}
+            >
+              <LogIn className="h-7 w-7" aria-hidden="true" />
+            </span>
+            <h2 className="text-[20px] font-bold tracking-[-0.02em] text-neutral-900">登录后填写收集表</h2>
+            <p className="mx-auto mt-2 max-w-[26em] text-sm leading-relaxed text-[color:var(--ink-2)]">
+              收集表仅对登录用户开放。提交后，可以在工作台的「我提交的需求」里随时查看这条流程推进到了哪一步。
+            </p>
+            <Link href="/login?next=/" prefetch={false} className="btn btn-primary mt-6 !h-[46px] w-full text-[16px]">
+              去登录
+            </Link>
+            <p className="mt-3 text-xs text-[color:var(--ink-3)]">没有账号请联系管理员开通。</p>
+          </section>
+        ) : (
+          <FlowBuilder
+            value={draft}
+            onChange={setDraft}
+            onSubmitted={() => {
+              toast.success("已提交", {
+                description: "已进入需求承接，可在工作台「我提交的需求」查看推进进度",
+              });
+            }}
+            onPreviewChart={openChart}
+          />
+        )}
       </div>
 
       {/* 代码块可能取不到(链路抖动,或页面打开后正好发了版):失败只在弹窗位置提示,表单内容不受影响 */}

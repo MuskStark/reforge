@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"database/sql"
 	"net/http"
 	"time"
 )
@@ -46,8 +48,35 @@ func loadProcess(w http.ResponseWriter, st *postgresStore, id string) (*Process,
 	return p, true
 }
 
+// intakeFreshState 拉改单窗口要用的项目状态:提交人、是否在进行中、
+// 承接是否还没开始(PMO 初析未完成且从未指派过 PM,即还在"等待初级分析")
+func intakeFreshState(ctx context.Context, q runner, projectID string) (createdBy string, active, notStarted bool, err error) {
+	var (
+		status   string
+		triageAt sql.NullTime
+		hasPM    bool
+	)
+	err = q.QueryRowContext(ctx, `SELECT COALESCE(created_by, ''), status, triage_done_at,
+		EXISTS (SELECT 1 FROM project_members m WHERE m.project_id = projects.id AND m.role = 'pm')
+		FROM projects WHERE id = $1`, projectID).Scan(&createdBy, &status, &triageAt, &hasPM)
+	if err != nil {
+		return
+	}
+	active = status == ProjActive
+	notStarted = !triageAt.Valid && !hasPM
+	return
+}
+
+// submitterMayEdit 提交人的改单窗口:项目是他提交的、仍在进行中,而且承接还没开始。
+// 初析完成或指派 PM 之后即锁定,之后的调整走项目里的流程定义修改
+func submitterMayEdit(ctx context.Context, q runner, projectID string, a *actor) bool {
+	by, active, notStarted, err := intakeFreshState(ctx, q, projectID)
+	return err == nil && active && notStarted && by != "" && by == a.ID
+}
+
 // registerDefinitionRoutes 编辑流程定义。
 // 流程定义是项目的"To-Be 工作副本":节点上的经办人(PM / BH / TH)、CTO 与管理员都能改(见 caps.editFlow);
+// 提交人另有一个改单窗口——自己提交的需求还没被处理(初析未完成、未指派 PM)时可自行修改;
 // 版本快照由关卡引擎在 G3 / G6 通过时自动留存。
 func registerDefinitionRoutes(mux *http.ServeMux, st *postgresStore) {
 	mux.HandleFunc("PUT /api/admin/processes/{id}", func(w http.ResponseWriter, r *http.Request) {
@@ -66,9 +95,12 @@ func registerDefinitionRoutes(mux *http.ServeMux, st *postgresStore) {
 			if c, err := loadCaps(r.Context(), st.db, projectID, a); err == nil {
 				allowed = c.editFlow()
 			}
+			if !allowed && submitterMayEdit(r.Context(), st.db, projectID, a) {
+				allowed = true
+			}
 		}
 		if !allowed {
-			writeError(w, http.StatusForbidden, "只有项目成员、CTO 或管理员可以修改流程")
+			writeError(w, http.StatusForbidden, "只有项目成员、CTO 或管理员可以修改流程；提交人可在需求开始处理前自行修改")
 			return
 		}
 		var body Process
@@ -97,6 +129,10 @@ func registerDefinitionRoutes(mux *http.ServeMux, st *postgresStore) {
 				"steps": len(body.Steps), "name": body.Name,
 			})
 			_, _ = st.db.ExecContext(r.Context(), `UPDATE projects SET updated_at = now() WHERE id = $1`, projectID)
+			// 承接还没开始时,把 As-Is 基线刷成最新定义:PMO 初析与自动诊断以改后的流程为准
+			if _, _, notStarted, err := intakeFreshState(r.Context(), st.db, projectID); err == nil && notStarted {
+				_ = snapshotVersionTx(r.Context(), st.db, projectID, &body, "as_is", "承接开始前修改后的流程定义（As-Is 基线随之刷新）", a.ID)
+			}
 		}
 		updated, _ := st.Get(p.ID)
 		writeJSON(w, http.StatusOK, updated)

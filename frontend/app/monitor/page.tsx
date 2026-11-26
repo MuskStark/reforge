@@ -14,7 +14,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Maximize2, Minimize2 } from "lucide-react";
-import { authFetch, getToken } from "@/lib/auth";
+import { authFetch, getToken, getUser } from "@/lib/auth";
 import type { Overview, OverviewCount, OverviewEvent, OverviewTrend } from "@/lib/types";
 
 const INK = "rgba(255,255,255,0.92)";
@@ -71,6 +71,12 @@ export default function MonitorPage() {
   useEffect(() => {
     if (!getToken()) {
       router.replace("/login");
+      return;
+    }
+    // 无岗位的纯提交人看不了全局统计(数据接口同样会拒绝),回工作台
+    const u = getUser();
+    if (u && u.role !== "admin" && !u.jobRole) {
+      router.replace("/work");
       return;
     }
     void load();

@@ -109,7 +109,7 @@ func travelPayload(name string) map[string]any {
 func TestIntakeDiagnosisThroughAPI(t *testing.T) {
 	e := newTestEnv(t)
 	admin := e.must("", "POST", "/api/auth/register", map[string]any{"username": "rootadmin", "password": "pass1234"})["token"].(string)
-	if code, _ := e.req("", "POST", "/api/processes", travelPayload("员工差旅报销流程")); code != 201 {
+	if code, _ := e.req(admin, "POST", "/api/processes", travelPayload("员工差旅报销流程")); code != 201 {
 		t.Fatalf("提交流程期望 201,得到 %d", code)
 	}
 	pid := e.projectByName(admin, "员工差旅报销流程")

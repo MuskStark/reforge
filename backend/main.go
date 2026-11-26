@@ -41,12 +41,22 @@ func newMux(st *postgresStore) *http.ServeMux {
 	mux.HandleFunc("GET /api/admin/users", handleListUsers(st))
 	mux.HandleFunc("POST /api/admin/users", handleAdminCreateUser(st))
 	mux.HandleFunc("DELETE /api/admin/users/{id}", handleAdminDeleteUser(st))
-	// 公开读收紧为登录可读(数据查看权限);匿名仅保留提交与健康检查
+	// 公开读收紧为登录可读(数据查看权限);匿名仅保留健康检查与日志上报。
+	// 无岗位的纯提交人只看到自己提交的流程
 	mux.HandleFunc("GET /api/processes", func(w http.ResponseWriter, r *http.Request) {
-		if currentUser(w, r) == nil {
+		a, ok := currentActor(w, r, st)
+		if !ok {
 			return
 		}
-		list, err := st.List()
+		var (
+			list []*Process
+			err  error
+		)
+		if a.isJobless() {
+			list, err = st.ListForSubmitter(a.ID)
+		} else {
+			list, err = st.List()
+		}
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "读取失败: "+err.Error())
 			return
@@ -54,7 +64,12 @@ func newMux(st *postgresStore) *http.ServeMux {
 		writeJSON(w, http.StatusOK, list)
 	})
 	mux.HandleFunc("POST /api/processes", func(w http.ResponseWriter, r *http.Request) {
-		// F02:匿名提交固定窗口限流(每次尝试计数,20 次/分钟)
+		// 收集表仅登录可填:提交人写进项目的 created_by,登录后可在工作台查看自己需求的推进
+		a, ok := currentActor(w, r, st)
+		if !ok {
+			return
+		}
+		// F02:提交固定窗口限流(每次尝试计数,20 次/分钟)
 		if !submitWindow.allowHit("submit:" + clientIP(r)) {
 			writeError(w, http.StatusTooManyRequests, "提交过于频繁,请稍后再试")
 			return
@@ -68,6 +83,10 @@ func newMux(st *postgresStore) *http.ServeMux {
 		p.CreatedAt = time.Now()
 		p.UpdatedAt = p.CreatedAt
 		sanitize(&p)
+		if p.Applicant == "" {
+			// 申报人留空时记提交账号的显示名;字段仍可改,支持替别人代填
+			p.Applicant = a.name()
+		}
 		if msg := validateProcess(&p); msg != "" {
 			writeError(w, http.StatusBadRequest, msg)
 			return
@@ -84,7 +103,7 @@ func newMux(st *postgresStore) *http.ServeMux {
 		if tpl, terr := loadStageTemplates(r.Context(), st.db); terr == nil && len(tpl) > 0 && tpl[0].Key == keyIntake {
 			waiting = "新流程「" + created.Name + "」已提交，等待初级分析与指派 PM"
 		}
-		if pid, perr := st.CreateProjectForProcess(r.Context(), created); perr != nil {
+		if pid, perr := st.CreateProjectForProcess(r.Context(), created, a); perr != nil {
 			requestLogger(r).Error("自动立项失败(可由启动时的补建兜底)", "process", created.ID, "err", perr)
 		} else {
 			// 需求承接:新流程知会 PMO。管理员始终知会(系统里还没有 PMO 岗位时由管理员兜底)
@@ -95,12 +114,25 @@ func newMux(st *postgresStore) *http.ServeMux {
 				_ = notifyManyTx(r.Context(), st.db, userIDs(admins), "project_created", pid, "", "", waiting, "project_created:"+pid)
 			}
 		}
-		requestLogger(r).Info("新流程提交", "process", created.ID, "steps", len(created.Steps))
+		requestLogger(r).Info("新流程提交", "process", created.ID, "steps", len(created.Steps), "user", a.name())
 		writeJSON(w, http.StatusCreated, created)
 	})
 	mux.HandleFunc("GET /api/processes/{id}", func(w http.ResponseWriter, r *http.Request) {
-		if currentUser(w, r) == nil {
+		a, ok := currentActor(w, r, st)
+		if !ok {
 			return
+		}
+		// 无岗位的纯提交人只能读自己的提交
+		if a.isJobless() {
+			by, err := submitterOfProcess(r.Context(), st.db, r.PathValue("id"))
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "读取失败: "+err.Error())
+				return
+			}
+			if by != a.ID {
+				writeError(w, http.StatusNotFound, "流程不存在")
+				return
+			}
 		}
 		p, err := st.Get(r.PathValue("id"))
 		if err != nil {

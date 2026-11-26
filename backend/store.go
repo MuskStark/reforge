@@ -20,6 +20,7 @@ import (
 // store 流程存储接口（JSON 文件 / PostgreSQL 两种实现共用）
 type store interface {
 	List() ([]*Process, error)
+	ListForSubmitter(userID string) ([]*Process, error)
 	Get(id string) (*Process, error)
 	Create(p *Process) (*Process, error)
 	Delete(id string) (bool, error)
@@ -147,6 +148,17 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN NOT NULL
 	} else if n > 0 {
 		slog.Info("已为存量流程建立流程项目", "count", n)
 	}
+	// 存量归属回填(幂等):收集表改为仅登录可填之前提交的流程没有账号关联,
+	// 按申报人姓名 = 显示名或账号名尽力匹配(与大屏部门统计同一口径),让老提交人也能在工作台看到自己的需求
+	if _, err := db.ExecContext(ctx, `
+UPDATE projects pr SET created_by = u.id
+FROM processes p, users u
+WHERE pr.process_id = p.id AND pr.created_by = ''
+  AND COALESCE(p.applicant, '') <> ''
+  AND (u.display_name = p.applicant OR u.username = p.applicant)`); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("项目提交人回填失败: %w", err)
+	}
 	if err := s.SeedSystemsFromProcesses(); err != nil {
 		db.Close()
 		return nil, err
@@ -168,10 +180,10 @@ type postgresStore struct {
 // userCols 用户表的查询列(与 User 字段扫描顺序一致)
 const userCols = `SELECT id, username, password_hash, role, display_name, department, job_role, created_at, must_change_password FROM users`
 
-// defaultJobRole 岗位为空或非法时回落为 BH(业务经办)
+// defaultJobRole 岗位为空即无岗位(纯提交人);非法值同样按无岗位处理
 func defaultJobRole(r string) string {
 	if !validJobRoles[r] {
-		return RoleHandler
+		return RoleNone
 	}
 	return r
 }
@@ -202,7 +214,17 @@ func scanProcess(row interface{ Scan(...any) error }) (*Process, error) {
 }
 
 func (s *postgresStore) List() ([]*Process, error) {
-	rows, err := s.db.Query("SELECT " + listCols + " FROM processes p LEFT JOIN users u ON u.id = p.assignee_id ORDER BY p.created_at DESC")
+	return s.listProcesses("")
+}
+
+// ListForSubmitter 提交人视角的流程列表:只返回这个人提交过(自动立项归属到他)的流程。
+// 无岗位用户只见自己的提交,走这里
+func (s *postgresStore) ListForSubmitter(userID string) ([]*Process, error) {
+	return s.listProcesses("WHERE EXISTS (SELECT 1 FROM projects pr WHERE pr.process_id = p.id AND pr.created_by = $1)", userID)
+}
+
+func (s *postgresStore) listProcesses(where string, args ...any) ([]*Process, error) {
+	rows, err := s.db.Query("SELECT "+listCols+" FROM processes p LEFT JOIN users u ON u.id = p.assignee_id "+where+" ORDER BY p.created_at DESC", args...)
 	if err != nil {
 		return nil, err
 	}

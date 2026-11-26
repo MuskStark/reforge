@@ -3,21 +3,23 @@
 /**
  * 工作台(登录后的首页):只回答"我现在要做什么"。
  * 主列是一张按动作分组的清单——待我评审 / 待我初析与指派 / 待我终审 / 等我推进 / 我的任务,不同的人看到不同的组;
- * 右栏是我的项目与需要关注的。有内容才成卡,空的收成一行,各组全空显示「都处理完了」。
+ * 右栏是我提交的需求(有才显示)、我的项目与需要关注的。有内容才成卡,空的收成一行,各组全空显示「都处理完了」。
  * 分组的口径与侧栏上的待办数字共用 lib/workbench.ts。
  */
 
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import type { LucideIcon } from "lucide-react";
+import { toast } from "sonner";
 import { Check, ChevronDown, ChevronRight, ClipboardCheck, FileSignature, Hourglass, Plus, Presentation, Route, Stamp, TriangleAlert, UserPlus, Waypoints, Workflow, Users } from "lucide-react";
 import { AppShell, PageHead, StateLine, announceTodo } from "@/components/shell/app-shell";
 import { MembersDialog } from "@/components/projects/members-dialog";
+import { EditProcessModal } from "@/components/followup/edit-process-modal";
 import { PendingOnBadge } from "@/components/projects/stage-rail";
-import { computeWorkbench, riskWhy } from "@/lib/workbench";
+import { computeWorkbench, canEditSubmission, riskWhy } from "@/lib/workbench";
 import { inIntakeStage, intakeHref, isIntakeReview } from "@/lib/intake";
 import { authFetch, type SessionUser } from "@/lib/auth";
-import type { PendingReview, ProjectView, UserDir, WorkItem } from "@/lib/types";
+import type { FlowProcess, PendingReview, ProjectView, UserDir, WorkItem } from "@/lib/types";
 import { HEALTH_LABEL, ITEM_STATUS_LABEL, MODE_LABEL, PENDING_ON_LABEL, PRIORITY_LABEL, STATUS_LABEL, dueInfo, fmtDate, pct, priorityClass, statusClass } from "@/lib/labels";
 import { cn } from "@/lib/utils";
 
@@ -73,12 +75,16 @@ function WorkbenchBody({ me }: { me: SessionUser }) {
   const [users, setUsers] = useState<UserDir[]>([]);
   const [assignOf, setAssignOf] = useState<ProjectView | null>(null);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  /** 正在修改的自己提交的流程(未被处理时可以改) */
+  const [editing, setEditing] = useState<FlowProcess | null>(null);
 
   const isAdmin = me.role === "admin";
   const isPM = me.jobRole === "pm";
   const isPMO = me.jobRole === "viewer";
 
   const canAssign = isAdmin || isPMO;
+  // 无岗位的纯提交人:右栏只有「我提交的需求」,不参与项目
+  const jobless = me.role !== "admin" && !me.jobRole;
 
   const load = useCallback(async () => {
     try {
@@ -332,7 +338,7 @@ function WorkbenchBody({ me }: { me: SessionUser }) {
           { icon: Plus, label: "提交流程", href: "/" },
         ];
 
-  const projRow = (p: ProjectView) => {
+  const projRow = (p: ProjectView, trailing?: React.ReactNode) => {
     const progress = pct(p.stats.done, p.stats.total);
     const tag =
       p.status !== "active" ? (
@@ -347,6 +353,7 @@ function WorkbenchBody({ me }: { me: SessionUser }) {
         <span className="proj-top">
           <span className="proj-name">{p.name}</span>
           {tag}
+          {trailing}
         </span>
         <span className="proj-bottom">
           <span className="proj-stage">
@@ -362,6 +369,16 @@ function WorkbenchBody({ me }: { me: SessionUser }) {
         </span>
       </Link>
     );
+  };
+
+  // 打开自己未处理需求的修改弹层:先把流程定义读出来
+  const openEditSubmission = async (p: ProjectView) => {
+    try {
+      const proc = await authFetch<FlowProcess>(`/api/processes/${p.processId}`, { cache: "no-store" });
+      setEditing(proc);
+    } catch {
+      toast.error("读取流程失败", { description: "请稍后重试" });
+    }
   };
 
   return (
@@ -429,20 +446,55 @@ function WorkbenchBody({ me }: { me: SessionUser }) {
         </div>
 
         <aside className="min-w-0 space-y-3.5">
-          <section className="glass-card side-card">
-            <header className="side-head">
-              <h2>{model.oversee ? "在途项目" : "我参与的项目"}</h2>
-              <Link href="/projects" prefetch={false} className="side-more">
-                查看全部
-                <ChevronRight aria-hidden="true" />
-              </Link>
-            </header>
-            {model.mine.length === 0 ? (
-              <p className="side-empty">{model.oversee ? "当前没有在途项目。" : "你还没有参与任何项目。被加入项目后，会出现在这里。"}</p>
-            ) : (
-              model.mine.slice(0, 5).map(projRow)
-            )}
-          </section>
+          {model.submitted.length > 0 && (
+            <section className="glass-card side-card">
+              <header className="side-head">
+                <h2>我提交的需求</h2>
+                <Link href="/projects?scope=submitted" prefetch={false} className="side-more">
+                  查看全部
+                  <ChevronRight aria-hidden="true" />
+                </Link>
+              </header>
+              {model.submitted.slice(0, 5).map((p) =>
+                projRow(
+                  p,
+                  canEditSubmission(me.id, p) ? (
+                    <button
+                      key="edit-submission"
+                      type="button"
+                      className="btn-tint"
+                      title="需求还没被处理，可以修改；开始处理后锁定"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        void openEditSubmission(p);
+                      }}
+                    >
+                      修改
+                    </button>
+                  ) : undefined,
+                ),
+              )}
+            </section>
+          )}
+
+          {/* 纯提交人不会被加进项目,这张卡恒空,不占地方 */}
+          {!jobless && (
+            <section className="glass-card side-card">
+              <header className="side-head">
+                <h2>{model.oversee ? "在途项目" : "我参与的项目"}</h2>
+                <Link href="/projects" prefetch={false} className="side-more">
+                  查看全部
+                  <ChevronRight aria-hidden="true" />
+                </Link>
+              </header>
+              {model.mine.length === 0 ? (
+                <p className="side-empty">{model.oversee ? "当前没有在途项目。" : "你还没有参与任何项目。被加入项目后，会出现在这里。"}</p>
+              ) : (
+                model.mine.slice(0, 5).map((p) => projRow(p))
+              )}
+            </section>
+          )}
 
           {showRisk && (
             <section className="glass-card side-card">
@@ -468,6 +520,18 @@ function WorkbenchBody({ me }: { me: SessionUser }) {
       </div>
 
       {assignOf && <MembersDialog project={assignOf} users={users} onClose={() => setAssignOf(null)} onSaved={() => void refreshOne()} />}
+
+      {/* 修改自己未被处理的需求(改单窗口);保存后刷新列表与角标 */}
+      {editing && (
+        <EditProcessModal
+          process={editing}
+          onClose={() => setEditing(null)}
+          onSaved={() => {
+            setEditing(null);
+            void load();
+          }}
+        />
+      )}
     </>
   );
 }

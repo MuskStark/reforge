@@ -29,10 +29,16 @@ func (s *postgresStore) UpdateUserProfile(ctx context.Context, id, displayName, 
 	return err
 }
 
-// handleUserDirectory GET /api/users —— 登录可见的用户目录(指派任务、选成员时用;不含系统角色与口令)
+// handleUserDirectory GET /api/users —— 登录可见的用户目录(指派任务、选成员时用;不含系统角色与口令)。
+// 无岗位的纯提交人没有使用场景,也不该看到全员名单
 func handleUserDirectory(st *postgresStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if currentUser(w, r) == nil {
+		a, ok := currentActor(w, r, st)
+		if !ok {
+			return
+		}
+		if a.isJobless() {
+			writeError(w, http.StatusForbidden, "无岗位用户不能查看用户目录")
 			return
 		}
 		users, err := st.ListUsers()
@@ -85,7 +91,7 @@ func handleAdminUpdateUser(st *postgresStore) http.HandlerFunc {
 		if body.JobRole != nil {
 			job = strings.TrimSpace(*body.JobRole)
 			if !validJobRoles[job] {
-				writeError(w, http.StatusBadRequest, "岗位无效（应为 PMO、CTO、PM、BH 或 TH）")
+				writeError(w, http.StatusBadRequest, "岗位无效（应为无岗位、PMO、CTO、PM、BH 或 TH）")
 				return
 			}
 		}

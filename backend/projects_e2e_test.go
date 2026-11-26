@@ -302,8 +302,8 @@ func TestProjectLifecycle(t *testing.T) {
 	// 未登录一律 401
 	e.fail("", "GET", "/api/projects", nil, 401, "未登录")
 
-	// ---- 提交流程即自动立项:等待 PMO 初级分析 ----
-	code, _ := e.req("", "POST", "/api/processes", processPayload("采购申请审批流程"))
+	// ---- 提交流程即自动立项:等待 PMO 初级分析 ----(提交人用无关普通成员,顺带覆盖 member 提交)
+	code, _ := e.req(other, "POST", "/api/processes", processPayload("采购申请审批流程"))
 	if code != 201 {
 		t.Fatalf("提交流程期望 201,得到 %d", code)
 	}
@@ -701,7 +701,7 @@ func TestProjectLifecycle(t *testing.T) {
 	e.fail(pm, "POST", "/api/projects/"+pid+"/updates", map[string]any{"progress": "x", "health": "on_track"}, 400, "进行中")
 
 	// ---- 第二个项目:搁置 / 恢复 / 取消,以及定时任务(逾期、评审积压) ----
-	e.must("", "POST", "/api/processes", processPayload("报销流程"))
+	e.must(other, "POST", "/api/processes", processPayload("报销流程"))
 	_, projects = e.list(admin, "/api/projects")
 	var pid2 string
 	for _, raw := range projects {

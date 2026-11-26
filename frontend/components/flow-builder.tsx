@@ -2,6 +2,7 @@
 
 import { AnimatePresence } from "motion/react";
 import { useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { AlertCircle, CheckCircle2, Plus, RotateCcw, Save, User, Waypoints } from "lucide-react";
 import { toast } from "sonner";
 import { Input } from "@/components/ui/input";
@@ -15,7 +16,7 @@ import { issueAnchorId, focusAnchor } from "@/lib/form-focus";
 import { StepCard } from "@/components/step-card";
 import type { FlowProcess, FlowStep } from "@/lib/types";
 import { emptyProcess, emptyStep, normalizeParty } from "@/lib/types";
-import { adminFetch } from "@/lib/auth";
+import { adminFetch, clearSession, getToken } from "@/lib/auth";
 import { newRequestId, reportApiFailure } from "@/lib/client-logger";
 
 /** 流程名称输入框的锚点 id */
@@ -23,6 +24,9 @@ const BASE_ANCHOR = "flow-name";
 
 /** 请求根本没发出去(断网、后端没启动),区别于后端返回的业务错误 */
 class NetworkError extends Error {}
+
+/** 提交时发现会话过期:已在提交处提示并送去登录页,不要再说成"提交被拒绝" */
+class SessionExpiredError extends Error {}
 
 /**
  * 汇总整张表单还差的全部必填项(与后端校验规则一致),按填写顺序分组。
@@ -81,6 +85,7 @@ export function FlowBuilder({
   existingId?: string;
 }) {
   const { name, description, applicant, steps } = value;
+  const router = useRouter();
   // 编辑态:按钮写「保存修改」,也不给「重置」(会把已加载的流程清空)和「一键生成流程图」(编辑弹层里没有预览)
   const editing = Boolean(existingId);
   const [submitting, setSubmitting] = useState(false);
@@ -161,21 +166,32 @@ export function FlowBuilder({
         });
       } else {
         const requestId = newRequestId();
+        // 收集表仅登录可填:提交要带上会话令牌,后端把提交人记进项目的 created_by
+        const headers: Record<string, string> = { "Content-Type": "application/json", "X-Request-Id": requestId };
+        const token = getToken();
+        if (token) headers.Authorization = `Bearer ${token}`;
         let res: Response;
         try {
           res = await fetch("/api/processes", {
             method: "POST",
-            headers: { "Content-Type": "application/json", "X-Request-Id": requestId },
+            headers,
             body: JSON.stringify(payload),
           });
         } catch {
-          // 公开的收集表,提交的人多半没有账号;请求没发出去,后端自己记不到,所以报一条浏览器日志
+          // 请求没发出去(断网、后端没启动),后端自己记不到,所以报一条浏览器日志
           reportApiFailure({ method: "POST", path: "/api/processes", status: 0, requestId, message: "提交时没有连上服务器" });
           throw new NetworkError();
         }
         const d = (await res.json().catch(() => null)) as (FlowProcess & { error?: string }) | null;
         // 回来的不是后端的 JSON(网关、隧道的错误页):同样只有浏览器这边知道
         if (!d) reportApiFailure({ method: "POST", path: "/api/processes", status: res.status, requestId, message: `服务返回了 ${res.status}` });
+        if (res.status === 401) {
+          // 填写途中会话过期:清掉本地会话送去登录页,带着 next=/ 回来继续填这张表
+          clearSession();
+          toast.error("登录已过期", { description: "请重新登录后继续填写" });
+          router.replace("/login?next=/");
+          throw new SessionExpiredError();
+        }
         // 后端校验没过、提交太频繁等:原样显示后端给的说明,不要说成网络异常
         if (!res.ok) throw new Error(d?.error ?? `服务返回了 ${res.status}，请稍后重试`);
         if (!d) throw new Error("服务返回了无法识别的内容，请稍后重试");
@@ -186,11 +202,12 @@ export function FlowBuilder({
       });
       setAttempted(false);
       onSubmitted();
-      if (!existingId) onChange(emptyProcess());
+      // 重置表单准备下一张;申报人保留(同一人往往连续提交,页面也会用登录账号兜底)
+      if (!existingId) onChange({ ...emptyProcess(), applicant });
     } catch (e) {
       if (e instanceof NetworkError) {
         toast.error("网络异常", { description: "无法连接后端服务，请确认 Go 服务已启动" });
-      } else {
+      } else if (!(e instanceof SessionExpiredError)) {
         toast.error(existingId ? "保存被拒绝" : "提交被拒绝", {
           description: e instanceof Error ? e.message : "请稍后重试",
         });

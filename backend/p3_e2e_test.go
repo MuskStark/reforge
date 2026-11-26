@@ -68,7 +68,7 @@ func TestStageTemplateConfig(t *testing.T) {
 	e.fail(cto1, "PUT", "/api/admin/stage-templates", map[string]any{"templates": tpl}, 403, "管理员")
 
 	// 改模板之前先立一个项目:它应当一直按内置模板走
-	e.must("", "POST", "/api/processes", processPayload("旧流程"))
+	e.must(admin, "POST", "/api/processes", processPayload("旧流程"))
 	pidA := e.projectByName(admin, "旧流程")
 	e.must(admin, "PUT", "/api/projects/"+pidA+"/members", map[string]any{"userId": pmID, "role": "pm", "action": "add"})
 	e.must(admin, "PUT", "/api/projects/"+pidA+"/members", map[string]any{"userId": h1ID, "role": "handler", "action": "add"})
@@ -144,7 +144,7 @@ func TestStageTemplateConfig(t *testing.T) {
 	}
 
 	// 改模板之后提交的流程按新模板立项
-	e.must("", "POST", "/api/processes", processPayload("新流程"))
+	e.must(admin, "POST", "/api/processes", processPayload("新流程"))
 	pidB := e.projectByName(admin, "新流程")
 	e.must(admin, "PUT", "/api/projects/"+pidB+"/members", map[string]any{"userId": pmID, "role": "pm", "action": "add"})
 	e.must(admin, "PUT", "/api/projects/"+pidB+"/members", map[string]any{"userId": h1ID, "role": "handler", "action": "add"})
@@ -243,7 +243,7 @@ func TestStageTemplateConfig(t *testing.T) {
 	if err != nil || len(again) != 8 || again[1].Name != "需求评审" || again[0].Mode != ModeAll {
 		t.Fatalf("重启后模板应保持: %v %+v", err, again)
 	}
-	e.must("", "POST", "/api/processes", processPayload("重启后的流程"))
+	e.must(admin, "POST", "/api/processes", processPayload("重启后的流程"))
 	pidC := e.projectByName(admin, "重启后的流程")
 	if len(dig(e.project(admin, pidC), "stages").([]any)) != 8 {
 		t.Fatal("重启后新建的项目应按保存的模板立项")
@@ -352,7 +352,7 @@ func TestNotifyChannelsDelivery(t *testing.T) {
 	e.fail(admin, "PATCH", path+"/nope", map[string]any{"name": "x"}, 404, "不存在")
 
 	// 提交流程 → 管理员的"新流程"通知被转发
-	e.must("", "POST", "/api/processes", processPayload("报销流程"))
+	e.must(admin, "POST", "/api/processes", processPayload("报销流程"))
 	pid := e.projectByName(admin, "报销流程")
 	deliver()
 	if got := inbox(); len(got) != 2 || !strings.Contains(got[1], "新流程「报销流程」已提交") {
@@ -521,7 +521,7 @@ func TestExportAndDeleteProcess(t *testing.T) {
 	}
 
 	// 立项并推进一段
-	e.must("", "POST", "/api/processes", processPayload("采购流程"))
+	e.must(admin, "POST", "/api/processes", processPayload("采购流程"))
 	pid := e.projectByName(admin, "采购流程")
 	var procID string
 	_ = e.st.db.QueryRow(`SELECT process_id FROM projects WHERE id = $1`, pid).Scan(&procID)
@@ -717,8 +717,8 @@ func TestExportAndDeleteProcess(t *testing.T) {
 	}
 
 	// 按所选项目导出(看板上筛出哪些就导哪些),顺序与传入一致
-	e.must("", "POST", "/api/processes", processPayload("另一个流程"))
-	e.must("", "POST", "/api/processes", processPayload("又一个流程"))
+	e.must(admin, "POST", "/api/processes", processPayload("另一个流程"))
+	e.must(admin, "POST", "/api/processes", processPayload("又一个流程"))
 	a1 := e.projectByName(admin, "另一个流程")
 	a2 := e.projectByName(admin, "又一个流程")
 	code, _, body = e.postRaw(pm, "/api/projects/export.csv", map[string]any{"ids": []string{a2, a1}})
@@ -729,9 +729,9 @@ func TestExportAndDeleteProcess(t *testing.T) {
 	e.fail(pm, "POST", "/api/projects/export.csv", map[string]any{"ids": []string{}}, 400, "请选择")
 	e.fail("", "POST", "/api/projects/export.csv", map[string]any{"ids": []string{a1}}, 401, "未登录")
 
-	// 防公式注入:流程名与申报人是匿名提交的自由文本,以 = + - @ 开头时加单引号前缀
+	// 防公式注入:流程名与申报人是提交人填写的自由文本,以 = + - @ 开头时加单引号前缀
 	const evilName = `=HYPERLINK("http://example.invalid","点我")`
-	e.must("", "POST", "/api/processes", processPayload(evilName))
+	e.must(admin, "POST", "/api/processes", processPayload(evilName))
 	eviID := e.projectByName(admin, evilName)
 	var evilProc string
 	if err := e.st.db.QueryRow(`SELECT process_id FROM projects WHERE id = $1`, eviID).Scan(&evilProc); err != nil {

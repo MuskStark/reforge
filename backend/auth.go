@@ -377,11 +377,9 @@ func handleAdminCreateUser(st store) http.HandlerFunc {
 			writeError(w, http.StatusBadRequest, "角色无效（应为 admin 或 member）")
 			return
 		}
-		if body.JobRole == "" {
-			body.JobRole = RoleHandler
-		}
+		// 岗位缺省即无岗位:新账号默认是纯提交人,要参与项目再由管理员授予岗位
 		if !validJobRoles[body.JobRole] {
-			writeError(w, http.StatusBadRequest, "岗位无效（应为 PMO、CTO、PM、BH 或 TH）")
+			writeError(w, http.StatusBadRequest, "岗位无效（应为无岗位、PMO、CTO、PM、BH 或 TH）")
 			return
 		}
 		if msg := validateCredential(body.Username, body.Password); msg != "" {

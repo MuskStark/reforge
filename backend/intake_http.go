@@ -24,13 +24,13 @@ func registerIntakeRoutes(mux *http.ServeMux, st *postgresStore) {
 	mux.HandleFunc("PUT /api/reviews/{id}/assessment", st.handleSaveAssessment)
 }
 
-// intakeViewOf 读出承接的完整视图;项目不存在或没有承接阶段时返回 nil
+// intakeViewOf 读出承接的完整视图;项目不存在、没有承接阶段或对无岗位用户不可见时返回 nil
 func (s *postgresStore) intakeViewOf(ctx context.Context, a *actor, id string) (*IntakeView, error) {
 	pr, err := getProject(ctx, s.db, id, false)
 	if err != nil {
 		return nil, err
 	}
-	if pr == nil {
+	if pr == nil || (a != nil && !joblessSees(a, pr)) {
 		return nil, nil
 	}
 	st, ok := pr.intakeStage()

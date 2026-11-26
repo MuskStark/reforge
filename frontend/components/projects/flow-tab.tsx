@@ -14,7 +14,17 @@ import { FlowGraph, type ChartSource } from "@/components/flow-graph";
 import { ChartEditorModal } from "@/components/followup/chart-editor";
 import { EditProcessModal } from "@/components/followup/edit-process-modal";
 import type { DetailCtx, FlowEditor } from "@/components/projects/project-detail";
+import { canEditSubmission } from "@/lib/workbench";
 import { cn } from "@/lib/utils";
+
+/** 最新的 As-Is 版本:承接开始前提交人/管理员改过流程的话,基线会被刷新成新的 as_is 版本 */
+function latestAsIs(versions: ProcessVersion[]): ProcessVersion | null {
+  let best: ProcessVersion | null = null;
+  for (const v of versions) {
+    if (v.kind === "as_is" && (!best || v.version > best.version)) best = v;
+  }
+  return best;
+}
 
 const KIND_LABEL: Record<string, string> = { as_is: "As-Is", to_be: "To-Be 基线", published: "已发布" };
 
@@ -56,7 +66,7 @@ export function FlowTab({ ctx, autoEdit = null, onAutoEditDone }: { ctx: DetailC
       const list = vs ?? [];
       setVersions(list);
       setCurrent(cmp.current);
-      const pick = (list.find((v) => v.kind === "as_is") ?? list[0])?.version;
+      const pick = (latestAsIs(list) ?? list[0])?.version;
       if (pick) {
         setView(await authFetch<ProcessVersion>(`/api/projects/${project.id}/versions/${pick}`, { cache: "no-store" }));
       } else {
@@ -79,9 +89,11 @@ export function FlowTab({ ctx, autoEdit = null, onAutoEditDone }: { ctx: DetailC
     }
   };
 
-  const asIs = versions.find((v) => v.kind === "as_is") ?? null;
-  // 节点上的经办人最清楚流程实际怎么走:项目里的 PM / BH / TH、CTO 与管理员都能改(服务端逐请求校验),项目结束后锁定
-  const canEdit = project.can.editFlow && project.status !== "done" && project.status !== "cancelled";
+  const asIs = latestAsIs(versions);
+  // 节点上的经办人最清楚流程实际怎么走:项目里的 PM / BH / TH、CTO 与管理员都能改(服务端逐请求校验),项目结束后锁定;
+  // 提交人另有改单窗口——需求还没被处理时可自行修改
+  const canEdit =
+    (project.can.editFlow || canEditSubmission(ctx.me.id, project)) && project.status !== "done" && project.status !== "cancelled";
   const leftSource: ChartSource | null = view?.steps ? { name: `${KIND_LABEL[view.kind] ?? ""} · v${view.version}`, steps: view.steps } : null;
   const rightSource: ChartSource | null = process ? { name: "当前（To-Be 工作副本）", steps: process.steps } : null;
 
