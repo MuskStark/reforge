@@ -239,6 +239,14 @@ export function ItemDialog({
       />
 
       <div className="mt-5 grid gap-4">
+        {/* 被指派人的操作说明:做完怎么标、卡住怎么办 */}
+        {!isNew && item && item.assigneeId === me.id && editable && item.status !== "done" && item.status !== "cancelled" && (
+          <p className="rounded-xl bg-[color:var(--tint-soft)] px-3 py-2 text-[12.5px] leading-relaxed text-[color:var(--tint-deep)]">
+            这条工作项分给了你：做完把状态改为「已完成」；卡住时选「已阻塞」并写明卡在哪里，PM 会看到。
+            {item.required && " 它是必交付物——未完成时 PM 无法提交本阶段的评审。"}
+          </p>
+        )}
+
         {/* 类型 + 标题 */}
         <div className="flex items-center gap-2">
           <select

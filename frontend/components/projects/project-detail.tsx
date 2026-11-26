@@ -18,11 +18,14 @@ import { canEditSubmission } from "@/lib/workbench";
 import { acceptStageOf, fmtDateTime, HEALTH_LABEL, healthClass, MODE_LABEL, OVERALL, PRIORITY_LABEL, priorityClass, STATUS_LABEL, statusClass } from "@/lib/labels";
 import { OVERALL_MODE_LABEL, countersignMode } from "@/lib/step-checks";
 import { AppShell, PageHead, StateLine } from "@/components/shell/app-shell";
+import { ActionGuideCard } from "@/components/projects/action-guide";
+import { guideFor } from "@/lib/action-guide";
 import { MemberRow, StageRail, PendingOnBadge } from "@/components/projects/stage-rail";
 import { MembersDialog, canAssignMembers } from "@/components/projects/members-dialog";
 import { PlanTab } from "@/components/projects/plan-tab";
 import { ReviewTab } from "@/components/projects/review-tab";
 import { FlowTab } from "@/components/projects/flow-tab";
+import { EditProcessModal } from "@/components/followup/edit-process-modal";
 import { ActivityTab } from "@/components/projects/activity-tab";
 import { IntakeTab } from "@/components/projects/intake-tab";
 import { awaitingFinal, inIntakeStage, myIntakeAction, stageStatusText } from "@/lib/intake";
@@ -88,6 +91,8 @@ function ProjectDetailBody({ id, me }: { id: string; me: SessionUser }) {
   const [statusAsk, setStatusAsk] = useState<"on_hold" | "active" | "done" | "cancelled" | null>(null);
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
+  /** 提交人(无岗位)从行动卡点「修改需求」打开的改单弹层 */
+  const [editSubmission, setEditSubmission] = useState<FlowProcess | null>(null);
 
   // 进入时读取地址栏里的标签与要定位的工作项(可从通知、工作台直达)
   useEffect(() => {
@@ -194,6 +199,9 @@ function ProjectDetailBody({ id, me }: { id: string; me: SessionUser }) {
   const canEditFlow = (project.can.editFlow || canEditSubmission(me.id, project)) && !ended && !!process;
   // 项目正停在承接阶段:这一段的指派、提交、评估、终审都在「承接」标签里,页头按钮直接带过去
   const atIntake = inIntakeStage(project);
+  // 行动引导:轮到当前用户做什么(完成核准 → 承接 → 表决 → PM 推进 → 提交人改单;详见 lib/action-guide.ts)
+  const guideMissing = items.filter((i) => i.required && i.stageSeq === cur?.seq && i.status !== "done" && i.status !== "cancelled");
+  const guide = guideFor(me, project, guideMissing);
   // 「承接」标签只对第一个阶段是承接阶段的项目存在;地址栏写了 tab=intake 而项目没有承接阶段时回落到概览
   const intakeOpen = !!project.intake && !project.intake.legacy;
   const activeTab: DetailTab = tab === "gate" ? (atIntake ? "intake" : "review") : tab === "intake" && !intakeOpen ? "overview" : tab ?? "overview";
@@ -274,6 +282,16 @@ function ProjectDetailBody({ id, me }: { id: string; me: SessionUser }) {
         <ExportMenu id={project.id} name={project.name} />
       </PageHead>
 
+      {/* 行动卡:轮到你才出现,轮不到时页面与现状一致 */}
+      {guide && (
+        <ActionGuideCard
+          guide={guide}
+          className="mb-4"
+          onGo={(t) => goTab(t)}
+          onEditSubmission={() => process && setEditSubmission(process)}
+        />
+      )}
+
       {/* 元信息 */}
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <span className={cn(statusClass(project.status), "!h-[24px]")}>{STATUS_LABEL[project.status]}</span>
@@ -318,6 +336,17 @@ function ProjectDetailBody({ id, me }: { id: string; me: SessionUser }) {
       {updateOpen && <UpdateDialog ctx={ctx} onClose={() => setUpdateOpen(false)} />}
       {flowChartOpen && process && (
         <FlowChartModal onClose={() => setFlowChartOpen(false)} source={{ name: project.name, steps: process.steps }} />
+      )}
+      {/* 提交人(无岗位)从行动卡进入的改单弹层;保存后整页刷新 */}
+      {editSubmission && (
+        <EditProcessModal
+          process={editSubmission}
+          onClose={() => setEditSubmission(null)}
+          onSaved={() => {
+            setEditSubmission(null);
+            void loadAll();
+          }}
+        />
       )}
 
       {statusAsk && (
@@ -472,13 +501,14 @@ function OverviewTab({ ctx, onStatus }: { ctx: DetailCtx; onStatus: (s: "on_hold
     if (!cur) return null;
     if (project.status !== "active") return null;
     if (cur.status === "in_review") {
+      // 轮到你表决的提示由行动卡与页头按钮承担;这里把等待说明带上进度
+      const votesDone = project.review?.reviewers?.filter((r) => r.decision !== "pending").length ?? 0;
+      const votesTotal = project.review?.reviewers?.length ?? 0;
       return (
         <>
           <p className="text-[13px] leading-relaxed text-[color:var(--ink-2)]">
             「{cur.gate}」评审中（{MODE_LABEL[cur.mode]} · 第 {project.review?.round ?? 1} 轮）。
-            {project.review?.reviewers?.length
-              ? ` 已表决 ${project.review.reviewers.filter((r) => r.decision !== "pending").length}/${project.review.reviewers.length}。`
-              : ""}
+            {votesTotal > 0 ? ` 已表决 ${votesDone}/${votesTotal}` : ""}，通过后自动进入下一阶段并通知全体成员。
           </p>
         </>
       );

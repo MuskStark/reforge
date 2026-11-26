@@ -6,7 +6,7 @@
  */
 
 import { useEffect, useState } from "react";
-import { CornerUpLeft, FastForward, Undo2 } from "lucide-react";
+import { CornerUpLeft, FastForward, Info, Undo2 } from "lucide-react";
 import { toast } from "sonner";
 import { authFetch } from "@/lib/auth";
 import type { GateReview, ProjectView } from "@/lib/types";
@@ -64,7 +64,8 @@ export function ReviewTab({ ctx }: { ctx: DetailCtx }) {
   const pendingHere = live && cur?.status === "in_review" && review?.status === "pending" && review.stageSeq === cur.seq;
   const iCanVote =
     !!pendingHere &&
-    (project.can.isAdmin || (cur.reviewerRole === "cto" ? project.can.reviewCTO : cur.reviewerRole === "handler" ? project.can.reviewHandler : false));
+    // 与页头"去表决"按钮同一口径:非 cto/handler 的关卡兜底到 manage(管理员),避免页头给按钮、页里却等待
+    (cur.reviewerRole === "cto" ? project.can.reviewCTO : cur.reviewerRole === "handler" ? project.can.reviewHandler : project.can.manage);
   const myRow = pendingHere ? review!.reviewers.find((r) => r.userId === me.id && me.id !== "") : undefined;
   const myVote = myRow && myRow.decision !== "pending" ? myRow.decision : "";
   const votes = pendingHere
@@ -248,6 +249,18 @@ export function ReviewTab({ ctx }: { ctx: DetailCtx }) {
                 ) : iCanVote ? (
                   <>
                     <span className="text-[13px] font-medium text-neutral-900">你的表决</span>
+                    <div className="mt-1.5 flex items-start gap-2 rounded-xl bg-[color:var(--tint-soft)] px-3 py-2 text-[12.5px] leading-relaxed text-[color:var(--tint-deep)]">
+                      <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                      <span>
+                        评审要点：核对提交说明与必交付物完成情况；方案与立项时的对比在「流程」标签查看。
+                        {required.length > 0 && (
+                          <>
+                            {" "}本阶段必交付 <b className="font-data">{required.length - missing.length}/{required.length}</b> 已完成
+                            {missing.length > 0 && <span className="text-[color:var(--red-deep)]">（仍有 {missing.length} 项未完成）</span>}。
+                          </>
+                        )}
+                      </span>
+                    </div>
                     <Textarea
                       aria-label="评审意见"
                       value={comment}
@@ -271,7 +284,9 @@ export function ReviewTab({ ctx }: { ctx: DetailCtx }) {
                     </div>
                   </>
                 ) : (
-                  <p className="text-[13px] text-[color:var(--ink-2)]">等待{reviewerName}表决。通过后自动进入下一阶段并通知全体成员。</p>
+                  <p className="text-[13px] text-[color:var(--ink-2)]">
+                    等待{reviewerName}表决{votes.total > 0 ? `：已表决 ${votes.done}/${votes.total}` : ""}。通过后自动进入下一阶段并通知全体成员。
+                  </p>
                 )}
                 {project.can.manage && (
                   <button type="button" disabled={busy} onClick={() => void withdraw()} className="mt-2.5 inline-flex items-center gap-1.5 text-xs font-medium text-[color:var(--ink-2)] hover:text-[color:var(--red-deep)]">

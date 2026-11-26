@@ -6,9 +6,11 @@
  */
 
 import { useEffect, useMemo, useState } from "react";
-import { Plus } from "lucide-react";
+import { ClipboardList, Plus } from "lucide-react";
 import type { ItemStatus, WorkItem } from "@/lib/types";
 import { ITEM_TYPE_LABEL, dueInfo, itemTypeClass } from "@/lib/labels";
+import { iAmPM } from "@/lib/workbench";
+import { inIntakeStage } from "@/lib/intake";
 import { ItemDialog } from "@/components/projects/item-dialog";
 import type { DetailCtx } from "@/components/projects/project-detail";
 import { Avatar } from "@/components/projects/stage-rail";
@@ -24,10 +26,16 @@ const COLUMNS: { status: ItemStatus[]; title: string; hint: string }[] = [
 ];
 
 export function PlanTab({ ctx, focusItem, clearFocus }: { ctx: DetailCtx; focusItem: string | null; clearFocus: () => void }) {
-  const { project, items } = ctx;
+  const { project, items, me } = ctx;
   const [stage, setStage] = useState<string>("current");
   const [creating, setCreating] = useState(false);
   const [openId, setOpenId] = useState<string | null>(null);
+  const cur = project.stages[project.currentStage - 1];
+  // PM 的行动提示:必交付物进度 + 交付完成后的评审提交去向(承接期的提交在「承接」标签,不在此提示)
+  const curRequired = items.filter((i) => i.required && cur && i.stageSeq === cur.seq);
+  const curMissing = curRequired.filter((i) => i.status !== "done" && i.status !== "cancelled");
+  const showDeliverableHint =
+    project.status === "active" && cur?.status === "in_progress" && !!cur.gate && !inIntakeStage(project) && iAmPM(me.id, project);
 
   // 从通知、概览等处带 item 参数进来时,直接打开那条工作项
   useEffect(() => {
@@ -47,6 +55,28 @@ export function PlanTab({ ctx, focusItem, clearFocus }: { ctx: DetailCtx; focusI
 
   return (
     <div>
+      {/* 必交付物进度提示(PM):做完去哪提交、现在还差什么 */}
+      {showDeliverableHint && (
+        <div className="mb-3 flex flex-wrap items-center gap-2.5 rounded-2xl bg-[color:var(--amber-soft)] px-3.5 py-2.5 shadow-[inset_0_0_0_0.5px_rgba(255,149,0,0.25)]">
+          <ClipboardList className="h-4 w-4 shrink-0 text-[color:var(--amber-deep)]" aria-hidden="true" />
+          <span className="min-w-0 flex-1 text-[13px] leading-relaxed text-[color:var(--amber-deep)]">
+            本阶段必交付 <b className="font-data">{curRequired.length - curMissing.length}/{curRequired.length}</b>
+            {curMissing.length > 0 ? (
+              <>
+                {" "}· 还差 <b>{curMissing.map((i) => i.title).join("、")}</b>。全部完成后即可提交「{cur.gate}」评审。
+              </>
+            ) : (
+              <>
+                {" "}· 已全部完成，可以提交「{cur.gate}」评审了。
+              </>
+            )}
+          </span>
+          <button type="button" onClick={() => ctx.goTab("review")} className="btn btn-glass !h-8 shrink-0 !px-3 text-[12px]">
+            去提交评审
+          </button>
+        </div>
+      )}
+
       {/* 工具条:阶段筛选 + 新建 */}
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <div className="flex min-w-0 flex-1 flex-wrap gap-1.5">

@@ -42,11 +42,22 @@ export function StageRail({ stages, current, finalSeq }: { stages: StageView[]; 
   );
 }
 
+/** "待谁处理"徽章。悬停说明告诉各角色此刻该做什么、去哪里操作 */
+const PENDING_ON_HINT: Record<ProjectView["pendingOn"], string> = {
+  admin: "还没有指派 PM：管理员在「承接」或成员管理里指派后，项目正式启动",
+  pmo: "轮到 PMO 处理：初级分析、指派 PM、终审或核准完成，入口在工作台与详情页行动卡",
+  pm: "轮到 PM 推进：完成必交付物后在「评审」标签提交关卡评审",
+  cto: "当前关卡由 CTO 表决：评审人在「评审」标签（承接期在「承接」标签）给出结论",
+  handler: "当前关卡由 BH 表决：评审人在「评审」标签（承接期在「承接」标签）给出结论",
+  "": "",
+};
+
 /** "待谁处理"徽章 */
 export function PendingOnBadge({ on }: { on: ProjectView["pendingOn"] }) {
   if (!on) return null;
   return (
     <span
+      title={PENDING_ON_HINT[on]}
       className={cn(
         "badge !h-[20px] text-[11px]",
         on === "admin" && "badge-amber",
