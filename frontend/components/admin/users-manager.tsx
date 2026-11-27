@@ -52,9 +52,9 @@ function jobBadge(job: JobRole | ""): string {
 }
 
 /**
- * 后台 · 用户与岗位:管理员创建账号并设置显示名 / 部门 / 岗位。
+ * 后台 · 用户与岗位:管理员创建账号,编辑账号信息(用户名 / 系统角色 / 显示名 / 部门 / 岗位),重置密码。
  * 岗位决定这个人在流程项目里能做什么:CTO 评审,PM 推进,BH 确认与试运行。名称一律用英文缩写。
- * 创建账号走页头按钮弹出的表单,列表页只管看和找。
+ * 创建账号走页头按钮弹出的表单,列表页的编辑弹窗管改;改用户名或重置密码会吊销该账号的登录。
  */
 export function UsersManager() {
   const [users, setUsers] = useState<RegisteredUser[] | null>(null);
@@ -63,7 +63,14 @@ export function UsersManager() {
   const [creating, setCreating] = useState(false);
   const [draft, setDraft] = useState(emptyDraft);
   const [editing, setEditing] = useState<RegisteredUser | null>(null);
-  const [editForm, setEditForm] = useState({ displayName: "", department: "", jobRole: "" as JobRole | "" });
+  const [editForm, setEditForm] = useState({
+    username: "",
+    displayName: "",
+    department: "",
+    jobRole: "" as JobRole | "",
+    role: "member" as "member" | "admin",
+    newPassword: "", // 留空 = 不改密码
+  });
   const [busy, setBusy] = useState(false);
   // 当前登录的人:列表里标出来,而且不能删自己
   const self = useMemo(() => (typeof window === "undefined" ? null : getUser()), []);
@@ -123,27 +130,42 @@ export function UsersManager() {
 
   const openEdit = (u: RegisteredUser) => {
     setEditing(u);
-    setEditForm({ displayName: u.displayName, department: u.department, jobRole: u.jobRole });
+    setEditForm({ username: u.username, displayName: u.displayName, department: u.department, jobRole: u.jobRole, role: u.role, newPassword: "" });
   };
 
   const saveEdit = async () => {
     if (!editing) return;
-    if (!editForm.displayName.trim()) {
-      toast.error("显示名不能为空");
+    const isSelf = Boolean(self) && self?.username === editing.username;
+    // 缺什么一次列全,不逐项中断
+    const issues: string[] = [];
+    if (!editForm.username.trim()) issues.push("缺用户名");
+    if (!editForm.displayName.trim()) issues.push("缺显示名");
+    const pwd = editForm.newPassword;
+    if (pwd && (pwd.length < 6 || pwd.length > 64)) issues.push("新密码需在 6-64 个字符之间");
+    if (issues.length > 0) {
+      toast.error("请先处理以下问题", { description: issues.join("；") });
       return;
     }
     setBusy(true);
     try {
-      const u = await authFetch<RegisteredUser>(`/api/admin/users/${editing.id}`, {
-        method: "PATCH",
-        body: JSON.stringify({
-          displayName: editForm.displayName.trim(),
-          department: editForm.department.trim(),
-          jobRole: editForm.jobRole,
-        }),
-      });
+      const payload: Record<string, unknown> = {
+        username: editForm.username.trim(),
+        displayName: editForm.displayName.trim(),
+        department: editForm.department.trim(),
+        jobRole: editForm.jobRole,
+      };
+      if (!isSelf) payload.role = editForm.role;
+      let u = await authFetch<RegisteredUser>(`/api/admin/users/${editing.id}`, { method: "PATCH", body: JSON.stringify(payload) });
+      let pwdNote = "";
+      if (pwd && !isSelf) {
+        u = await authFetch<RegisteredUser>(`/api/admin/users/${editing.id}/password`, {
+          method: "POST",
+          body: JSON.stringify({ password: pwd }),
+        });
+        pwdNote = "；密码已重置，该账号需重新登录并先改成自己的密码";
+      }
       setUsers((prev) => (prev ?? []).map((x) => (x.id === u.id ? u : x)));
-      toast.success("已保存", { description: `「${u.displayName}」· ${jobRoleName(u.jobRole)}` });
+      toast.success("已保存", { description: `「${u.displayName}」· ${jobRoleName(u.jobRole)}${pwdNote}` });
       setEditing(null);
     } catch (e) {
       fail(e, "保存失败");
@@ -163,6 +185,8 @@ export function UsersManager() {
   };
 
   const filtering = Boolean(query.trim() || job);
+  // 编辑的是当前登录账号:系统角色与重置密码要锁住(后端同样挡),改用户名会把自己踢下线
+  const isEditingSelf = editing != null && Boolean(self) && self?.username === editing.username;
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     return (users ?? []).filter(
@@ -229,7 +253,7 @@ export function UsersManager() {
           {new Date(u.createdAt).toLocaleDateString("zh-CN")}
         </span>,
         <span key="actions" className="row-actions">
-          <button type="button" onClick={() => openEdit(u)} aria-label={`编辑 ${u.displayName || u.username}`} title="编辑显示名 / 部门 / 岗位" className="icon-btn">
+          <button type="button" onClick={() => openEdit(u)} aria-label={`编辑 ${u.displayName || u.username}`} title="编辑账号信息 / 重置密码" className="icon-btn">
             <Pencil className="h-4 w-4" />
           </button>
           <button
@@ -360,14 +384,68 @@ export function UsersManager() {
 
       {editing && (
         <Dialog onClose={() => setEditing(null)} labelledBy="edit-user-title">
-          <DialogHeader id="edit-user-title" title={`编辑「${editing.displayName || editing.username}」`} subtitle="用户名不可改；岗位改动立即生效。" onClose={() => setEditing(null)} />
+          <DialogHeader
+            id="edit-user-title"
+            title={`编辑「${editing.displayName || editing.username}」`}
+            subtitle="用户名是登录用的账号；改用户名或重置密码后，该账号现有的登录会全部退出。"
+            onClose={() => setEditing(null)}
+          />
           <div className="mt-5 grid gap-4">
-            <Field label="显示名" required>
-              <Input value={editForm.displayName} onChange={(e) => setEditForm({ ...editForm, displayName: e.target.value })} />
-            </Field>
-            <Field label="部门">
-              <Input value={editForm.department} onChange={(e) => setEditForm({ ...editForm, department: e.target.value })} />
-            </Field>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Field
+                label="用户名"
+                required
+                hint={
+                  isEditingSelf
+                    ? "保存后你将退出登录，需用新用户名重新登录"
+                    : "2-32 个字符，用于登录；改动后该账号需重新登录"
+                }
+              >
+                <Input
+                  value={editForm.username}
+                  placeholder="2-32 个字符，用于登录"
+                  autoComplete="off"
+                  className="font-data"
+                  onChange={(e) => setEditForm({ ...editForm, username: e.target.value })}
+                />
+              </Field>
+              <Field label="显示名" required>
+                <Input value={editForm.displayName} placeholder="如：张三" autoComplete="off" maxLength={32} onChange={(e) => setEditForm({ ...editForm, displayName: e.target.value })} />
+              </Field>
+              <Field label="部门">
+                <Input value={editForm.department} placeholder="如：信息中心" autoComplete="off" maxLength={64} onChange={(e) => setEditForm({ ...editForm, department: e.target.value })} />
+              </Field>
+              <Field label="重置密码" hint={isEditingSelf ? undefined : "留空则不修改；重置的是临时密码，该账号下次登录须先改成自己的"}>
+                {isEditingSelf ? (
+                  <p className="flex h-11 items-center text-[13px] text-[color:var(--ink-3)]">当前登录账号的密码请在右上角个人信息中修改</p>
+                ) : (
+                  <Input type="password" value={editForm.newPassword} placeholder="留空则不修改" autoComplete="new-password" onChange={(e) => setEditForm({ ...editForm, newPassword: e.target.value })} />
+                )}
+              </Field>
+              <div className="space-y-1.5">
+                <span className="block text-[13px] font-medium text-neutral-800">系统角色</span>
+                <div className="seg !h-11">
+                  {(
+                    [
+                      ["member", "普通账号"],
+                      ["admin", "系统管理员"],
+                    ] as const
+                  ).map(([v, label]) => (
+                    <button
+                      key={v}
+                      type="button"
+                      disabled={isEditingSelf}
+                      onClick={() => setEditForm({ ...editForm, role: v })}
+                      className={cn(editForm.role === v && "on", isEditingSelf && "opacity-50")}
+                      aria-pressed={editForm.role === v}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                <p className="text-xs text-[color:var(--ink-3)]">{isEditingSelf ? "当前登录账号不能改自己的系统角色。" : "管理员可以进入系统管理；降级后须重新登录生效。"}</p>
+              </div>
+            </div>
             <Field label="岗位" hint="决定这个人在流程项目里的权限">
               <div className="list-group">
                 {JOB_ROLE_OPTIONS.map((o) => (

@@ -35,6 +35,8 @@ func newMux(st *postgresStore) *http.ServeMux {
 	mux.HandleFunc("POST /api/auth/password", handleChangePassword(st))
 	mux.HandleFunc("GET /api/users", handleUserDirectory(st))
 	mux.HandleFunc("PATCH /api/admin/users/{id}", handleAdminUpdateUser(st))
+	// 管理员重置任意用户密码(临时密码,用户下次登录强制改)
+	mux.HandleFunc("POST /api/admin/users/{id}/password", handleAdminResetPassword(st))
 	mux.HandleFunc("DELETE /api/auth/session", handleLogout)
 	// 浏览器与 Next 服务端的日志上报(不要求登录,见 logging.go)
 	mux.HandleFunc("POST "+clientLogsPath, handleClientLogs(clientLogLimiter))

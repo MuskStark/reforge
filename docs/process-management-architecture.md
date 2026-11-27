@@ -991,7 +991,7 @@ P0+P1 是"能用"的最小闭环：没有任务拆解，但 PM / CTO / 经办已
 - **请求编号**（`X-Request-Id`）：沿用请求带来的合法编号（8–64 位字母、数字、`_`、`-`），否则生成 16 位十六进制；写回响应头，并放进请求的上下文。`requestLogger(r)` 取出带 `req` 的日志器，审计、`writeErr`、删除流程等都用它，和访问日志那一行靠 `req` 对应。
 - **真实错误只进日志**：`writeErr` 对非业务错误回「服务异常，请稍后重试」，真实原因带 `req` 记 ERROR。早期接口里另有 19 处仍把 `err.Error()` 写在响应里返回，这次没有改接口——它们的失败由访问日志在 5xx 那一行原样记下 `err=`。
 - **panic 恢复**：处理函数崩溃不再直接断连接，记 `msg=panic` 和堆栈，回一个带 `requestId` 的 500；`http.ErrAbortHandler` 照常放行。
-- **审计**（`msg=audit`，`action` 取值）：`auth.register`、`auth.login`、`auth.login_failed`、`auth.login_locked`、`auth.logout`、`auth.password_wrong`、`auth.password_change`、`user.profile_update`、`user.create`、`user.update`、`user.delete`、`template.replace`、`channel.create` / `update` / `delete`（只记「密钥是否改过」，不记密钥本身）、`system.create` / `delete`、`process.delete`。项目内的推进、评审、回退等动作已经在 `events` 表里，日志不重复记；访问日志里有「谁、何时、调了哪个接口」。
+- **审计**（`msg=audit`，`action` 取值）：`auth.register`、`auth.login`、`auth.login_failed`、`auth.login_locked`、`auth.logout`、`auth.password_wrong`、`auth.password_change`、`user.profile_update`、`user.create`、`user.update`（含管理员改用户名 / 系统角色，改用户名时记 `new_username`）、`user.password_reset`（管理员重置密码，只记目标用户不记口令）、`user.delete`、`template.replace`、`channel.create` / `update` / `delete`（只记「密钥是否改过」，不记密钥本身）、`system.create` / `delete`、`process.delete`。项目内的推进、评审、回退等动作已经在 `events` 表里，日志不重复记；访问日志里有「谁、何时、调了哪个接口」。
 - **上报接口** `POST /api/logs`：不要求登录（公开的收集表也会出错），所以有三道闸——每个来源地址每分钟 60 批、单批不超过 64KB 与 20 条、逐字段截断。级别按上报的映射，不认识的按 INFO；登录人以后端会话为准，不信上报里自己写的。内容一律当不可信文本处理：去掉控制字符，输出时转义。
 - **定时任务与外部通知投递**：失败记 ERROR（panic 带堆栈），发送失败记 WARN，每轮正常跑完是 DEBUG。
 

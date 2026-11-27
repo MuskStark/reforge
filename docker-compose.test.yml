@@ -13,6 +13,8 @@ services:
   postgres:
     image: postgres:16-alpine
     container_name: flow-test-postgres
+    ports:
+      - "55432:5432" # go test 的 e2e 用例从宿主机连 flow_test 库(见 README 的 TEST_DATABASE_URL)
     environment:
       POSTGRES_USER: flow
       POSTGRES_PASSWORD: flow

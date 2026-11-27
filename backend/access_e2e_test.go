@@ -416,3 +416,77 @@ func TestSelfProfile(t *testing.T) {
 	e.fail(envTok, "POST", "/api/auth/password", map[string]any{"oldPassword": "envpass123", "newPassword": "another123"}, 403, "环境变量")
 	e.must(envTok, "GET", "/api/admin/users", nil)
 }
+
+// 管理员维护账号:改用户名 / 系统角色 / 重置密码。用户名与系统角色快照在会话里,
+// 改动一律吊销存量会话强制重登;重置的是临时密码,下次登录强制改成自己的。
+func TestAdminManageUserAccount(t *testing.T) {
+	e := newTestEnv(t)
+	reg := e.must("", "POST", "/api/auth/register", map[string]any{"username": "rootadmin", "password": "pass1234"})
+	admin := reg["token"].(string)
+	adminID := dig(reg, "user", "id").(string)
+
+	bh, bhID := e.createUser(admin, "王经办", RoleHandler)
+	other, otherID := e.createUser(admin, "路人甲", RoleHandler)
+
+	// ---- 改用户名:新名可登录、旧名失效,存量会话吊销 ----
+	updated := e.must(admin, "PATCH", "/api/admin/users/"+bhID, map[string]any{"username": "u_新账号"})
+	got(t, updated, "username", "u_新账号")
+	e.fail(bh, "GET", "/api/auth/me", nil, 401, "未登录")
+	if code, _ := e.req("", "POST", "/api/auth/login", map[string]any{"username": "u_王经办", "password": userPassword}); code != 401 {
+		t.Fatalf("旧用户名应无法登录,得到 %d", code)
+	}
+	e.must("", "POST", "/api/auth/login", map[string]any{"username": "u_新账号", "password": userPassword})
+
+	// 用户名撞上别人:409;自己重提交现名不算冲突
+	e.fail(admin, "PATCH", "/api/admin/users/"+otherID, map[string]any{"username": "u_新账号"}, 409, "用户名已被占用")
+	e.must(admin, "PATCH", "/api/admin/users/"+bhID, map[string]any{"username": "u_新账号"})
+	// 长度不合规矩
+	e.fail(admin, "PATCH", "/api/admin/users/"+bhID, map[string]any{"username": "短"}, 400, "2-32")
+
+	// ---- 系统角色:不能改自己、角色值要合法;变更须重登生效 ----
+	e.fail(admin, "PATCH", "/api/admin/users/"+adminID, map[string]any{"role": "member"}, 403, "不能修改当前登录账号的系统角色")
+	e.fail(admin, "PATCH", "/api/admin/users/"+bhID, map[string]any{"role": "superuser"}, 400, "角色无效")
+	promoted := e.must(admin, "PATCH", "/api/admin/users/"+otherID, map[string]any{"role": "admin"})
+	got(t, promoted, "role", "admin")
+	e.fail(other, "GET", "/api/auth/me", nil, 401, "未登录")
+	other = e.login("路人甲", userPassword)
+	e.must(other, "GET", "/api/admin/users", nil) // 重登后管理员权限生效
+	// 改回普通账号:rootadmin 还在,放行
+	e.must(admin, "PATCH", "/api/admin/users/"+otherID, map[string]any{"role": "member"})
+	// 只剩 rootadmin 一名管理员时,环境变量引导的管理员也不能降级他
+	t.Setenv("FLOW_ADMIN_USER", "envadmin")
+	t.Setenv("FLOW_ADMIN_PASS", "envpass123")
+	envTok := e.must("", "POST", "/api/auth/login", map[string]any{"username": "envadmin", "password": "envpass123"})["token"].(string)
+	e.fail(envTok, "PATCH", "/api/admin/users/"+adminID, map[string]any{"role": "member"}, 403, "系统至少需要保留一名管理员")
+
+	// ---- 重置密码:临时密码 + 下次登录强制改密 ----
+	reset := e.must(admin, "POST", "/api/admin/users/"+bhID+"/password", map[string]any{"password": "temp12345"})
+	got(t, reset, "mustChangePassword", true)
+	e.fail(bh, "GET", "/api/auth/me", nil, 401, "未登录") // 改密即吊销全部存量会话
+	if code, _ := e.req("", "POST", "/api/auth/login", map[string]any{"username": "u_新账号", "password": userPassword}); code != 401 {
+		t.Fatalf("重置后旧密码应失效,得到 %d", code)
+	}
+	relogin := e.must("", "POST", "/api/auth/login", map[string]any{"username": "u_新账号", "password": "temp12345"})
+	got(t, relogin, "user", "mustChangePassword", true)
+	reloginTok := relogin["token"].(string)
+	if code, out := e.req(reloginTok, "GET", "/api/projects", nil); code != 403 || out["code"] != passwordChangeRequired {
+		t.Fatalf("重置后未改密应被强制改密闸拦下,得到 %d %v", code, out)
+	}
+	e.must(reloginTok, "POST", "/api/auth/password", map[string]any{"oldPassword": "temp12345", "newPassword": "myown123"})
+
+	// 密码长度 / 不能借管理员通道重置自己的密码(走自助改密)
+	e.fail(admin, "POST", "/api/admin/users/"+bhID+"/password", map[string]any{"password": "123"}, 400, "6-64")
+	e.fail(admin, "POST", "/api/admin/users/"+adminID+"/password", map[string]any{"password": "temp12345"}, 403, "自己的密码")
+
+	// ---- 管理员改自己的用户名:同样吊销会话,重登后仍是管理员 ----
+	renamed := e.must(admin, "PATCH", "/api/admin/users/"+adminID, map[string]any{"username": "root_admin"})
+	got(t, renamed, "username", "root_admin")
+	e.fail(admin, "GET", "/api/auth/me", nil, 401, "未登录")
+	admin = e.must("", "POST", "/api/auth/login", map[string]any{"username": "root_admin", "password": "pass1234"})["token"].(string)
+	e.must(admin, "GET", "/api/admin/users", nil)
+
+	// 普通成员与未登录都动不了管理端接口
+	e.fail(reloginTok, "PATCH", "/api/admin/users/"+otherID, map[string]any{"username": "再改一个"}, 403, "管理员")
+	e.fail("", "PATCH", "/api/admin/users/"+bhID, map[string]any{"username": "再改一个"}, 401, "未登录")
+	e.fail("", "POST", "/api/admin/users/"+bhID+"/password", map[string]any{"password": "temp12345"}, 401, "未登录")
+}
